@@ -1,0 +1,20 @@
+  
+NO.000017 2000-01-01
+            00:44:13
+
+ LEU -       0 CELL/uL
+ KET -        0 mmol/L
+ NIT -   
+ URO            Normal
+ BIL -        0 umol/L
+ PRO -           0 g/L
+*GLU +2      14 mmol/L
+ SG         1.010     
+*BLD +-     10 CELL/uL
+ pH         5.0       
+*Vc  +3     5.6 mmol/L
+ 
+
+
+
+

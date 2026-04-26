@@ -1,0 +1,21 @@
+  
+ID:260413002682
+NO.000003 2000-01-01
+            00:15:57
+
+ LEU -       0 CELL/uL
+ KET -        0 mmol/L
+ NIT -   
+ URO            Normal
+ BIL -        0 umol/L
+*PRO +1        0.3 g/L
+*GLU +1     5.5 mmol/L
+ SG         1.005     
+*BLD +3    200 CELL/uL
+ pH         5.0       
+ Vc  -        0 mmol/L
+ 
+
+
+
+

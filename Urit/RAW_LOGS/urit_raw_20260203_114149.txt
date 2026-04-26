@@ -1,0 +1,24 @@
+  
+NO.000023 2000-01-01
+            02:56:56
+
+*LEU +1     70 CELL/uL
+ KET -        0 mmol/L
+ NIT -   
+*URO +1      33 umol/L
+ BIL -        0 umol/L
+ GLU -        0 mmol/L
+*PRO +1        0.3 g/L
+ SG         1.030     
+ pH         5.5       
+*BLD +1     25 CELL/uL
+ Vc  -        0 mmol/L
+*MA         >=150 mg/L
+*Ca       <=1.0 mmol/L
+ CR        17.6 mmol/L
+*ACR   3.4-33.9mg/mmol
+ 
+
+
+
+

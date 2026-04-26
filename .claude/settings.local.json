@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir \"G:\\\\DASTUR\\\\URIT 50\")",
+      "Bash(xargs grep -l \"draw_code128\\\\|Code128\\\\|drawCentredString\")",
+      "Bash(dir /s /b \"G:\\\\DASTUR\\\\*.py\")",
+      "Bash(python -c \"import os; files=[]; [files.extend\\([os.path.join\\(r,f\\) for f in fs if f.endswith\\(''.py''\\)]\\) for r,d,fs in os.walk\\(r''G:\\\\DASTUR''\\)]; print\\(''\\\\n''.join\\(files\\)\\)\")",
+      "Bash(python -c \":*)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''monoblok_dastur.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''Sintaksis: OK''\\)\")",
+      "Bash(py -3 -c \"import ast; ast.parse\\(open\\(r''G:\\\\DASTUR\\\\URIT 50\\\\monoblok_dastur.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''Sintaksis: OK''\\)\")",
+      "Bash(python -m py_compile \"G:/DASTUR/URIT 50/monoblok_dastur.py\")",
+      "Bash(py -3 -m py_compile \"G:/DASTUR/URIT 50/monoblok_dastur.py\")",
+      "Bash(python -c \"import py_compile; py_compile.compile\\(''monoblok_dastur.py'', doraise=True\\); print\\(''Syntax OK''\\)\")",
+      "Bash(\"C:\\\\Program Files\\\\Python313\\\\python.exe\" -c \":*)",
+      "Bash(\"C:\\\\Program Files\\\\Python313\\\\python.exe\" -m pip install pymupdf --quiet)",
+      "Bash(python -c \"import pdfplumber; pdf = pdfplumber.open\\(''G:/DASTUR/280-LIS.pdf''\\); [print\\(p.extract_text\\(\\)\\) for p in pdf.pages]\")",
+      "Bash(python -c \"import PyPDF2; r=PyPDF2.PdfReader\\(''G:/DASTUR/280-LIS.pdf''\\); [print\\(r.pages[i].extract_text\\(\\)\\) for i in range\\(len\\(r.pages\\)\\)]\")",
+      "Bash(python -c \"import fitz; doc=fitz.open\\(''G:/DASTUR/280-LIS.pdf''\\); [print\\(doc[i].get_text\\(\\)\\) for i in range\\(doc.page_count\\)]\")",
+      "Bash(python -c \"import py_compile; py_compile.compile\\(''bc20s_listener.py'', doraise=True\\); print\\(''OK: bc20s_listener.py syntax check passed''\\)\")",
+      "Bash(python -c \"import py_compile; py_compile.compile\\(''bc20s_listener.py'', doraise=True\\); print\\(''OK: syntax check passed''\\)\")",
+      "Bash(cat \"C:/Program Files \\(x86\\)/Mindray/Hematology Analyzer Data Management/LabInfosystem/Dat/202603/BC-20s_20260319_019.txt\")",
+      "Bash(python -c \"import base64; wbc_b64=''AAAAAAAAAQQMGzVZg67S6/j79+7i08Kwn5CDeG5lX1pXVlVWWFxfYmNma3J7g4qQlpugpamsrKmjm5GGe3BmXVRMRDwzLCUfGhYSEA0LCggHBgYFBAMCAgEBAQEBAQEBAQAAAQEBAQEBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=''; data=base64.b64decode\\(wbc_b64\\); print\\(f''WBC: {len\\(data\\)} bytes''\\); print\\(f''Values: {list\\(data\\)}''\\); print\\(f''Min={min\\(data\\)} Max={max\\(data\\)}''\\)\")",
+      "Bash(python -c \"import base64; rbc=''AAAAAAAAAAAAAAAAAAAAAAEBAgMFCQ8XIzJGXXiUsMrg8Pj58uXSvKOLc15LOy4kHBYRDgsJCAYGBQUEBAQEBAQEBAQEBAQEAwMDAwMCAgIBAQEBAQEBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=''; data=base64.b64decode\\(rbc\\); print\\(f''RBC: {len\\(data\\)} bytes''\\); print\\(f''Values: {list\\(data\\)}''\\); print\\(f''Min={min\\(data\\)} Max={max\\(data\\)}''\\)\")",
+      "Bash(python export_normas.py)",
+      "Bash(pip install *)",
+      "Bash(start \"\" \"G:\\\\DASTUR\\\\URIT 50\\\\normas_export.xlsx\")",
+      "Bash(python -c ' *)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('urine_window.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('G:/DASTUR/URIT 50/urine_window.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")"
+    ]
+  }
+}

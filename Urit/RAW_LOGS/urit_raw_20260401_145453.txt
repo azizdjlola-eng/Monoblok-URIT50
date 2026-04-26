@@ -1,0 +1,25 @@
+  
+ID:260401002291
+NO.000020 2000-01-01
+            06:18:39
+
+*LEU +-     15 CELL/uL
+ KET -        0 mmol/L
+ NIT -   
+ URO            Normal
+ BIL -        0 umol/L
+*GLU +-     2.8 mmol/L
+ PRO -           0 g/L
+ SG         1.025     
+ pH         5.5       
+*BLD +1     25 CELL/uL
+ Vc  -        0 mmol/L
+ MA          <=10 mg/L
+ Ca         5.0 mmol/L
+*CR       >=26.4mmol/L
+ ACR       <3.4mg/mmol
+ 
+
+
+
+

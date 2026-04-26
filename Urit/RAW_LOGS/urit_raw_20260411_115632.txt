@@ -1,0 +1,20 @@
+  
+NO.000016 2000-01-01
+            03:41:05
+
+ LEU -       0 CELL/uL
+ KET -        0 mmol/L
+ NIT -   
+ URO            Normal
+ BIL -        0 umol/L
+*PRO +1        0.3 g/L
+*GLU +2      14 mmol/L
+ SG         1.005     
+*BLD +2     80 CELL/uL
+ pH         5.5       
+*Vc  +1     1.4 mmol/L
+ 
+
+
+
+

@@ -1,0 +1,20 @@
+  
+NO.000019 2000-01-01
+            00:48:09
+
+ LEU -       0 CELL/uL
+ KET -        0 mmol/L
+ NIT -   
+*URO +3   >=131 umol/L
+*BIL +3     100 umol/L
+ PRO -           0 g/L
+ GLU -        0 mmol/L
+ SG         1.015     
+*BLD +1     25 CELL/uL
+ pH         5.0       
+*Vc  +3     5.6 mmol/L
+ 
+
+
+
+

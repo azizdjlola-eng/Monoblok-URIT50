@@ -1,0 +1,17467 @@
+   # -*- coding: utf-8 -*-
+"""
+Monoblok Dastur - Hamshiralar uchun
+Funksiyalar:
+1. Barkod skaner qilish
+2. Bemor ma'lumotlarini ko'rsatish
+3. Tahlillar ro'yxatini ko'rsatish
+4. Blankalar yaratish
+5. Natijalarni kiritishasi kolom. monoblok dasturini ishga tushurganda 
+6. Chop etish va saqlash
+"""
+
+import os
+import sys
+import io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+import tkinter as tk
+from tkinter import ttk, messagebox, scrolledtext
+from datetime import datetime
+import threading
+import queue
+import subprocess
+import time
+import re
+import json
+from copy import deepcopy
+from contextlib import closing
+from typing import Dict, List, Optional
+from docx import Document
+from docx.shared import Pt, RGBColor, Cm, Inches
+from docx.oxml.ns import qn
+from docx.oxml import OxmlElement, parse_xml
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING, WD_BREAK, WD_COLOR_INDEX
+from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ROW_HEIGHT_RULE
+import mysql.connector
+from threading import Lock
+
+# docx2pdf import (optional)
+try:
+    from docx2pdf import convert
+    PDF_AVAILABLE = True
+except ImportError:
+    PDF_AVAILABLE = False
+
+# Serial port monitoring
+try:
+    import serial
+    SERIAL_AVAILABLE = True
+except ImportError:
+    SERIAL_AVAILABLE = False
+    serial = None
+
+# BK-280 HL7 Listener import
+try:
+    from bk280_listener import start_bk280_listener, stop_bk280_listener
+    BK280_AVAILABLE = True
+except ImportError as e:
+    print(f"[OGOHLANTIRISH] BK-280 listener import qilinmadi: {e}")
+    start_bk280_listener = None
+    stop_bk280_listener = None
+    BK280_AVAILABLE = False
+
+# BK-280 LIS Server import (barcode query handler)
+try:
+    from BK280.asus_lis_server import start_lis_server as start_bk280_lis, stop_lis_server as stop_bk280_lis
+    BK280_LIS_AVAILABLE = True
+except ImportError as e:
+    print(f"[OGOHLANTIRISH] BK-280 LIS server import qilinmadi: {e}")
+    start_bk280_lis = None
+    stop_bk280_lis = None
+    BK280_LIS_AVAILABLE = False
+
+# BC-20S Gematologiya analizatori MLLP Listener
+try:
+    from bc20s_listener import start_bc20s_listener, stop_bc20s_listener, is_running as bc20s_is_running
+    BC20S_AVAILABLE = True
+except ImportError as e:
+    print(f"[OGOHLANTIRISH] BC-20S listener import qilinmadi: {e}")
+    start_bc20s_listener = None
+    stop_bc20s_listener  = None
+    bc20s_is_running     = lambda: False
+    BC20S_AVAILABLE = False
+
+# RAW Ma'lumotlar oynalari (Database bilan ishlamaydi)
+try:
+    from hematology_window import open_window as open_hematology_window, HL7_TO_DB_NAME as _HEMA_HL7_MAP, get_multi_ref as _hema_get_multi_ref
+    HEMATOLOGY_AVAILABLE = True
+except ImportError as e:
+    print(f"[OGOHLANTIRISH] Hematology window import qilinmadi: {e}")
+    HEMATOLOGY_AVAILABLE = False
+    open_hematology_window = None
+    _HEMA_HL7_MAP = {}
+    _hema_get_multi_ref = None
+
+try:
+    from biochemistry_window import open_window as open_biochemistry_window
+    BIOCHEMISTRY_AVAILABLE = True
+except ImportError as e:
+    print(f"[OGOHLANTIRISH] Biochemistry window import qilinmadi: {e}")
+    BIOCHEMISTRY_AVAILABLE = False
+    open_biochemistry_window = None
+
+try:
+    from urine_window import open_window as open_urine_window
+    URINE_WINDOW_AVAILABLE = True
+except ImportError as e:
+    print(f"[OGOHLANTIRISH] Urine window import qilinmadi: {e}")
+    URINE_WINDOW_AVAILABLE = False
+    open_urine_window = None
+
+# Sifat Nazorati (QC) moduli
+try:
+    from qc_module import open_qc_window as _open_qc_window
+    QC_AVAILABLE = True
+except ImportError as e:
+    print(f"[OGOHLANTIRISH] QC module import qilinmadi: {e}")
+    QC_AVAILABLE = False
+    _open_qc_window = None
+
+# Database sozlamalari
+from monoblok_db_config import DB_CONFIG
+
+# Blanka Generator constants (from blanka_generator.py)
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = r"G:\Қилинган анализлар"
+STANDART_SHABLONLAR_DIR = r"G:\DASTUR\Standart shablaonlar"
+TEMPLATES_DIR = os.path.join(SCRIPT_DIR, "templates")
+CONFIG_FILE = os.path.join(SCRIPT_DIR, "blanka_config.json")
+
+TEST_GROUPS = ['GEM', 'BIO', 'IFA', 'URINE', 'TEST', 'COAG']
+
+# Lipid va Buyrak panel tarkibidagi tahlillar (tahlillar.id bo'yicha)
+# Panel buyurtmada bo'lganda, bu ID li yakka testlar ro'yxatda QAYTA ko'rsatilmaydi
+LIPID_PANEL_MEMBER_IDS = {43, 44, 123, 124}   # TC=43, TG=44, LDL=123, HDL=124
+BUYRAK_PANEL_MEMBER_IDS = {42, 41, 35, 50}    # Mochevina=42, Kreatinin=41, Albumin=35, Siydik kislota=50
+
+GROUP_NAMES = {
+    "GEM": "GEMOTOLOGIK TEKSHIRUVLAR",
+    "BIO": "QONNING BIOKIMYOVIY TAHLILI",
+    "URINE": "UMUMIY SIYDIK TAHLILI",
+    "IFA": "IMMUNOFERMENT ANALIZLAR",
+    "TEST": "BOSHQA TESTLAR",
+    "COAG": "KOAGULOGRAMMA",
+}
+
+GROUP_DISPLAY = {
+    "GEM": "GEMOTOLOGIK",
+    "BIO": "BIOXIMIK",
+    "URINE": "SIYDIK",
+    "IFA": "IFA",
+    "TEST": "TEST",
+    "COAG": "KOAGUL",
+}
+
+EXCLUDED_TESTS = []  # Umumiy qon va siydik blankaga qo'shiladi
+
+STANDART_SHABLON_MAPPING = {
+    'brutsellez': 'BRUSELLYOZNI ANIQLASH UCHUN.docx',
+    'heddelson': 'BRUSELLYOZNI ANIQLASH UCHUN.docx',
+    'wright': 'BRUSELLYOZNI ANIQLASH UCHUN.docx',
+    'nechiporenko': 'SIYDIKNING NECHIPORENKO   TAHLILI.docx',
+    'nicheporenko': 'SIYDIKNING NECHIPORENKO   TAHLILI.docx',
+    'zimnitskiy': 'SIYDIKNING ZIMNITSKIY  TAHLILI3.docx',
+    'зимницкий': 'SIYDIKNING ZIMNITSKIY  TAHLILI3.docx',
+    'koagulogramma': 'KOAGULOGRAMMA.docx',
+    'koagul': 'KOAGULOGRAMMA.docx',
+    'ginekologik': 'GINEKOLOGIK SURTMA.docx',
+    'urologik': 'UROLOGIK SURTMA (MUJSKOY MAZOK).docx',
+    'spermogramma': 'SPERMOGRAMMA.docx',
+    'torch': 'TORCH INFEKSIYASIGA IgM VA IgG.docx',
+    'troponin': 'TROPONIN (KOMBO).docx',
+    'najas': 'NAJAS TAHLILI.docx',
+    'qon guruhi': 'QON GURUHI VA REZUS-OMILINI ANIQLASH.docx',
+    'rezus': 'QON GURUHI VA REZUS-OMILINI ANIQLASH.docx',
+    'revmoprobe': 'REVMOPROBA.docx',
+    'revmoprob': 'REVMOPROBA.docx',
+    'pepsinogen': 'Pepsinogen 1 va Pepsinogen 2   IFA usulida aniqlash.docx',
+    'insulin': 'INSULIN VA HOMA INDEKSINI ANIQLASH.docx',
+    'homa': 'INSULIN VA HOMA INDEKSINI ANIQLASH.docx',
+    'siydikning umumiy': 'SIYDIKNING UMUMIY TAXLILI.docx',
+    'umumiy siydik': 'SIYDIKNING UMUMIY TAXLILI.docx',
+}
+
+# Connection Pooling
+_db_connection = None
+_db_connection_lock = Lock()
+
+_db_first_connect = True  # Birinchi ulanish uchun flag
+
+def db_conn():
+    """Database ulanishi (Connection Pooling) - yaxshilangan xato boshqaruvi"""
+    global _db_connection, _db_first_connect
+
+    with _db_connection_lock:
+        if _db_connection is not None:
+            try:
+                _db_connection.ping(reconnect=True, attempts=1, delay=0)
+                return _db_connection
+            except Exception as e:
+                print(f"[OGOHLANTIRISH] DB qayta ulanmoqda: {e}")
+                try:
+                    _db_connection.close()
+                except:
+                    pass
+                _db_connection = None
+
+        try:
+            config = DB_CONFIG.copy()
+            config.update({
+                "connection_timeout": 10,
+                "raise_on_warnings": False,
+            })
+
+            if _db_first_connect:
+                print(f"[YANGILANMOQDA] {DB_CONFIG['host']} ga ulanishga harakat qilmoqda...")
+            _db_connection = mysql.connector.connect(**config)
+            if _db_first_connect:
+                print(f"[OK] {DB_CONFIG['host']} ga muvaffaqiyatli ulanildi!")
+                _db_first_connect = False
+            return _db_connection
+        except mysql.connector.errors.InterfaceError as e:
+            last_error = f"Tarmoq xatosi: {e}"
+            _db_connection = None
+        except mysql.connector.errors.ProgrammingError as e:
+            last_error = f"Foydalanuvchi/parol xatosi: {e}"
+            _db_connection = None
+        except mysql.connector.errors.DatabaseError as e:
+            last_error = f"Database topilmadi: {e}"
+            _db_connection = None
+        except Exception as e:
+            last_error = f"{type(e).__name__}: {e}"
+            _db_connection = None
+
+        # Xato xabari — faqat qisqa
+        if _db_first_connect:
+            print(f"[XATO] DB ulanish: {last_error}")
+            _db_first_connect = False
+
+        return None
+
+# ============================================================================
+# BLANKA GENERATOR FUNKSIYALARI (blanka_generator.py dan)
+# ============================================================================
+
+# Config: load/save blanka_config.json
+LOGO_DEFAULT_PATH = r"G:\DASTUR\URIT 50\logo.jpg"
+
+def load_blanka_config() -> dict:
+    default_path = r"G:\DASTUR\URIT 50\Standart shablonlar\blanka ustuni.docx"
+    default_config = {
+        "blanka_ustuni_path": default_path,
+        "logo_path": LOGO_DEFAULT_PATH,
+    }
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+                if isinstance(config, dict):
+                    if 'blanka_ustuni_path' not in config:
+                        config['blanka_ustuni_path'] = default_path
+                    if 'logo_path' not in config:
+                        config['logo_path'] = LOGO_DEFAULT_PATH
+                    return config
+                return default_config
+        except Exception as e:
+            print(f"[OGOHLANTIRISH] Sozlamalarni yuklashda xato: {e}")
+            return default_config
+    return default_config
+
+def save_blanka_config(config: dict = None):
+    if config is None:
+        config = {}
+    default_path = r"G:\DASTUR\URIT 50\Standart shablonlar\blanka ustuni.docx"
+    if 'blanka_ustuni_path' not in config:
+        config['blanka_ustuni_path'] = default_path
+    try:
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[OGOHLANTIRISH] Sozlamalarni saqlashda xato: {e}")
+
+# TEST_NORMAS dict (hardcoded fallback normas)
+TEST_NORMAS = {
+    # BIOXIMIK
+    "ALT": {"norma": "< 40", "unit": "Ед/л", "type": "numeric", "min": 0, "max": 40},
+    "Alanin aminotransferaza (ALT)": {"norma": "0-41", "unit": "Ed/l", "type": "numeric", "min": 0, "max": 41},
+    "AST": {"norma": "<35", "unit": "Ед/л", "type": "numeric", "min": 0, "max": 35},
+    "АЛТ": {"norma": "< 40", "unit": "Ед/л", "type": "numeric", "min": 0, "max": 40},
+    "АСТ": {"norma": "<35", "unit": "Ед/л", "type": "numeric", "min": 0, "max": 35},
+    "Glyukoza": {"norma": "3,2-6,1", "unit": "ммоль/л", "type": "numeric", "min": 3.2, "max": 6.1},
+    "Глюкоза": {"norma": "3,2-6,1", "unit": "ммоль/л", "type": "numeric", "min": 3.2, "max": 6.1},
+    "Kreatinin": {"norma": "Э: 44-115, А: 44-97", "unit": "мкмоль/л", "type": "numeric_gender", "min_m": 44, "max_m": 115, "min_f": 44, "max_f": 97},
+    "Креатинин": {"norma": "Э: 44-115, А: 44-97", "unit": "мкмоль/л", "type": "numeric_gender", "min_m": 44, "max_m": 115, "min_f": 44, "max_f": 97},
+    "Mochevina": {"norma": "2,5-8,3", "unit": "ммоль/л", "type": "numeric", "min": 2.5, "max": 8.3},
+    "Мочевина": {"norma": "2,5-8,3", "unit": "ммоль/л", "type": "numeric", "min": 2.5, "max": 8.3},
+    "Xolesterol": {"norma": "<5,2", "unit": "ммоль/л", "type": "numeric", "min": 0, "max": 5.2},
+    "Холестерин": {"norma": "<5,2", "unit": "ммоль/л", "type": "numeric", "min": 0, "max": 5.2},
+    "Kalsiy": {"norma": "2,0-2,6", "unit": "ммоль/л", "type": "numeric", "min": 2.0, "max": 2.6},
+    "Kalsiy Ca": {"norma": "2,0-2,6", "unit": "ммоль/л", "type": "numeric", "min": 2.0, "max": 2.6},
+    "Кальций": {"norma": "2,0-2,6", "unit": "ммоль/л", "type": "numeric", "min": 2.0, "max": 2.6},
+    "Kaliy": {"norma": "3,6-5,4", "unit": "ммоль/л", "type": "numeric", "min": 3.6, "max": 5.4},
+    "Калий": {"norma": "3,6-5,4", "unit": "ммоль/л", "type": "numeric", "min": 3.6, "max": 5.4},
+    "Temir": {"norma": "6,6-27", "unit": "мкмоль/л", "type": "numeric", "min": 6.6, "max": 27},
+    "Temir Fe": {"norma": "6,6-27", "unit": "мкмоль/л", "type": "numeric", "min": 6.6, "max": 27},
+    "Темир": {"norma": "6,6-27", "unit": "мкмоль/л", "type": "numeric", "min": 6.6, "max": 27},
+    "Siydik kislotasi": {"norma": "Э: 210-420, А: 150-350", "unit": "мкмоль/л", "type": "numeric_gender", "min_m": 210, "max_m": 420, "min_f": 150, "max_f": 350},
+    "Мочевая кислота": {"norma": "Э: 210-420, А: 150-350", "unit": "мкмоль/л", "type": "numeric_gender", "min_m": 210, "max_m": 420, "min_f": 150, "max_f": 350},
+    "Umumiy oqsil": {"norma": "<3 ёш 46-70, >3 ёш 66-85", "unit": "г/л", "type": "numeric_age"},
+    "Умумий оқсил": {"norma": "<3 ёш 46-70, >3 ёш 66-85", "unit": "г/л", "type": "numeric_age"},
+    "Albumin": {"norma": "35-55", "unit": "г/л", "type": "numeric", "min": 35, "max": 55},
+    "Альбумин": {"norma": "35-55", "unit": "г/л", "type": "numeric", "min": 35, "max": 55},
+    "Bilirubin": {"norma": "Умумий: 3,4-20,5", "unit": "мкмоль/л", "type": "numeric", "min": 3.4, "max": 20.5},
+    "Билирубин": {"norma": "Умумий: 3,4-20,5", "unit": "мкмоль/л", "type": "numeric", "min": 3.4, "max": 20.5},
+    "LDG": {"norma": "207-414", "unit": "Ед/л", "type": "numeric", "min": 207, "max": 414},
+    "ЛДГ": {"norma": "207-414", "unit": "Ед/л", "type": "numeric", "min": 207, "max": 414},
+    "Alfa-amilaza": {"norma": "28-100", "unit": "Ед/л", "type": "numeric", "min": 28, "max": 100},
+    "α-амилаза": {"norma": "28-100", "unit": "Ед/л", "type": "numeric", "min": 28, "max": 100},
+    "GGT": {"norma": "Э: 10-71, А: 6-42", "unit": "Ед/л", "type": "numeric_gender", "min_m": 10, "max_m": 71, "min_f": 6, "max_f": 42},
+    "ГГТ": {"norma": "Э: 10-71, А: 6-42", "unit": "Ед/л", "type": "numeric_gender", "min_m": 10, "max_m": 71, "min_f": 6, "max_f": 42},
+    "IF": {"norma": "Э: <115, А: <105", "unit": "Ед/л", "type": "numeric_gender", "min_m": 0, "max_m": 115, "min_f": 0, "max_f": 105},
+    "ИФ": {"norma": "Э: <115, А: <105", "unit": "Ед/л", "type": "numeric_gender", "min_m": 0, "max_m": 115, "min_f": 0, "max_f": 105},
+    "Ishqoriy Fosfataza": {"norma": "Э: <115, А: <105", "unit": "Ед/л", "type": "numeric_gender", "min_m": 0, "max_m": 115, "min_f": 0, "max_f": 105},
+    "Timol": {"norma": "0-4", "unit": "Ед/л", "type": "numeric", "min": 0, "max": 4},
+    "Тимол": {"norma": "0-4", "unit": "Ед/л", "type": "numeric", "min": 0, "max": 4},
+    "Magniy": {"norma": "1.7-2.4", "unit": "мг/дл", "type": "numeric", "min": 1.7, "max": 2.4},
+    "Magniy Mg": {"norma": "1.7-2.4", "unit": "мг/дл", "type": "numeric", "min": 1.7, "max": 2.4},
+    "Магний": {"norma": "1.7-2.4", "unit": "мг/дл", "type": "numeric", "min": 1.7, "max": 2.4},
+    "Natriy": {"norma": "135-150", "unit": "ммоль/л", "type": "numeric", "min": 135, "max": 150},
+    "Натрий": {"norma": "135-150", "unit": "ммоль/л", "type": "numeric", "min": 135, "max": 150},
+    "Trigliserid": {"norma": "-", "unit": "ммоль/л", "type": "text"},
+    "Триглицерид": {"norma": "-", "unit": "ммоль/л", "type": "text"},
+    # IFA
+    "TTG": {"norma": "0,4-4,0", "unit": "мМЕ/л", "type": "hormone"},
+    "ТТГ": {"norma": "0,4-4,0", "unit": "мМЕ/л", "type": "hormone"},
+    "T4 erkin": {"norma": "9,0-25,0", "unit": "пмоль/л", "type": "hormone"},
+    "T4 свободный": {"norma": "9,0-25,0", "unit": "пмоль/л", "type": "hormone"},
+    "T3 erkin": {"norma": "3,0-6,0", "unit": "пмоль/л", "type": "hormone"},
+    "T3 свободный": {"norma": "3,0-6,0", "unit": "пмоль/л", "type": "hormone"},
+    "Prolaktin": {"norma": "Э: 2,5-17, А: 1,9-25", "unit": "нг/мл", "type": "hormone"},
+    "ПРОЛАКТИН": {"norma": "Э: 2,5-17, А: 1,9-25", "unit": "нг/мл", "type": "hormone"},
+    "FSG": {"norma": "Э: 1,5-12, А: 3,0-13", "unit": "мМЕ/мл", "type": "hormone"},
+    "ФСГ": {"norma": "Э: 1,5-12, А: 3,0-13", "unit": "мМЕ/мл", "type": "hormone"},
+    "LG": {"norma": "Э: 1,7-8,6, А: 2,4-12,6", "unit": "мМЕ/мл", "type": "hormone"},
+    "ЛГ": {"norma": "Э: 1,7-8,6, А: 2,4-12,6", "unit": "мМЕ/мл", "type": "hormone"},
+    "LH": {"norma": "Э: 1,7-8,6, А: 2,4-12,6", "unit": "мМЕ/мл", "type": "hormone"},
+    "Progesteron": {"norma": "Э: 0-4,0", "unit": "нмоль/л", "type": "hormone"},
+    "ПРОГЕСТЕРОН": {"norma": "Э: 0-4,0", "unit": "нмоль/л", "type": "hormone"},
+    "Estradiol": {"norma": "Э: 0,029-0,3", "unit": "нмоль/л", "type": "hormone"},
+    "ЭСТРАДИОЛ": {"norma": "Э: 0,029-0,3", "unit": "нмоль/л", "type": "hormone"},
+    "Testosteron": {"norma": "Э: 1-38", "unit": "нмоль/л", "type": "hormone"},
+    "ТЕСТОСТЕРОН": {"norma": "Э: 1-38", "unit": "нмоль/л", "type": "hormone"},
+    "AT-TPO": {"norma": "Э: 0-30, А: 0-30", "unit": "МЕ/мл", "type": "hormone"},
+    "АТ ТПО": {"norma": "Э: 0-30, А: 0-30", "unit": "МЕ/мл", "type": "hormone"},
+    "HCG": {"norma": "Э: 0-15, А: 0-15", "unit": "Ед/л", "type": "hormone"},
+    "ХГЧ": {"norma": "Э: 0-15, А: 0-15", "unit": "Ед/л", "type": "hormone"},
+    "Vitamin D": {"norma": "30-50", "unit": "нг/мл", "type": "hormone"},
+    "Vitamin B12": {"norma": "200-835", "unit": "pg/ml", "type": "hormone"},
+    "Ferritin": {"norma": "Э: 16-220, А: 10-124", "unit": "ng/ml", "type": "hormone"},
+    "Ферритин": {"norma": "Э: 16-220, А: 10-124", "unit": "ng/ml", "type": "hormone"},
+    "Insulin": {"norma": "2.6-24.9", "unit": "μУ/мл", "type": "hormone"},
+    "Инсулин": {"norma": "2.6-24.9", "unit": "μУ/мл", "type": "hormone"},
+    "IgE": {"norma": "20-100", "unit": "IU/ml", "type": "hormone"},
+    "CA 72-4": {"norma": "0-6.0", "unit": "Ед/мл", "type": "hormone"},
+    # TEST
+    "HBsAg": {"norma": "Манфий (-)", "unit": "", "type": "express"},
+    "HCV": {"norma": "Манфий (-)", "unit": "", "type": "express"},
+    "RW": {"norma": "Манфий (-)", "unit": "", "type": "express"},
+    "Helicobacter": {"norma": "Манфий (-)", "unit": "", "type": "express"},
+}
+
+# birlik_konvertatsiya
+def convert_birlik_to_latin(birlik: str) -> str:
+    if not birlik:
+        return ""
+    birlik_mapping = {
+        "сек": "sek", "мин": "min", "час": "soat",
+        "г/л": "g/l", "мг/л": "mg/l", "нг/мл": "ng/ml", "пг/мл": "pg/ml",
+        "мг/дл": "mg/dl", "мл": "ml", "л": "l",
+        "ммоль/л": "mmol/l", "мкмоль/л": "mkmol/l", "нмоль/л": "nmol/l",
+        "пмоль/л": "pmol/l", "моль/л": "mol/l",
+        "мМЕ/л": "mME/l", "мМЕ/мл": "mME/ml", "МЕ/л": "ME/l", "МЕ/мл": "ME/ml",
+        "μУ/мл": "μU/ml", "IU/ml": "IU/ml", "IU/l": "IU/l",
+        "Ед/л": "Ed/l", "Ед/мл": "Ed/ml", "U/ml": "U/ml", "U/l": "U/l",
+        "мкм³": "mkm³", "пг": "pg", "%": "%", "INR": "INR",
+        "ko'ruv maydonida": "ko'ruv maydonida", "preparatda": "preparatda",
+        "CELL/µL": "CELL/µL", "Erit/mkl": "Erit/mkl",
+    }
+    birlik_trimmed = birlik.strip()
+    if birlik_trimmed in birlik_mapping:
+        return birlik_mapping[birlik_trimmed]
+    result = birlik_trimmed
+    for kirill, latin in birlik_mapping.items():
+        if kirill in result:
+            result = result.replace(kirill, latin)
+    return result if result != birlik_trimmed else birlik_trimmed
+
+def convert_norma_to_latin(norma: str) -> str:
+    if not norma:
+        return ""
+    result = norma
+    result = result.replace("Э:", "E:").replace("Эркак:", "Erkak:")
+    result = result.replace("А:", "A:").replace("Аёл:", "Ayol:")
+    result = result.replace("ёш", "yosh").replace("Ёш", "Yosh")
+    result = result.replace("Фолликулярная", "Follikulyar")
+    result = result.replace("Овуляция", "Ovulyatsiya")
+    result = result.replace("Лютеиновая", "Lyutein")
+    result = result.replace("Менопауза", "Menopauza")
+    result = result.replace("1-й триместр", "1-trimestr")
+    result = result.replace("2-й триместр", "2-trimestr")
+    result = result.replace("3-й триместр", "3-trimestr")
+    result = result.replace("Норма", "Norma").replace("Меъёр", "Me'yor")
+    return result
+
+def convert_test_name_to_latin(test_name: str) -> str:
+    if not test_name:
+        return ""
+    result = test_name
+    result = result.replace("Эркак", "Erkak").replace("Аёл", "Ayol")
+    result = result.replace("ёш", "yosh").replace("Ёш", "Yosh")
+    return result
+
+# Helper: replace_text_in_doc() - format-preserving placeholder swap
+def replace_text_in_doc(doc: Document, old: str, new: str):
+    def _replace_in_paragraph(para):
+        full_text = para.text
+        if old not in full_text:
+            return
+        for run in para.runs:
+            if old in run.text:
+                original_font = run.font.name
+                original_size = run.font.size
+                original_bold = run.bold
+                original_color = run.font.color.rgb if run.font.color.rgb else None
+                run.text = run.text.replace(old, new)
+                if original_font:
+                    run.font.name = original_font
+                    run._element.rPr.rFonts.set(qn('w:eastAsia'), original_font)
+                if original_size:
+                    run.font.size = original_size
+                if original_bold is not None:
+                    run.bold = original_bold
+                if original_color:
+                    run.font.color.rgb = original_color
+    for p in doc.paragraphs:
+        if old in p.text:
+            _replace_in_paragraph(p)
+    for tbl in doc.tables:
+        for row in tbl.rows:
+            for cell in row.cells:
+                for p in cell.paragraphs:
+                    if old in p.text:
+                        _replace_in_paragraph(p)
+    for sec in doc.sections:
+        for hf in (sec.header, sec.footer):
+            for p in hf.paragraphs:
+                if old in p.text:
+                    _replace_in_paragraph(p)
+            for tbl in hf.tables:
+                for row in tbl.rows:
+                    for cell in row.cells:
+                        for p in cell.paragraphs:
+                            if old in p.text:
+                                _replace_in_paragraph(p)
+
+# Helper: get_test_norma() - DB-first, hardcoded fallback
+def is_categorical_test(test_name: str):
+    test_name_lower = test_name.lower()
+    categorical_keywords = [
+        'qon guruhi', 'qon guruh', 'rezus', 'резус', 'guruh', 'группа',
+        'blood group', 'blood type', 'rh factor', 'rh faktor'
+    ]
+    return any(keyword in test_name_lower for keyword in categorical_keywords)
+
+def select_norma_by_patient(norma_text: str, jins: str = "", yosh: int = None, age_days: int = None):
+    """Bemor jinsi va yoshiga qarab norma matnidan mos diapazonni tanlash.
+    norma_text: "Kat1: min-max; Kat2: min-max" yoki "Kat1: min-max, Kat2: min-max"
+    age_days: kun bo'yicha yosh (chaqaloqlar uchun), yosh: yillar bo'yicha yosh.
+    """
+    if not norma_text:
+        return norma_text
+    # Ajratuvchini aniqlash: nuqta-vergul, yangi qator, keyin harfdan oldingi vergul
+    if ";" in norma_text:
+        parts = [p.strip() for p in norma_text.split(";")]
+    elif "\n" in norma_text:
+        parts = [p.strip() for p in norma_text.split("\n")]
+    elif "," in norma_text:
+        parts = re.split(r',\s+(?=[A-Za-zA-Яа-яЎўҚқҒғҲҳ>])', norma_text)
+        parts = [p.strip() for p in parts]
+    else:
+        return norma_text
+
+    parts = [p for p in parts if p and ":" in p]
+    if not parts:
+        return norma_text
+
+    matched_norms = []
+    for part in parts:
+        category_part, range_part = part.split(":", 1)
+        cat = category_part.strip()
+        cat_up = cat.upper()
+        range_part = range_part.strip()
+
+        # === JINS moslashtirish ===
+        is_erkak_cat = "ERKAK" in cat_up or "ЭРКАК" in cat_up or cat_up in ("E", "M", "MALE")
+        is_ayol_cat  = "AYOL" in cat_up or "АЁЛ" in cat_up or "WOMEN" in cat_up or cat_up in ("A", "F", "FEMALE")
+
+        if is_erkak_cat or is_ayol_cat:
+            if not jins:
+                continue
+            jins_up = jins.upper()
+            is_erkak_pt = jins_up in ("ERKAK", "ЭРКАК", "M", "MALE", "E")
+            is_ayol_pt  = jins_up in ("AYOL", "АЁЛ", "F", "FEMALE", "A", "WOMEN", "WOMAN")
+            if is_erkak_cat and is_erkak_pt:
+                matched_norms.append(range_part)
+            elif is_ayol_cat and is_ayol_pt:
+                matched_norms.append(range_part)
+            continue
+
+        # === YOSH moslashtirish ===
+        cat_lower = cat.lower()
+
+        # "Yangi tug'ilgan" yoki "Neonate" — 0–28 kun
+        if any(k in cat_lower for k in ["yangi", "tug'ilgan", "neonate", "newborn", "chaqaloq", "0-28"]):
+            match = False
+            if age_days is not None and 0 <= age_days <= 28:
+                match = True
+            elif yosh is not None and yosh == 0 and age_days is None:
+                match = True
+            if match:
+                matched_norms.append(range_part)
+            continue
+
+        # "1 oy" yoki "N oy - M yosh" — kunlarda hisoblash
+        oy_match = re.search(r'(\d+)\s*oy', cat_lower)
+        if oy_match:
+            start_oy = int(oy_match.group(1))
+            end_yosh_m = re.search(r'-\s*(\d+)\s*(yosh|год)', cat_lower)
+            end_yosh = int(end_yosh_m.group(1)) if end_yosh_m else None
+            if age_days is not None:
+                start_days = start_oy * 30
+                end_days = end_yosh * 365 if end_yosh else None
+                if age_days >= start_days and (end_days is None or age_days < end_days):
+                    matched_norms.append(range_part)
+            elif yosh is not None:
+                if yosh >= start_oy / 12 and (end_yosh is None or yosh < end_yosh):
+                    matched_norms.append(range_part)
+            continue
+
+        # "> N yosh"
+        if ">" in cat:
+            try:
+                age_limit = int(re.search(r'>(\d+)', cat).group(1))
+                cmp_yosh = yosh if yosh is not None else (age_days // 365 if age_days else None)
+                if cmp_yosh is not None and cmp_yosh > age_limit:
+                    matched_norms.append(range_part)
+            except:
+                pass
+            continue
+
+        # "< N yosh"
+        if "<" in cat:
+            try:
+                age_limit = int(re.search(r'<(\d+)', cat).group(1))
+                cmp_yosh = yosh if yosh is not None else (age_days // 365 if age_days else None)
+                if cmp_yosh is not None and cmp_yosh < age_limit:
+                    matched_norms.append(range_part)
+            except:
+                pass
+            continue
+
+        # "N-M yosh" oralig'i
+        yosh_range_m = re.search(r'(\d+)\s*-\s*(\d+)\s*(yosh|год|лет)?', cat_lower)
+        if yosh_range_m:
+            try:
+                min_age = int(yosh_range_m.group(1))
+                max_age = int(yosh_range_m.group(2))
+                cmp = yosh if yosh is not None else (age_days // 365 if age_days else None)
+                if cmp is not None and min_age <= cmp <= max_age:
+                    matched_norms.append(range_part)
+            except:
+                pass
+            continue
+
+        # "Kattalar" yoki "Adults" — agar yosh mos kelmasa va boshqa kategoriyalar o'tib ketsa
+        if any(k in cat_lower for k in ["kattal", "adult", "взросл", "umumiy", "general"]):
+            # Faqat agar boshqa kategoriyalar mos kelmagan bo'lsa qo'shamiz (pastda)
+            pass  # skip for now, handle as fallback below
+
+    if matched_norms:
+        return "; ".join(matched_norms) if len(matched_norms) > 1 else matched_norms[0]
+
+    # Fallback: "Kattalar"/"Adults" kategoriyasini qidirish
+    for part in parts:
+        cat, range_part = part.split(":", 1)
+        cat_lower = cat.strip().lower()
+        if any(k in cat_lower for k in ["kattal", "adult", "взросл", "umumiy"]):
+            return range_part.strip()
+
+    return norma_text
+
+def _get_norma_from_test_normas(test_name: str):
+    """TEST_NORMAS lug'atidan norma qidirish — FAQAT to'liq nom bilan (qisman moslik olib tashlandi)."""
+    if not test_name:
+        return None
+    tn = (test_name or '').strip()
+    if tn in TEST_NORMAS:
+        return TEST_NORMAS[tn]
+    return None
+
+
+def parse_norma_for_category(norma_text: str, category: str = "Emizikli yosh"):
+    """
+    Norma textidan ma'lum kategoriya uchun min-max ni ajratadi.
+    Masalan: "Erkak: 0.0-30.0, Ayol: 0.0-30.0, Emizikli yosh: 0.0-120.0"
+    parse_norma_for_category(..., "Emizikli yosh") → "0.0-120.0"
+    """
+    if not norma_text or not category:
+        return None
+    try:
+        pattern = rf'{re.escape(category)}\s*:\s*([\d.\-\s,]+?)(?:\s*,\s*[A-Za-z]|$)'
+        match = re.search(pattern, norma_text, re.IGNORECASE)
+        if match:
+            range_str = match.group(1).strip()
+            return range_str
+    except Exception:
+        pass
+    return None
+
+def _get_norma_bold_hints(norma_text: str, jins: str = "", yosh=None, emizikli: int = 0, cycle_note: str = "",
+                          menopauza: int = 0, homiladorlik_hafta=None) -> list:
+    """
+    Bemorga mos keladigan BARCHA norma kategoriya nomlarini qaytaradi (qalin ko'rsatish uchun).
+    Bemor bir vaqtda emizikli HAM, homilador HAM bo'lishi mumkin — BARCHA mos fazalar to'planadi.
+    Masalan: emizikli + homilador 30-hafta ayol → ["Emizikli yosh", "3-trimestr"]
+             menopauza ayol → ["Menopauza"]
+             homilador 12-hafta → ["1-trimestr"]
+             follikulyar faza ayol → ["Follikulyar"]
+    """
+    if not norma_text:
+        return []
+    hints = []
+    _cn_lower = (cycle_note or '').lower()
+
+    # 1) EMIZIKLI (orders.emizikli=1 YOKI cycle_note da "emizikli" matni)
+    _is_emizikli = (emizikli == 1) or ('emizikli' in _cn_lower and 'emas' not in _cn_lower)
+    if _is_emizikli:
+        hints.append("Emizikli yosh")
+
+    # 2) MENOPAUZA
+    if menopauza == 1:
+        hints.append("Menopauza")
+
+    # 3) HOMILADORLIK HAFTASI — trimestrni aniqlash
+    if homiladorlik_hafta:
+        try:
+            hafta = int(homiladorlik_hafta)
+            if hafta <= 12:
+                hints.append("1-trimestr")
+            elif hafta <= 27:
+                hints.append("2-trimestr")
+            else:
+                hints.append("3-trimestr")
+            # Aniq haftalar uchun (HCG normalari)
+            if hafta <= 2:
+                hints.append("1-Hafta")
+            elif hafta <= 4:
+                hints.append(f"{hafta}-Hafta")
+        except (ValueError, TypeError):
+            pass
+
+    # 4) CYCLE_NOTE bo'yicha trimestr/faza aniqlash (eski ma'lumotlar uchun yoki qo'shimcha)
+    if cycle_note:
+        # Trimestr — faqat homiladorlik_hafta orqali qo'shilmagan bo'lsa
+        if not homiladorlik_hafta:
+            if "1-trimestr" in _cn_lower or "1 trimestr" in _cn_lower:
+                hints.append("1-trimestr")
+            elif "2-trimestr" in _cn_lower or "2 trimestr" in _cn_lower:
+                hints.append("2-trimestr")
+            elif "3-trimestr" in _cn_lower or "3 trimestr" in _cn_lower:
+                hints.append("3-trimestr")
+        # Menstrual faza — avval kun raqamidan aniqlanadi
+        import re as _re_cycle
+        _phase_added = False
+        _day_m = _re_cycle.search(r'(\d+)\s*[-–]?\s*kun', _cn_lower)
+        if _day_m:
+            _day = int(_day_m.group(1))
+            if 1 <= _day <= 13:
+                hints.append("Follikulyar")
+                _phase_added = True
+            elif _day == 14:
+                hints.append("Ovulyatsiya")
+                _phase_added = True
+            elif _day >= 15:
+                hints.append("Lyutein")
+                _phase_added = True
+        # Matn orqali faza (agar kun raqami yo'q bo'lsa yoki qo'shimcha belgi bo'lsa)
+        if not _phase_added:
+            if "follikul" in _cn_lower:
+                hints.append("Follikulyar")
+            elif "ovulya" in _cn_lower:
+                hints.append("Ovulyatsiya")
+            elif "lyutein" in _cn_lower:
+                hints.append("Lyutein")
+        # Menopauza — faqat bazadan menopauza=1 bo'lmagan bo'lsa
+        if menopauza != 1 and "menopauza" in _cn_lower:
+            hints.append("Menopauza")
+
+    # 5) JINS bo'yicha — har doim qo'shiladi
+    jins_up = (jins or '').upper()
+    is_erkak = jins_up in ("ERKAK", "ЭРКАК", "M", "MALE", "E")
+    is_ayol  = jins_up in ("AYOL", "АЁЛ", "F", "FEMALE", "A", "WOMEN", "WOMAN")
+
+    if is_erkak:
+        hints.append("Erkak")
+    elif is_ayol:
+        hints.append("Ayol")
+
+    # 6) YOSH bo'yicha — norma_textdagi yosh kategoriyalarini tahlil qilish
+    if yosh is not None and norma_text:
+        import re as _re_age
+        _age_lines = _re_age.split(r'[;\n]|,\s+(?=\S)', str(norma_text))
+        for _aline in _age_lines:
+            if ':' not in _aline:
+                continue
+            _acat = _aline.split(':')[0].strip()
+            if not _acat:
+                continue
+            # Faqat yosh belgisi bo'lgan kategoriyalarga qaraladi
+            _has_age_sign = any(c in _acat for c in '<>≥≤+') or _re_age.search(r'\d+\s*(yosh|лет|год)', _acat.lower())
+            if not _has_age_sign:
+                continue
+            _gt = _re_age.search(r'[>≥]\s*=?\s*(\d+)', _acat)
+            _lt = _re_age.search(r'[<≤]\s*=?\s*(\d+)', _acat)
+            _rng = _re_age.search(r'(\d+)\s*[-–]\s*(\d+)', _acat)
+            _plus = _re_age.search(r'(\d+)\s*\+', _acat)
+            _matched = False
+            if _gt and int(yosh) > int(_gt.group(1)):
+                _matched = True
+            elif _lt and int(yosh) < int(_lt.group(1)):
+                _matched = True
+            elif _rng and int(_rng.group(1)) <= int(yosh) <= int(_rng.group(2)):
+                _matched = True
+            elif _plus and int(yosh) >= int(_plus.group(1)):
+                _matched = True
+            if _matched:
+                hints.append(_acat)
+
+    # Takrorlanishni oldini olish
+    return list(dict.fromkeys(hints))
+
+
+def get_test_norma(test_name: str, jins: str = "", guruh: str = "", yosh: int = None, norma_from_window: str = None, unit_from_window: str = None, tahlil_id: int = None, emizikli: int = 0, cycle_note: str = "", menopauza: int = 0, homiladorlik_hafta=None):
+    """
+    Norma olish: tahlil_id bo'lsa DB birinchi (har doim); yo'q bo'lsa oynadan, so'ng DB.
+    tahlil_id: tahlillar.id — ID orqali aniq norma olish uchun (DB norma ustuvor).
+    """
+    if not test_name and not tahlil_id:
+        return {"norma": "-", "unit": "", "type": "text"}
+    test_name_clean = (test_name or '').strip()
+    if test_name_clean and is_categorical_test(test_name_clean):
+        return {"norma": "Har qanday qiymat norma hisoblanadi", "unit": "", "type": "categorical"}
+    # tahlil_id bo'lmasa — oynadan kelgan norma birinchi (eski xatti-harakat)
+    if not tahlil_id and norma_from_window and str(norma_from_window).strip() and str(norma_from_window).strip() != '-':
+        norma_win_text = str(norma_from_window).strip()
+        unit = (unit_from_window or '').strip() if unit_from_window else ''
+        bold_hints = _get_norma_bold_hints(norma_win_text, jins, yosh, emizikli, cycle_note,
+                                           menopauza=menopauza,
+                                           homiladorlik_hafta=homiladorlik_hafta)
+        _min_val, _max_val = None, None
+        try:
+            import re as _re
+            _nums = _re.findall(r'[\d.]+', norma_win_text.split('\n')[0])
+            if len(_nums) >= 2:
+                _min_val = float(_nums[0])
+                _max_val = float(_nums[1])
+            elif len(_nums) == 1:
+                if norma_win_text.strip().startswith(('<', 'менее', 'gacha')):
+                    _max_val = float(_nums[0])
+                else:
+                    _min_val = float(_nums[0])
+        except Exception:
+            pass
+        return {"norma": norma_win_text, "unit": unit, "type": "numeric", "bold_hints": bold_hints,
+                "min": _min_val, "max": _max_val}
+    # Bazadan yuklash — avval tahlil_id orqali (aniq), keyin tahlil_nomi
+    # tahlil_id bo'lsa DB DOIM birinchi (norma_from_window dan ustun)
+    conn = db_conn()
+    if conn:
+        try:
+            cursor = conn.cursor(dictionary=True)
+            db_name = test_name_clean
+            if tahlil_id:
+                cursor.execute("SELECT nomi FROM tahlillar WHERE id = %s LIMIT 1", (tahlil_id,))
+                t_row = cursor.fetchone()
+                if t_row and t_row.get('nomi'):
+                    db_name = (t_row.get('nomi') or '').strip()
+            if not db_name:
+                db_name = test_name_clean
+            result = None
+            if guruh and db_name:
+                cursor.execute("SELECT * FROM tahlillar_norma WHERE guruh = %s AND tahlil_nomi = %s", (guruh, db_name))
+                result = cursor.fetchone()
+            if not result and db_name:
+                cursor.execute("SELECT * FROM tahlillar_norma WHERE tahlil_nomi = %s", (db_name,))
+                result = cursor.fetchone()
+            cursor.close()
+            # conn.close() QILMAYMIZ - bu global db_conn() ulanishi
+            if result:
+                test_type = result.get('type', 'numeric')
+                if test_type == 'categorical' or is_categorical_test(test_name_clean):
+                    return {"norma": "Har qanday qiymat norma hisoblanadi", "unit": result.get('birlik', ''), "type": "categorical"}
+                norma_text = result.get('norma', '-')
+
+                # BARCHA NORMALAR TO'LIQ KO'RSATILADI — faqat bemorga mos kelgan qator qalin bo'ladi.
+                # select_norma_by_patient() endi norma textni filterlaMASDAn, faqat min/max olish uchun ishlatiladi.
+                bold_hints = _get_norma_bold_hints(norma_text, jins, yosh, emizikli, cycle_note,
+                                                   menopauza=menopauza,
+                                                   homiladorlik_hafta=homiladorlik_hafta)
+
+                # min/max qiymatlarni hisoblash uchun filterlangan normani olish
+                selected_for_minmax = select_norma_by_patient(norma_text, jins, yosh)
+
+                norma_info = {
+                    "norma": norma_text,   # TO'LIQ norma text (filtersiz)
+                    "selected_norma": selected_for_minmax,  # Yosh/jins bo'yicha tanlangan (min/max uchun)
+                    "bold_hints": bold_hints,  # Qalin ko'rsatiladigan kategoriyalar
+                    "unit": result.get('birlik', ''), "type": test_type,
+                    "min": float(result['min_val']) if result.get('min_val') else None,
+                    "max": float(result['max_val']) if result.get('max_val') else None,
+                    "min_m": float(result['min_val_m']) if result.get('min_val_m') else None,
+                    "max_m": float(result['max_val_m']) if result.get('max_val_m') else None,
+                    "min_f": float(result['min_val_f']) if result.get('min_val_f') else None,
+                    "max_f": float(result['max_val_f']) if result.get('max_val_f') else None,
+                }
+                return norma_info
+        except Exception as e:
+            print(f"[OGOHLANTIRISH] Bazadan norma olishda xato: {e}")
+            # conn.close() QILMAYMIZ - global connection
+    # Bazada norma topilmadi — oynadan kelgan normani zaxira sifatida ishlatish
+    if norma_from_window and str(norma_from_window).strip() and str(norma_from_window).strip() != '-':
+        norma_win_text = str(norma_from_window).strip()
+        unit = (unit_from_window or '').strip() if unit_from_window else ''
+        bold_hints = _get_norma_bold_hints(norma_win_text, jins, yosh, emizikli, cycle_note,
+                                           menopauza=menopauza,
+                                           homiladorlik_hafta=homiladorlik_hafta)
+        _min_val, _max_val = None, None
+        try:
+            import re as _re
+            _nums = _re.findall(r'[\d.]+', norma_win_text.split('\n')[0])
+            if len(_nums) >= 2:
+                _min_val = float(_nums[0])
+                _max_val = float(_nums[1])
+            elif len(_nums) == 1:
+                if norma_win_text.strip().startswith(('<', 'менее', 'gacha')):
+                    _max_val = float(_nums[0])
+                else:
+                    _min_val = float(_nums[0])
+        except Exception:
+            pass
+        return {"norma": norma_win_text, "unit": unit, "type": "numeric", "bold_hints": bold_hints,
+                "min": _min_val, "max": _max_val}
+    return {"norma": "-", "unit": "", "type": "text"}
+
+# Helper: group_tests_by_category() - DB-first categorization
+def get_order_tests(order_id: int):
+    conn = db_conn()
+    if not conn:
+        return []
+    try:
+        cursor = conn.cursor(dictionary=True)
+        query = """SELECT oi.id, oi.order_id, oi.tahlil_id, 
+                          COALESCE(oi.nomi, t.nomi) as nomi, 
+                          oi.narxi,
+                          t.sample as test_type, 
+                          t.nomi as tahlil_nomi
+                   FROM order_items oi
+                   LEFT JOIN tahlillar t ON oi.tahlil_id = t.id
+                   WHERE oi.order_id = %s ORDER BY oi.id"""
+        cursor.execute(query, (order_id,))
+        tests = cursor.fetchall()
+        return tests
+    except Exception as e:
+        print(f"[XATO] Tahlillarni olishda xato: {e}")
+        return []
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        # conn.close() QILMAYMIZ - global connection
+
+def get_order_info(order_id: int):
+    conn = db_conn()
+    if not conn:
+        return None
+    try:
+        cursor = conn.cursor(dictionary=True)
+        query = """SELECT o.id as order_id, o.bemor_id, o.sana_vaqt, o.sample_id,
+                          o.emizikli, o.cycle_day, o.cycle_note,
+                          o.menopauza, o.homiladorlik_hafta, o.gormon_dori, o.klinik_izoh,
+                          COALESCE(o.vazn_buyrak, NULL) as vazn_buyrak,
+                          b.id as bemor_id, b.fish, b.yosh, b.jins, b.tugilgan_sana,
+                          b.telefon, b.shifokor, b.kod_yollanma, b.natija_kodi,
+                          b.sample_id as bemor_sample_id
+                   FROM orders o
+                   INNER JOIN bemorlar b ON o.bemor_id = b.id
+                   WHERE o.id = %s"""
+        cursor.execute(query, (order_id,))
+        order_info = cursor.fetchone()
+        return order_info
+    except Exception as e:
+        print(f"[XATO] Buyurtma ma'lumotlarini olishda xato: {e}")
+        return None
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        # conn.close() QILMAYMIZ - global connection
+
+def group_tests_by_category(tests: list):
+    groups = {"GEM": [], "BIO": [], "URINE": [], "IFA": [], "TEST": [], "COAG": []}
+    conn = db_conn()
+    category_cache = {}
+    if conn:
+        try:
+            cursor = conn.cursor(dictionary=True)
+            for test in tests:
+                test_name = (test.get('nomi') or test.get('tahlil_nomi') or '').strip()
+                if test_name:
+                    cursor.execute("SELECT guruh FROM tahlillar_norma WHERE tahlil_nomi = %s LIMIT 1", (test_name,))
+                    result = cursor.fetchone()
+                    if result and result.get('guruh'):
+                        category_cache[test_name] = (result.get('guruh') or '').strip().upper()
+            for test in tests:
+                test_name = (test.get('nomi') or test.get('tahlil_nomi') or '').strip()
+                if test_name and test_name not in category_cache:
+                    test_id = test.get('id') or test.get('tahlil_id')
+                    if test_id:
+                        cursor.execute("SELECT sample FROM tahlillar WHERE id = %s LIMIT 1", (test_id,))
+                        result = cursor.fetchone()
+                        if result and result.get('sample'):
+                            category_cache[test_name] = (result.get('sample') or '').strip().upper()
+            cursor.close()
+            # conn.close() QILMAYMIZ - global connection
+        except Exception as e:
+            print(f"[OGOHLANTIRISH] Bazadan kategoriyalarni olishda xato: {e}")
+    for test in tests:
+        test_name = (test.get('nomi') or test.get('tahlil_nomi') or '').strip()
+        test_type = (test.get('test_type') or '').strip().upper()
+        if any(excluded in test_name for excluded in EXCLUDED_TESTS):
+            continue
+        category = None
+        if test_name in category_cache:
+            category = category_cache[test_name]
+        elif test_type:
+            category = test_type
+        if category and category in groups:
+            groups[category].append(test)
+            continue
+        if test_type == "GEM":
+            groups["GEM"].append(test)
+        elif test_type == "BIO":
+            groups["BIO"].append(test)
+        elif test_type == "URINE":
+            groups["URINE"].append(test)  # Umumiy siydik ham qo'shiladi
+        elif test_type == "IFA":
+            groups["IFA"].append(test)
+        elif test_type == "COAG":
+            groups["COAG"].append(test)
+        elif test_type == "TEST":
+            groups["TEST"].append(test)
+        else:
+            test_name_upper = test_name.upper()
+            if any(keyword in test_name_upper for keyword in ["ИФА", "IFA", "ГАРМОН", "GARMON", "TTG", "T4", "T3", "ПРОЛАКТИН", "PROLAKTIN", "FSH", "FSG", "LH", "LG", "ГЕПАТИТ", "GEPATIT", "HBSAG", "HCV", "HDV", "ВИТАМИН", "VITAMIN", "FERITIN", "ФЕРРИТИН", "ОНКОМАРКЕР", "ONKOMARKER", "CA ", "IGE", "IGG", "IGM", "АЛЛЕРГИЯ", "ALLERGIYA", "АСКАРИДА", "ASKARIDA", "ЛЯМБЛИЯ", "LYAMBLIYA", "ГЕЛЬМИНТ", "GELMINT", "ХГЧ", "HCG", "ЭСТРАДИОЛ", "ESTRADIOL", "ПРОГЕСТЕРОН", "PROGESTERON", "ТЕСТОСТЕРОН", "TESTOSTERON", "ИНСУЛИН", "INSULIN"]):
+                groups["IFA"].append(test)
+            elif any(keyword in test_name_upper for keyword in ["GEMOTOLOG", "GEMATOLOG", "QON", "ҚОН", "ERITROTSIT", "ЭРИТРОЦИТ", "LEYKOTSIT", "ЛЕЙКОЦИТ", "GEMOGLOBIN", "ГЕМОГЛОБИН", "ESR", "ЭЧТ"]):
+                if "qon guruhi" not in test_name.lower() and "rezus" not in test_name.lower():
+                    groups["GEM"].append(test)  # Umumiy qon ham qo'shiladi
+            elif any(keyword in test_name_upper for keyword in ["BIOKIMYOVIY", "БИОКИМЁВИЙ", "BIO", "ALT", "AST", "АЛТ", "АСТ", "GLYUKOZA", "ГЛЮКОЗА", "KREATININ", "КРЕАТИНИН", "MOCHEVINA", "МОЧЕВИНА", "XOLESTEROL", "ХОЛЕСТЕРИН", "KALSIY", "КАЛЬЦИЙ", "KALIY", "КАЛИЙ", "TEMIR", "ТЕМИР", "MAGNIY", "МАГНИЙ", "NATRIY", "НАТРИЙ", "BILIRUBIN", "БИЛИРУБИН", "LDG", "ЛДГ", "AMILAZA", "АМИЛАЗА", "GGT", "ГГТ", "IF", "ИФ", "TIMOL", "ТИМОЛ", "TRIGLISERID", "ТРИГЛИЦЕРИД"]):
+                groups["BIO"].append(test)
+            elif any(keyword in test_name_upper for keyword in ["KOAGUL", "КОАГУЛ", "IVISH", "ИВИШ", "PROTHROMBIN", "ПРОТРОМБИН", "FIBRINOGEN", "ФИБРИНОГЕН", "APTT", "АЧТВ", "TT", "ТВ", "INR", "MHO"]):
+                groups["COAG"].append(test)
+            elif any(keyword in test_name_upper for keyword in ["SIYDIK", "СИЙДИК", "URINE", "NICHEPORENKO", "НИЧЕПОРЕНКО", "ZIMNITSKIY", "ЗИМНИЦКИЙ"]):
+                if "siydik kislota" not in test_name.lower() and "mochevaya" not in test_name.lower():
+                    groups["URINE"].append(test)  # Umumiy siydik qo'shiladi, siydik kislota emas
+            else:
+                groups["TEST"].append(test)
+    return {k: v for k, v in groups.items() if v}
+
+def get_standard_blank_template_for_test(test_name: str):
+    if not os.path.exists(STANDART_SHABLONLAR_DIR):
+        return (None, None)
+    test_name_lower = test_name.lower()
+    for keyword, template_file in STANDART_SHABLON_MAPPING.items():
+        if keyword in test_name_lower:
+            template_path = os.path.join(STANDART_SHABLONLAR_DIR, template_file)
+            if os.path.exists(template_path):
+                template_name = os.path.splitext(template_file)[0]
+                return (template_path, template_name)
+    try:
+        conn = db_conn()
+        if conn:
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SELECT standard_blank_path FROM tahlillar_norma WHERE tahlil_nomi = %s", (test_name,))
+            result = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            if result and result.get('standard_blank_path'):
+                path = result['standard_blank_path'].strip()
+                if path and os.path.exists(path):
+                    template_name = os.path.splitext(os.path.basename(path))[0]
+                    return (path, template_name)
+    except Exception as e:
+        print(f"[OGOHLANTIRISH] Database'dan shablon qidirishda xato: {e}")
+        if 'conn' in locals():
+            try:
+                conn.close()
+            except:
+                pass
+    return (None, None)
+
+def get_template_for_test(test_name):
+    """
+    Test nomiga qarab shablon faylini topish
+    
+    Returns:
+        tuple: (template_path, template_name) yoki (None, None)
+    """
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    templates_dir = os.path.join(script_dir, "templates")
+    
+    # Test nomini tozalash
+    test_name_lower = test_name.lower()
+    
+    # Shablon mapping
+    template_mapping = {
+        'brutsellez': 'brutsellez.docx',
+        'brutsellez (heddelson': 'brutsellez.docx',
+        'brutsellez (heddelson + wright': 'brutsellez.docx',
+        'heddelson': 'brutsellez.docx',
+        'wright': 'brutsellez.docx',
+        'heddelson + wright': 'brutsellez.docx',
+    }
+    
+    # Test nomiga qarab shablon topish
+    for keyword, template_file in template_mapping.items():
+        if keyword in test_name_lower:
+            template_path = os.path.join(templates_dir, template_file)
+            if os.path.exists(template_path):
+                return (template_path, template_file)
+    
+    # Agar topilmasa, None qaytaramiz
+    return (None, None)
+
+def fill_patient_data_in_template(template_path, order_info):
+    """
+    Shablon ichida bemor ma'lumotlarini to'ldirish
+    
+    Args:
+        template_path: Shablon fayl yo'li
+        order_info: Bemor ma'lumotlari dict
+    
+    Returns:
+        Document: To'ldirilgan hujjat
+    """
+    doc = Document(template_path)
+    
+    # Placeholder mapping
+    replacements = {
+        "{{SAMPLE}}": order_info.get('sample_id', '') or str(order_info.get('order_id', '')),
+        "{{FISH}}": order_info.get('fish', ''),
+        "{{YOSH}}": str(order_info.get('yosh', '')),
+        "{{JINS}}": order_info.get('jins', ''),
+        "{{TUGILGAN_SANA}}": order_info.get('tugilgan_sana', ''),
+        "{{TELEFON}}": order_info.get('telefon', ''),
+        "{{SHIFOKOR}}": order_info.get('shifokor', ''),
+        "{{MANZIL}}": order_info.get('manzil', ''),
+        "{{DATE_TIME}}": datetime.now().strftime("%d.%m.%Y %H:%M"),
+        "{{DATE}}": datetime.now().strftime("%d.%m.%Y"),
+        "{{TIME}}": datetime.now().strftime("%H:%M"),
+    }
+    
+    # replace_text_in_doc dan foydalanish (formatni saqlab qolish uchun)
+    for old, new in replacements.items():
+        replace_text_in_doc(doc, old, str(new))
+    
+    return doc
+
+def open_template_with_patient_data(template_path, order_info, temp_dir=None):
+    """
+    Shablonni bemor ma'lumotlari bilan to'ldirib ochish
+    
+    Args:
+        template_path: Shablon fayl yo'li
+        order_info: Bemor ma'lumotlari
+        temp_dir: Vaqtinchalik fayl saqlash papkasi
+    
+    Returns:
+        str: Vaqtinchalik fayl yo'li
+    """
+    if temp_dir is None:
+        temp_dir = os.path.join(os.path.dirname(template_path), "temp")
+    
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    # To'ldirilgan hujjatni yaratish
+    doc = fill_patient_data_in_template(template_path, order_info)
+    
+    # Vaqtinchalik fayl nomi
+    sample_id = order_info.get('sample_id', '') or str(order_info.get('order_id', ''))
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    temp_filename = f"shablon_{sample_id}_{timestamp}.docx"
+    temp_path = os.path.join(temp_dir, temp_filename)
+    
+    # Saqlash
+    doc.save(temp_path)
+    
+    return temp_path
+
+def organize_tests_by_template(tests: list, order_id: int = None):
+    """
+    Testlarni shablonlari bo'yicha guruhlaydi.
+    order_id berilsa, test_results jadvalidan filled_template_path ni ham tekshiradi.
+    """
+    organized = {'with_templates': {}, 'by_group': {}}
+    
+    # Agar order_id berilgan bo'lsa, filled_template_path larni oldindan yuklash
+    filled_paths = {}
+    if order_id:
+        try:
+            conn = db_conn()
+            if conn:
+                cursor = conn.cursor(dictionary=True)
+                cursor.execute("""
+                    SELECT test_name, filled_template_path 
+                    FROM test_results 
+                    WHERE order_id = %s AND filled_template_path IS NOT NULL AND filled_template_path != ''
+                """, (str(order_id),))
+                for row in cursor.fetchall():
+                    if row.get('filled_template_path') and os.path.exists(row['filled_template_path']):
+                        filled_paths[row['test_name']] = row['filled_template_path']
+                cursor.close()
+                conn.close()
+        except Exception as e:
+            print(f"[OGOHLANTIRISH] filled_template_path larni olishda xato: {e}")
+    
+    for test in tests:
+        test_name = test.get('nomi') or test.get('tahlil_nomi') or ''
+        if not test_name:
+            continue
+        
+        # 1: filled_template_path dan izlash
+        if test_name in filled_paths:
+            fp = filled_paths[test_name]
+            template_name = os.path.splitext(os.path.basename(fp))[0]
+            if template_name not in organized['with_templates']:
+                organized['with_templates'][template_name] = []
+            organized['with_templates'][template_name].append({
+                'test': test, 
+                'template_path': fp, 
+                'template_name': template_name
+            })
+            continue
+        
+        # 2: STANDART_SHABLON_MAPPING dan izlash
+        template_path, template_name = get_standard_blank_template_for_test(test_name)
+        if template_path and template_name:
+            if template_name not in organized['with_templates']:
+                organized['with_templates'][template_name] = []
+            organized['with_templates'][template_name].append({
+                'test': test, 
+                'template_path': template_path, 
+                'template_name': template_name
+            })
+        else:
+            # Guruhga qo'shish (GEM, BIO, EXPRESS va boshqalar)
+            test_type = (test.get('test_type') or '').strip().upper()
+            test_name_upper = test_name.upper()
+            # Agar test nomida 'EKSPRESS' so'zi bo'lsa, bazadagi guruhidan qat'iy nazar EXPRESS
+            if 'EKSPRESS' in test_name_upper:
+                test_type = 'EXPRESS'
+            elif not test_type:
+                if any(kw in test_name_upper for kw in ['GEMOTOLOG', 'GEMATOLOG']):
+                    test_type = 'GEM'
+                elif any(kw in test_name_upper for kw in ['QON GURUHI', 'REZUS']):
+                    test_type = 'EXPRESS'
+                elif 'QON' in test_name_upper and 'UMUMIY' not in test_name_upper:
+                    test_type = 'GEM'
+                elif any(kw in test_name_upper for kw in ['BIOKIMYOVIY', 'BIO']):
+                    test_type = 'BIO'
+                elif any(kw in test_name_upper for kw in ['SIYDIK', 'URINE']):
+                    test_type = 'URINE'
+                elif any(kw in test_name_upper for kw in ['GEPATIT', 'SIFILIS', 'RW', 'HCV', 'HBSAG', 'HIV']):
+                    # IFA/ИФА testlari EXPRESS emas — bazadagi guruh (IFA) saqlanadi
+                    if 'IFA' not in test_name_upper and 'ИФА' not in test_name_upper:
+                        test_type = 'EXPRESS'
+                elif any(kw in test_name_upper for kw in ['KOAGUL', 'IVISH']):
+                    test_type = 'COAG'
+                else:
+                    test_type = 'TEST'
+
+            if test_type in ('POSITIVE_NEGATIVE', 'BLOOD_GROUP', 'BLOODGROUP'):
+                test_type = 'EXPRESS'
+            
+            if test_type not in organized['by_group']:
+                organized['by_group'][test_type] = []
+            organized['by_group'][test_type].append(test)
+    
+    return organized
+
+def extract_tables_from_docx(source_path: str, target_doc: Document,
+                              section_title: str = None, order_info: dict = None):
+    """
+    Manba .docx faylidan barcha jadvallarni olib, target_doc ga joylashtiradi.
+    
+    Faqat jadvallar ko'chiriladi. Sarlavha, footer, header ko'chirilmaydi —
+    chunki umumiy blank o'z headeriga ega.
+    
+    Args:
+        source_path: To'ldirilgan Word faylining to'liq yo'li
+        target_doc: Natija yoziladigan asosiy Document obyekti
+        section_title: Jadval ustiga yoziladigan sarlavha (ixtiyoriy)
+        order_info: Bemor ma'lumotlari — placeholderlarni to'ldirish uchun
+    
+    Returns:
+        bool: Muvaffaqiyatli bo'lsa True, xato bo'lsa False
+    """
+    try:
+        if not source_path or not os.path.exists(source_path):
+            print(f"[XATO] Fayl topilmadi: {source_path}")
+            return False
+        
+        source_doc = Document(source_path)
+        
+        # Agar bemor ma'lumotlari berilgan bo'lsa, placeholderlarni to'ldirish
+        if order_info:
+            fish = (order_info.get('fish') or '').strip()
+            sample_id = str(order_info.get('sample_id') or order_info.get('order_id') or '')
+            yosh = str(order_info.get('yosh') or '')
+            tugilgan_sana = order_info.get('tugilgan_sana') or ''
+            dt_str = datetime.now().strftime("%d.%m.%Y %H:%M")
+            
+            if yosh:
+                tugilgan_text = f"{yosh} yosh"
+            elif tugilgan_sana:
+                try:
+                    parts = str(tugilgan_sana).split('-')
+                    tugilgan_text = f"{parts[2]}.{parts[1]}.{parts[0]}" if len(parts) == 3 else str(tugilgan_sana)
+                except:
+                    tugilgan_text = str(tugilgan_sana)
+            else:
+                tugilgan_text = ''
+            
+            nomeratsiya = '00'
+            sid = str(order_info.get('sample_id') or order_info.get('order_id') or '')
+            if len(sid) >= 2:
+                nomeratsiya = sid[-2:]
+            elif len(sid) == 1:
+                nomeratsiya = '0' + sid
+            
+            replacements = {
+                '{{FISH}}': fish, '{{NOMERATSIYA}}': nomeratsiya,
+                '{{TUGILGAN_SANA}}': tugilgan_text, '{{YOSH}}': yosh,
+                '{{SAMPLE}}': sample_id, '{{ID}}': sample_id,
+                '{{DATE_TIME}}': dt_str, '{{DATE}}': dt_str.split()[0] if ' ' in dt_str else dt_str,
+                '{{TIME}}': dt_str.split()[1] if ' ' in dt_str else '',
+            }
+            for old, new in replacements.items():
+                replace_text_in_doc(source_doc, old, str(new))
+        
+        # Jadvallar soni tekshirish
+        if not source_doc.tables:
+            print(f"[OGOHLANTIRISH] Faylda jadval topilmadi: {source_path}")
+            return False
+        
+        # Sarlavha qo'shish (ixtiyoriy)
+        if section_title:
+            title_para = target_doc.add_paragraph()
+            title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _set_para_spacing(title_para, 0, 0, line_spacing=1.0)
+            title_run = title_para.add_run(section_title)
+            title_run.font.name = "Times New Roman"
+            title_run._element.rPr.rFonts.set(qn('w:eastAsia'), "Times New Roman")
+            title_run.font.size = Pt(14)
+            title_run.font.bold = True
+            title_run.font.color.rgb = RGBColor(0x27, 0xae, 0x60)
+            target_doc.add_paragraph()
+        
+        # Faqat jadvallarni ko'chirish
+        tables_copied = 0
+        for table in source_doc.tables:
+            try:
+                new_tbl = deepcopy(table._element)
+                target_doc._body.append(new_tbl)
+                tables_copied += 1
+            except Exception as e:
+                print(f"[OGOHLANTIRISH] Jadvalni ko'chirishda xato: {e}")
+                try:
+                    new_tbl = parse_xml(table._element.xml)
+                    target_doc._body.append(new_tbl)
+                    tables_copied += 1
+                except Exception as e2:
+                    print(f"[XATO] Jadval o'tkazilmadi: {e2}")
+        
+        if tables_copied > 0:
+            target_doc.add_paragraph()  # Ajratuvchi qator
+            print(f"[OK] {tables_copied} ta jadval ko'chirildi: {os.path.basename(source_path)}")
+            return True
+        else:
+            print(f"[XATO] Hech bir jadval ko'chirilmadi: {source_path}")
+            return False
+    
+    except Exception as e:
+        print(f"[XATO] extract_tables_from_docx xatosi: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def create_ginekologik_table_in_doc(doc: Document, result_json: str, order_info: dict):
+    """
+    Ginekologik surtma natijasini Word hujjatiga jadval sifatida qo'shish.
+    result_json: {"leykot_v": "4-5", "leykot_c": "3-4", ...}
+    Ustunlar: Ko'rsatkich (9sm) | Qin V (3.33sm) | Bachadon C (3.34sm) | Siydik U (3.33sm) = 19sm
+    """
+    import json
+
+    try:
+        data = json.loads(result_json) if result_json else {}
+    except:
+        data = {}
+
+    # Sarlavha
+    title = doc.add_paragraph()
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(title, 0, 0, line_spacing=1)
+    r = _add_run_tnr(title, "GINEKOLOGIK SURTMA", 13, bold=True,
+                     color_rgb=RGBColor(0x27, 0xae, 0x60))
+
+    # Jadval — 4 ustun
+    table = doc.add_table(rows=1, cols=4)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+
+    # Ustun kenliklari: 9 + 3.33 + 3.34 + 3.33 = 19 sm
+    _apply_table_widths(table, [9.0, 3.33, 3.34, 3.33])
+
+    # Sarlavha qatori — och ko'k fon, qora matn (B&W printerda yaxshi ko'rinadi)
+    HEADER_COLOR = "9DC3E6"
+    headers = ["Ko'rsatkich", "Qin (V)", "Bachadon bo'yni (C)", "Siydik yo'li (U)"]
+    for cell, header in zip(table.rows[0].cells, headers):
+        _set_cell_shading(cell, HEADER_COLOR)
+        ph = cell.paragraphs[0]
+        ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(ph, 0, 0, line_spacing=1)
+        _add_run_tnr(ph, header, 11, bold=True)
+
+    # Ma'lumot qatorlari
+    rows_data = [
+        ("Leykotsitlar",                                                    "leykot"),
+        ("Yassi epiteliy",                                                  "yassi"),
+        ("Shilliq",                                                         "shilliq"),
+        ("Gonokokklar",                                                     "gonok"),
+        ("Trixomonada",                                                     "trixom"),
+        ("Atipik (klyucheviy) xujayralar",                                  "atipik"),
+        ("Laktobatsillalar (tayoqcha Doderleyna, gramm musbat tayoqcha)",   "lakto"),
+        ("Candida (Aitqi zamburug'i)",                                      "candida"),
+        ("Anaerob bakteriyalar (gramm manfiy tayoqcha), kokklar",           "anaerob"),
+    ]
+
+    for ko_rsatkich, kalit in rows_data:
+        row   = table.add_row()
+        cells = row.cells
+
+        # Ko'rsatkich ustuni
+        p0 = cells[0].paragraphs[0]
+        p0.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        _set_para_spacing(p0, 0, 0, line_spacing=1)
+        _add_run_tnr(p0, ko_rsatkich, 11)
+
+        # V / C / U qiymatlari
+        for i, col_key in enumerate(['v', 'c', 'u'], start=1):
+            val = data.get(f"{kalit}_{col_key}", '')
+            pi = cells[i].paragraphs[0]
+            pi.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _set_para_spacing(pi, 0, 0, line_spacing=1)
+            _add_run_tnr(pi, str(val) if val else '', 11, bold=True)
+
+def _add_section_title(doc, title_text):
+    """Yashil markaziy sarlavha qo'shish (barcha maxsus jadvallar uchun)."""
+    title = doc.add_paragraph()
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(title, 0, 0, line_spacing=1)
+    _add_run_tnr(title, title_text, 13, bold=True, color_rgb=RGBColor(0x27, 0xae, 0x60))
+
+def _add_table_header(table, headers, widths):
+    """Jadvalga sarlavha qatori (ko'k fon) qo'shish."""
+    HEADER_COLOR = "9DC3E6"
+    _apply_table_widths(table, widths)
+    for cell, hdr in zip(table.rows[0].cells, headers):
+        _set_cell_shading(cell, HEADER_COLOR)
+        ph = cell.paragraphs[0]
+        ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(ph, 0, 0, line_spacing=1)
+        _add_run_tnr(ph, hdr, 11, bold=True)
+
+def _cell_write(cell, text, bold=False, align=WD_ALIGN_PARAGRAPH.CENTER):
+    """Jadval katakchaga matn yozish."""
+    p = cell.paragraphs[0]
+    p.alignment = align
+    _set_para_spacing(p, 0, 0, line_spacing=1)
+    _add_run_tnr(p, str(text) if text else '', 11, bold=bold)
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  UROLOGIK SURTMA (MUJSKOY MAZOK) — Word jadval generatsiyasi
+# ─────────────────────────────────────────────────────────────────────────────
+def create_urologik_table_in_doc(doc, result_json, order_info):
+    """Urologik surtma natijasini Word hujjatiga jadval sifatida qo'shish."""
+    import json
+    try:
+        data = json.loads(result_json) if result_json else {}
+    except Exception:
+        data = {}
+
+    _add_section_title(doc, "UROLOGIK SURTMA (MUJSKOY MAZOK)")
+    table = doc.add_table(rows=1, cols=3)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _add_table_header(table, ["Ko'rsatkich", "Natija", "Norma"], [11.0, 4.5, 3.5])
+
+    rows_data = [
+        ("Leykotsitlar",                                                    "leykot",       "2-5"),
+        ("Eritrotsitlar",                                                   "eritr",        "1-2"),
+        ("Epiteliy",                                                        "epitel",       "1-10"),
+        ("Shilliq",                                                         "shilliq",      "Manfiy (-)"),
+        ("Kokklar mikroflora",                                              "kokklar",      "O'rtacha (0-5)"),
+        ("Hujayra ichi gram manfiy diplakokklari (Gonokokklar)",           "gonok",        "Manfiy (-)"),
+        ("Hujayradan tashqari gramm manfiy palochka va kokklar",           "gramm_manfiy", "Manfiy (-)"),
+        ("Hujayradan tashqari gramm musbat kokklar",                       "gramm_musbat", "Manfiy (-)"),
+        ("Trixomonada",                                                     "trixom",       "Manfiy (-)"),
+        ("Xlamidiya",                                                       "xlamid",       "Manfiy (-)"),
+        ("Ureaplazma",                                                      "ureaplaz",     "Manfiy (-)"),
+        ("Zamburug'lar",                                                    "zamburuglar",  "Manfiy (-)"),
+    ]
+    for ko_rsatkich, kalit, norma in rows_data:
+        row = table.add_row()
+        _cell_write(row.cells[0], ko_rsatkich, align=WD_ALIGN_PARAGRAPH.LEFT)
+        val = data.get(kalit, '')
+        _cell_write(row.cells[1], val, bold=True)
+        _cell_write(row.cells[2], norma)
+    doc.add_paragraph()
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  QONDAN MAZOK (MORFOLOGIYA) — Word jadval generatsiyasi
+# ─────────────────────────────────────────────────────────────────────────────
+def create_qondan_mazok_table_in_doc(doc, result_json, order_info):
+    """Qondan mazok (morfologiya) natijasini Word hujjatiga jadval sifatida qo'shish."""
+    import json
+    DISCLAIMER = (
+        "Bu laborator xulosa bo'lib, yakuniy tashxis emas. "
+        "Natijani mutaxassis shifokor bilan muhokama qiling."
+    )
+    try:
+        data = json.loads(result_json) if result_json else {}
+    except Exception:
+        data = {}
+
+    _add_section_title(doc, "QONDAN MAZOK (MORFOLOGIYA) NATIJALARI")
+
+    # ── Leykogramma jadvali ───────────────────────────────────────────────────
+    sub1 = doc.add_paragraph()
+    sub1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(sub1, 2, 1, line_spacing=1)
+    r = _add_run_tnr(sub1, "Leykogramma", 11); r.bold = True
+
+    table = doc.add_table(rows=1, cols=4)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _add_table_header(table, ["Ko'rsatkich", "Natija", "Me'yor", "Birlik"],
+                      [10.0, 3.5, 3.5, 2.0])
+
+    leuko_rows = [
+        ("Leykotsitlar (WBC)",           "wbc",        "4.0 \u2013 9.0",   "10\u2079/\u043b"),
+        ("Mielositlar",                   "mielot",     "\u2013",            "%"),
+        ("Metamielositlar",               "metamielot", "\u2013",            "%"),
+        ("Tayoqcha yadroli neytrofil",    "tayoqcha",   "1 \u2013 6",        "%"),
+        ("Segment yadroli neytrofil",     "segment",    "47 \u2013 72",      "%"),
+        ("Eozinofilllar",                 "eozinofil",  "0,5 \u2013 5",      "%"),
+        ("Bazofilllar",                   "bazofil",    "0 \u2013 1",        "%"),
+        ("Monotsitlar",                   "monotsit",   "3 \u2013 11",       "%"),
+        ("Limfotsitlar",                  "limfotsit",  "19 \u2013 37",      "%"),
+        ("Plazmatik hujayralar",          "plazmatsit", "\u2013",            "%"),
+    ]
+    for ko_rsatkich, kalit, meyor, birlik in leuko_rows:
+        row = table.add_row()
+        _cell_write(row.cells[0], ko_rsatkich, align=WD_ALIGN_PARAGRAPH.LEFT)
+        _cell_write(row.cells[1], str(data.get(kalit, '') or ''), bold=True)
+        _cell_write(row.cells[2], meyor)
+        _cell_write(row.cells[3], birlik)
+
+    # ── Eritrotsitlar morfologiyasi ───────────────────────────────────────────
+    ertr_title = doc.add_paragraph()
+    ertr_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(ertr_title, 4, 1, line_spacing=1)
+    r2 = _add_run_tnr(ertr_title, "Eritrotsitlar morfologiyasi", 11); r2.bold = True
+
+    ertr_scale = [
+        ("Anizositoz",   "anizositoz"),
+        ("Poikilositoz", "poykylositoz"),
+        ("Gipoxromiya",  "gipoxromiya"),
+        ("Mikrotsitoz",  "mikrotsitoz"),
+        ("Makrotsitoz",  "makrotsitoz"),
+    ]
+    etbl = doc.add_table(rows=1, cols=2)
+    etbl.style = 'Table Grid'
+    etbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _add_table_header(etbl, ["Ko'rsatkich", "Daraja"], [12.0, 7.0])
+    for label_text, key in ertr_scale:
+        val = str(data.get(key, '') or "yo'q")
+        rw = etbl.add_row()
+        _cell_write(rw.cells[0], label_text, align=WD_ALIGN_PARAGRAPH.LEFT)
+        _cell_write(rw.cells[1], val, bold=(val not in ("yo'q", "")))
+
+    # Eritrotsit shakllari
+    shapes_val = str(data.get('eritr_shakllar', '') or '')
+    if shapes_val and shapes_val != '-':
+        p_sh = doc.add_paragraph()
+        _set_para_spacing(p_sh, 2, 0, line_spacing=1)
+        _add_run_tnr(p_sh, "Eritrotsit shakllari:  ", 10)
+        r_sh = _add_run_tnr(p_sh, shapes_val, 10); r_sh.bold = True
+
+    # Bazofil donadkor
+    baz_val = str(data.get('bazofil_don', '') or "yo'q")
+    p_baz = doc.add_paragraph()
+    _set_para_spacing(p_baz, 1, 0, line_spacing=1)
+    _add_run_tnr(p_baz, "Bazofil donadkor eritrotsitlar:  ", 10)
+    r_baz = _add_run_tnr(p_baz, baz_val, 10)
+    if baz_val not in ("yo'q", ''): r_baz.bold = True
+
+    # ── Leykotsitlar morfologiyasi ────────────────────────────────────────────
+    leyk_title = doc.add_paragraph()
+    leyk_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(leyk_title, 4, 1, line_spacing=1)
+    r3 = _add_run_tnr(leyk_title, "Leykotsitlar morfologiyasi", 11); r3.bold = True
+
+    leyk_m_val = str(data.get('leyk_morfo', '') or '')
+    p_lm = doc.add_paragraph()
+    _set_para_spacing(p_lm, 0, 0, line_spacing=1)
+    if leyk_m_val and leyk_m_val != '-':
+        _add_run_tnr(p_lm, leyk_m_val, 10).bold = True
+    else:
+        _add_run_tnr(p_lm, "Patologik o'zgarishlar aniqlanmadi.", 10)
+
+    # ── Trombotsitlar ─────────────────────────────────────────────────────────
+    plt_miqdor = str(data.get('plt_miqdor', '') or 'Normal')
+    plt_morfo  = str(data.get('plt_morfo', '') or '')
+    p_plt = doc.add_paragraph()
+    _set_para_spacing(p_plt, 4, 0, line_spacing=1)
+    _add_run_tnr(p_plt, "Trombotsitlar:  ", 10)
+    r_plt = _add_run_tnr(p_plt, plt_miqdor, 10)
+    if plt_miqdor != 'Normal': r_plt.bold = True
+    if plt_morfo and plt_morfo != '-':
+        _add_run_tnr(p_plt, "  ({})".format(plt_morfo), 10)
+
+    # ── Xulosa (Laborator xulosa) ─────────────────────────────────────────────
+    xulosa_val = str(data.get('xulosa', '') or '').strip()
+    # Disclaimer xulosa ichida bo'lmasa qo'shib qo'yamiz
+    if not xulosa_val:
+        xulosa_val = (
+            "Periferik qon surtmasida patologik o'zgarishlar aniqlanmadi.\n\n"
+            + DISCLAIMER
+        )
+    elif DISCLAIMER not in xulosa_val:
+        xulosa_val = xulosa_val.rstrip() + "\n\n" + DISCLAIMER
+
+    xulosa_title = doc.add_paragraph()
+    xulosa_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(xulosa_title, 5, 1, line_spacing=1)
+    r4 = _add_run_tnr(xulosa_title, "Laborator xulosa", 11); r4.bold = True
+
+    # Xulosa matnini satrma-satr chiqarish (bo'sh satrlar uchun spacing)
+    for line in xulosa_val.split('\n'):
+        p_x = doc.add_paragraph()
+        _set_para_spacing(p_x, 0, 1, line_spacing=1.1)
+        if line.strip():
+            # Disclaimer satrini kursiv va kichik shrift bilan ajrat
+            if "laborator xulosa" in line.lower() or "yakuniy tashxis" in line.lower():
+                rx = _add_run_tnr(p_x, line.strip(), 9)
+                rx.italic = True
+                rx.bold = False
+            else:
+                rx = _add_run_tnr(p_x, line.strip(), 10)
+                rx.italic = True
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  BRUSELLYOZ — Word jadval generatsiyasi
+# ─────────────────────────────────────────────────────────────────────────────
+def create_brusellez_table_in_doc(doc, result_json, order_info):
+    """Brusellyoz (Reaksiya Xeddelsona + Rayta) natijasini Word hujjatiga qo'shish."""
+    import json
+    try:
+        data = json.loads(result_json) if result_json else {}
+    except Exception:
+        data = {}
+
+    _add_section_title(doc, "BRUSELLYOZNI ANIQLASH UCHUN")
+    # Subtitle
+    sub = doc.add_paragraph()
+    sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(sub, 0, 2, line_spacing=1)
+    _add_run_tnr(sub, "Reaksiya Xeddelsona va Rayta natijalari", 11)
+
+    table = doc.add_table(rows=1, cols=4)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _add_table_header(table, ["Ko'rsatgich", "Natija", "Titr", "Me'yor"], [8.0, 4.0, 3.5, 3.5])
+
+    rows_data = [
+        ("Reaksiya Xeddelsona", "xeddelson", "Manfiy (-)"),
+        ("Reaksiya Rayta",      "rayta",     "< 1:40"),
+    ]
+    for ko_rsatkich, kalit, me_yor in rows_data:
+        row = table.add_row()
+        _cell_write(row.cells[0], ko_rsatkich, align=WD_ALIGN_PARAGRAPH.LEFT)
+        _cell_write(row.cells[1], data.get(f"{kalit}_natija", ''), bold=True)
+        _cell_write(row.cells[2], data.get(f"{kalit}_titr", ''), bold=True)
+        _cell_write(row.cells[3], me_yor)
+    doc.add_paragraph()
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  NAJAS TAHLILI — Word jadval generatsiyasi
+# ─────────────────────────────────────────────────────────────────────────────
+def create_najas_table_in_doc(doc, result_json, order_info):
+    """Najas tahlili natijasini Word hujjatiga jadval sifatida qo'shish."""
+    import json
+    try:
+        data = json.loads(result_json) if result_json else {}
+    except Exception:
+        data = {}
+
+    _add_section_title(doc, "NAJAS TAHLILI")
+
+    # --- Asosiy parametrlar jadvali ---
+    table1 = doc.add_table(rows=1, cols=3)
+    table1.style = 'Table Grid'
+    table1.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _add_table_header(table1, ["Ko'rsatgich", "Natija", "Norma"], [11.0, 4.0, 4.0])
+
+    rows1 = [
+        ("Sutkalik miqdori",        "sutkalik_miqdori",  "100-250 gr"),
+        ("Namuna miqdori",           "namuna_miqdori",    "10-25 gr"),
+        ("Konsistensiyasi",          "konsistensiya",     "Shak. (yumshoq va quyuq)"),
+        ("Shakli",                   "shakli",            "Silindrsimon"),
+        ("Rangi",                    "rangi",             "Jigarrang"),
+        ("Reaksiyasi (pH)",          "reaksiya",          "Neytral"),
+        ("O'simlik kletchatkasi",    "kletchatka",        "Yo'q"),
+        ("Kraxmal",                  "kraxmal",           "Yo'q"),
+        ("Yodofil flora",            "yodofil",           "Yo'q"),
+        ("Shilliq, epiteliy",        "shilliq_epitel",    "Yo'q"),
+    ]
+    for ko_rsatkich, kalit, norma in rows1:
+        row = table1.add_row()
+        _cell_write(row.cells[0], ko_rsatkich, align=WD_ALIGN_PARAGRAPH.LEFT)
+        _cell_write(row.cells[1], data.get(kalit, ''), bold=True)
+        _cell_write(row.cells[2], norma)
+
+    # --- Mikroskopiya bölimi sarlavhasi ---
+    sub = doc.add_paragraph()
+    sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(sub, 2, 2, line_spacing=1)
+    _add_run_tnr(sub, "MIKROSKOPIYA NATIJALARI", 12, bold=True)
+
+    table2 = doc.add_table(rows=1, cols=2)
+    table2.style = 'Table Grid'
+    table2.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _add_table_header(table2, ["Ko'rsatgich", "Natija"], [13.0, 6.0])
+
+    rows2 = [
+        ("Neytral yog'",             "neytral_yog"),
+        ("Shilliq (mikroskopiya)",   "shilliq_mikro"),
+        ("Leykotsitlar",             "leykot"),
+        ("Eritrotsitlar",            "eritr"),
+        ("Sodda xayvonlar (Protozoa)","protozoa"),
+        ("Gijja tuxumlari",          "gijja"),
+        ("Zamburug'lar",             "zamburuglar"),
+    ]
+    for ko_rsatkich, kalit in rows2:
+        row = table2.add_row()
+        _cell_write(row.cells[0], ko_rsatkich, align=WD_ALIGN_PARAGRAPH.LEFT)
+        _cell_write(row.cells[1], data.get(kalit, ''), bold=True)
+    doc.add_paragraph()
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  PEPSINOGEN 1 VA 2 — Word jadval generatsiyasi
+# ─────────────────────────────────────────────────────────────────────────────
+def create_pepsinogen_table_in_doc(doc, result_json, order_info):
+    """Pepsinogen 1 va 2 natijasini Word hujjatiga qo'shish (revmoproba uslubida)."""
+    import json
+    try:
+        data = json.loads(result_json) if result_json else {}
+    except Exception:
+        data = {}
+
+    # Yashil sarlavha (revmoproba uslubida)
+    heading = doc.add_paragraph()
+    heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(heading, 0, 0, line_spacing=1.0)
+    _add_run_tnr(heading, "PEPSINOGEN", 14, bold=True, color_rgb=RGBColor(0x27, 0xae, 0x60))
+
+    HEADER_COLOR = "9DC3E6"
+    table = doc.add_table(rows=1, cols=4)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _apply_table_widths(table, [7.0, 3.0, 6.0, 3.0])
+    for cell, hdr in zip(table.rows[0].cells, ["Ko'rsatkich", "Natija", "Norma", "O'lchov birligi"]):
+        _set_cell_shading(cell, HEADER_COLOR)
+        ph = cell.paragraphs[0]
+        ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(ph, 0, 0, line_spacing=1)
+        _add_run_tnr(ph, hdr, 11, bold=True)
+
+    rows_data = [
+        ("Pepsinogen I (PGI) IFA",   "pg1",      "30-130",  "mkg/l"),
+        ("Pepsinogen II (PGII) IFA", "pg2",      "4-22",    "mkg/l"),
+        ("PG I / PG II Nisbati",     "pg_ratio", "3-20",    ""),
+    ]
+    for ko_rsatkich, kalit, norma, birlik in rows_data:
+        row = table.add_row()
+        _keep_row_together(row)
+        _cell_write(row.cells[0], ko_rsatkich, align=WD_ALIGN_PARAGRAPH.LEFT)
+        _cell_write(row.cells[1], data.get(kalit, ''), bold=True)
+        _cell_write(row.cells[2], norma)
+        _cell_write(row.cells[3], birlik)
+    doc.add_paragraph()
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  GTT — GLYUKOZAGA TOLERANTLIK TESTI — Word jadval generatsiyasi
+# ─────────────────────────────────────────────────────────────────────────────
+def create_gtt_table_in_doc(doc, result_json, order_info):
+    """Glyukozaga tolerantlik testi natijasini Word hujjatiga chiroyli jadval bilan qo'shish."""
+    try:
+        data = json.loads(result_json) if isinstance(result_json, str) else (result_json or {})
+    except Exception:
+        data = {}
+
+    GTT_ROWS = [
+        ("natoshchak",  "Glyukoza-natoshchak",                "3,2 \u2013 6,1",  "mmol/L"),
+        ("bir_soat",    "Glyukoza 1 soat o\u2018tgach",       "\u22649,4",        "mmol/L"),
+        ("ikki_soat",   "Glyukoza 2 soat o\u2018tgach",       "\u22647,8",        "mmol/L"),
+    ]
+    GTT_NORMA_MINMAX = {
+        "natoshchak": (3.2, 6.1),
+        "bir_soat":   (None, 9.4),
+        "ikki_soat":  (None, 7.8),
+    }
+
+    # Sarlavha
+    heading = doc.add_paragraph()
+    heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(heading, 0, 0, line_spacing=1.0)
+    _add_run_tnr(heading,
+                 "GLYUKOZAGA TOLERANTLIK TESTI (75 g glyukoza bilan)",
+                 14, bold=True, color_rgb=RGBColor(0x27, 0xae, 0x60))
+
+    table = doc.add_table(rows=1, cols=4)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _apply_table_widths(table, [7.0, 4.0, 4.0, 4.0])
+
+    HEADER_COLOR = "9DC3E6"
+    for cell, hdr in zip(table.rows[0].cells,
+                          ["Tahlil nomi", "Natija", "Norma", "O\u2019lchov birligi"]):
+        _set_cell_shading(cell, HEADER_COLOR)
+        ph = cell.paragraphs[0]
+        ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(ph, 0, 0, line_spacing=1)
+        _add_run_tnr(ph, hdr, 11, bold=True)
+
+    for key, row_name, norma_text, unit in GTT_ROWS:
+        val = data.get(key, '')
+        if val == '' and key not in data:
+            continue  # kiritilmagan qator — o'tkazib yuborish
+        val_str = str(val) if val != '' else ''
+        # Rang va strelka aniqlash
+        result_color, arrow = None, ''
+        try:
+            fv = float(str(val_str).replace(',', '.'))
+            mn, mx = GTT_NORMA_MINMAX.get(key, (None, None))
+            if mx is not None and fv > mx:
+                result_color = RGBColor(0xFF, 0x00, 0x00); arrow = ' \u2191'
+            elif mn is not None and fv < mn:
+                result_color = RGBColor(0x00, 0x00, 0xFF); arrow = ' \u2193'
+        except Exception:
+            pass
+
+        row = table.add_row()
+        _keep_row_together(row)
+        cells_r = row.cells
+        p0 = cells_r[0].paragraphs[0]
+        p0.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        _set_para_spacing(p0, 0, 0, line_spacing=1)
+        _add_run_tnr(p0, row_name, 11, bold=True)
+        p1 = cells_r[1].paragraphs[0]
+        p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(p1, 0, 0, line_spacing=1)
+        _add_run_tnr(p1, val_str + arrow if val_str else '', 11, bold=True, color_rgb=result_color)
+        p2 = cells_r[2].paragraphs[0]
+        p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(p2, 0, 0, line_spacing=1)
+        _add_run_tnr(p2, norma_text, 11)
+        p3 = cells_r[3].paragraphs[0]
+        p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(p3, 0, 0, line_spacing=1)
+        _add_run_tnr(p3, unit, 11)
+
+    # Xulosa (agar mavjud bo'lsa)
+    xulosa = data.get('xulosa', '')
+    if xulosa:
+        # Xulosadan faqat "XULOSA:" qatorini olish (qisqacha)
+        xulosa_lines = [ln for ln in xulosa.split('\n') if ln.strip()]
+        xulosa_short = ''
+        for ln in xulosa_lines:
+            if 'XULOSA:' in ln.upper():
+                xulosa_short = ln.strip()
+                break
+        if not xulosa_short:
+            xulosa_short = xulosa_lines[-1].strip() if xulosa_lines else ''
+        if xulosa_short:
+            # Xulosa rangi
+            if 'diabet' in xulosa_short.lower():
+                xul_color = RGBColor(0xC6, 0x28, 0x28)  # qizil
+            elif 'buzilgan' in xulosa_short.lower():
+                xul_color = RGBColor(0xE6, 0x51, 0x00)  # to'q sariq
+            else:
+                xul_color = RGBColor(0x2E, 0x7D, 0x32)  # yashil
+            xp = doc.add_paragraph()
+            xp.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            _set_para_spacing(xp, 0, 0, line_spacing=1.0)
+            _add_run_tnr(xp, xulosa_short, 11, bold=True, color_rgb=xul_color)
+
+    doc.add_paragraph()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  NECHIPORENKO TAHLILI — Word jadval generatsiyasi
+# ─────────────────────────────────────────────────────────────────────────────
+def create_nechiporenko_table_in_doc(doc, result_json, order_info):
+    """Nechiporenko tahlili natijasini Word hujjatiga qo'shish."""
+    import json
+    try:
+        data = json.loads(result_json) if result_json else {}
+    except Exception:
+        data = {}
+
+    _add_section_title(doc, "SIYDIKNING NECHIPORENKO TAHLILI")
+    table = doc.add_table(rows=1, cols=5)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _add_table_header(table,
+                      ["#", "Shaklli elementlar", "Natija", "Norma (Ayol)", "Norma (Erkak)"],
+                      [1.0, 8.0, 3.0, 3.5, 3.5])
+
+    rows_data = [
+        ("Leykotsitlar",   "leykot",      "4000 gacha", "2000 gacha"),
+        ("Eritrotsitlar",  "eritr",        "1000 gacha", "1000 gacha"),
+        ("Silindirlar",    "silindirlar",  "20 gacha",   "20 gacha"),
+    ]
+    for i, (ko_rsatkich, kalit, norma_a, norma_e) in enumerate(rows_data, 1):
+        row = table.add_row()
+        _cell_write(row.cells[0], str(i))
+        _cell_write(row.cells[1], ko_rsatkich, align=WD_ALIGN_PARAGRAPH.LEFT)
+        _cell_write(row.cells[2], data.get(kalit, ''), bold=True)
+        _cell_write(row.cells[3], norma_a)
+        _cell_write(row.cells[4], norma_e)
+    doc.add_paragraph()
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  ZIMNITSKIY TAHLILI — Word jadval generatsiyasi
+# ─────────────────────────────────────────────────────────────────────────────
+def create_zimnitskiy_table_in_doc(doc, result_json, order_info):
+    """Zimnitskiy tahlili natijasini Word hujjatiga qo'shish."""
+    import json
+    try:
+        data = json.loads(result_json) if result_json else {}
+    except Exception:
+        data = {}
+
+    _add_section_title(doc, "SIYDIKNING ZIMNITSKIY TAHLILI")
+    table = doc.add_table(rows=1, cols=4)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _add_table_header(table,
+                      ["#", "Namuna olingan vaqt", "Siydik miqdori (ml)", "Solishtirma og'irligi"],
+                      [1.0, 5.0, 6.5, 6.5])
+
+    sample_times = ["9:00", "12:00", "15:00", "18:00", "21:00", "24:00", "3:00", "6:00"]
+    for i, vaqt in enumerate(sample_times, 1):
+        row = table.add_row()
+        _cell_write(row.cells[0], str(i))
+        _cell_write(row.cells[1], vaqt)
+        _cell_write(row.cells[2], data.get(f"miqdori_{i}", ''), bold=True)
+        _cell_write(row.cells[3], data.get(f"solishtirma_{i}", ''), bold=True)
+
+    # Jami diurez
+    for label, key in [("Kunduzgi diurez", "kunduzgi_diurez"),
+                        ("Tungi diurez",    "tungi_diurez"),
+                        ("Jami sutkalik diurez", "jami_diurez")]:
+        row = table.add_row()
+        # Birinchi 3 ustun birlashtirilib label
+        row.cells[0].merge(row.cells[2])
+        _cell_write(row.cells[0], label, bold=True, align=WD_ALIGN_PARAGRAPH.LEFT)
+        _cell_write(row.cells[3], (data.get(key, '') or '') + ' ml', bold=True)
+    doc.add_paragraph()
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  SPERMOGRAMMA — Word jadval generatsiyasi
+# ─────────────────────────────────────────────────────────────────────────────
+def create_spermogramma_table_in_doc(doc, result_json, order_info):
+    """Spermogramma natijasini Word hujjatiga jadval sifatida qo'shish."""
+    import json
+    try:
+        data = json.loads(result_json) if result_json else {}
+    except Exception:
+        data = {}
+
+    _add_section_title(doc, "SPERMOGRAMMA")
+    table = doc.add_table(rows=1, cols=3)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _add_table_header(table, ["Ko'rsatkich", "Natija", "Me'yor"], [11.0, 4.0, 4.0])
+
+    rows_data = [
+        ("Saqlanish vaqti",               "saqlanish",     "3-5 sutka"),
+        ("Xajmi (ml)",                    "xajmi",         "2-6.4 ml"),
+        ("Rangi",                         "rangi",         "Qo'ng'ir sut"),
+        ("Xidi",                          "xidi",          "Xom kashtan"),
+        ("Suyulish vaqti (daq.)",         "suyulish",      "10-30 daq."),
+        ("rN (pH)",                       "rn",            "7.2-8.0"),
+        ("Ilashuvchanglik (mm)",           "ilashuv",       "0-20 mm"),
+        ("Spermatozoidlar a) 1 mlda",     "sperma_1ml",    "≥20 mln."),
+        ("Spermatozoidlar b) umumiy xajmida", "sperma_umumiy", "≥40 mln."),
+        ("Harakati: a) faol (%)",         "harakat_faol",  "40-85%"),
+        ("Harakati: b) sust (%)",         "harakat_sust",  "4-30%"),
+        ("Harakati: v) harakatsiz (%)",   "harakat_xar",   "0-14%"),
+        ("Tirik spermatozoidlar (%)",     "tirik",         "≥50%"),
+        ("Patologik shakllar (%)",        "patologik",     "15-25%"),
+        ("Spermatogen epiteliy",          "epitel",        "2-10 k.d."),
+        ("Leykotsitlar",                  "leykot",        "1-8 k.d."),
+        ("Letsitin donachalar",           "letsitin",      "Ko'p miqdorda"),
+        ("Agglyutinatsiya",               "agglyut",       "Yo'q"),
+        ("Fruktoza (mkmol/eyak.)",        "fruktoza",      "≥1.3"),
+        ("Limon kislotasi (mkmol/eyak.)","limon",          "≥52"),
+    ]
+    for ko_rsatkich, kalit, me_yor in rows_data:
+        row = table.add_row()
+        _cell_write(row.cells[0], ko_rsatkich, align=WD_ALIGN_PARAGRAPH.LEFT)
+        _cell_write(row.cells[1], data.get(kalit, ''), bold=True)
+        _cell_write(row.cells[2], me_yor)
+    doc.add_paragraph()
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  TORCH INFEKSIYASI IgM VA IgG — Word jadval generatsiyasi
+# ─────────────────────────────────────────────────────────────────────────────
+def create_torch_table_in_doc(doc, result_json, order_info):
+    """TORCH infeksiyasi IgM va IgG natijasini Word hujjatiga qo'shish.
+    Ustunlar: Ko'rsatkich | IgM | IgG | Me'yor
+    """
+    import json
+    try:
+        data = json.loads(result_json) if result_json else {}
+    except Exception:
+        data = {}
+
+    _add_section_title(doc, "TORCH INFEKSIYASIGA IgM VA IgG")
+    table = doc.add_table(rows=1, cols=4)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _add_table_header(table,
+                      ["Ko'rsatkich", "IgM", "IgG", "Me'yor"],
+                      [9.5, 3.5, 3.5, 2.5])
+
+    rows_data = [
+        ("Toxoplasma (TOKSOPLAZMOZ) Ekspress test",          "toxo"),
+        ("Rubella (QIZILCHA) Ekspress test",                 "rubella"),
+        ("Cytomegalovirus (SITOMYEGALOVIRUS) Ekspress test", "cmv"),
+        ("Herpes 1 (ODDIY GERPYES 1 tipi) Ekspress test",   "herpes1"),
+        ("Herpes 2 (ODDIY GERPYES 2 tipi) Ekspress test",   "herpes2"),
+    ]
+    for ko_rsatkich, kalit in rows_data:
+        row = table.add_row()
+        _cell_write(row.cells[0], ko_rsatkich, align=WD_ALIGN_PARAGRAPH.LEFT)
+        igm_val = data.get(f"{kalit}_igm", '')
+        igg_val = data.get(f"{kalit}_igg", '')
+        _cell_write(row.cells[1], igm_val, bold=(igm_val not in ('', 'Manfiy (-)')))
+        _cell_write(row.cells[2], igg_val, bold=(igg_val not in ('', 'Manfiy (-)')))
+        _cell_write(row.cells[3], "Manfiy (-)")
+    doc.add_paragraph()
+
+def get_group_name_from_db(guruh_code: str) -> str:
+    group_names = {
+        "GEM": "GEMOTOLOGIK TEKSHIRUVLAR",
+        "BIO": "QONNING BIOKIMYOVIY TAHLILI",
+        "URINE": "UMUMIY SIYDIK TAHLILI",
+        "IFA": "IMMUNOFERMENT ANALIZLAR",
+        "TEST": "BOSHQA TESTLAR",
+        "COAG": "KOAGULOGRAMMA",
+        "EXPRESS": "EKSPRESS TESTLAR NATIJALARI",
+    }
+    return group_names.get(guruh_code, guruh_code)
+
+def get_test_info_from_db(test_id: int = None, test_name: str = None) -> dict:
+    conn = db_conn()
+    if not conn:
+        return {}
+    try:
+        cursor = conn.cursor(dictionary=True)
+        if test_id:
+            cursor.execute("SELECT t.id, t.nomi, t.kod as kodi, t.sample as guruh FROM tahlillar t WHERE t.id = %s", (test_id,))
+        elif test_name:
+            cursor.execute("SELECT t.id, t.nomi, t.kod as kodi, t.sample as guruh FROM tahlillar t WHERE t.nomi = %s LIMIT 1", (test_name,))
+        else:
+            return {}
+        test_data = cursor.fetchone()
+        if not test_data:
+            cursor.close()
+            conn.close()
+            return {}
+        norma_data = {}
+        cursor.execute("SELECT norma, birlik, guruh FROM tahlillar_norma WHERE tahlil_nomi = %s LIMIT 1", (test_data.get('nomi', ''),))
+        norma_row = cursor.fetchone()
+        if norma_row:
+            norma_data = {'norma': norma_row.get('norma', ''), 'birlik': norma_row.get('birlik', ''), 'guruh': norma_row.get('guruh', test_data.get('guruh', ''))}
+        cursor.close()
+        conn.close()
+        return {
+            'nomi': test_data.get('nomi', ''),
+            'kodi': test_data.get('kodi', ''),
+            'norma': norma_data.get('norma', ''),
+            'birlik': norma_data.get('birlik', ''),
+            'guruh': norma_data.get('guruh', test_data.get('guruh', ''))
+        }
+    except Exception as e:
+        print(f"[XATO] Database'dan tahlil ma'lumotlarini olishda xato: {e}")
+        if 'conn' in locals():
+            try:
+                conn.close()
+            except:
+                pass
+        return {}
+
+# [10.5] append_template_to_doc() - Standart shablonni hujjatga qo'shish
+def append_template_to_doc(doc: Document, template_path: str, order_info: dict):
+    """
+    Standart shablonni asosiy hujjatga qo'shadi.
+    Bemor ma'lumotlarini to'ldiradi va jadvallar/paragraflarni ko'chiradi.
+    
+    Args:
+        doc: Asosiy hujjat
+        template_path: Standart shablon yo'li (to'ldirilgan yoki bo'sh)
+        order_info: Bemor ma'lumotlari
+    """
+    try:
+        template_doc = Document(template_path)
+        
+        # Bemor ma'lumotlarini to'ldirish
+        fish = (order_info.get('fish') or '').strip()
+        sample_id = str(order_info.get('sample_id') or order_info.get('order_id') or '')
+        yosh = str(order_info.get('yosh') or '')
+        tugilgan_sana = order_info.get('tugilgan_sana') or ''
+        dt_str = datetime.now().strftime("%d.%m.%Y %H:%M")
+        
+        # Tug'ilgan sana formatlash
+        if yosh:
+            tugilgan_text = f"{yosh} yosh"
+        elif tugilgan_sana:
+            try:
+                parts = str(tugilgan_sana).split('-')
+                if len(parts) == 3:
+                    tugilgan_text = f"{parts[2]}.{parts[1]}.{parts[0]}"
+                else:
+                    tugilgan_text = str(tugilgan_sana)
+            except:
+                tugilgan_text = str(tugilgan_sana)
+        else:
+            tugilgan_text = ''
+        
+        # Nomeratsiya (so'nggi 2 raqam)
+        nomeratsiya = '00'
+        sid = str(order_info.get('sample_id') or order_info.get('order_id') or '')
+        if len(sid) >= 2:
+            nomeratsiya = sid[-2:]
+        elif len(sid) == 1:
+            nomeratsiya = '0' + sid
+        
+        replacements = {
+            '{{FISH}}': fish,
+            '{{NOMERATSIYA}}': nomeratsiya,
+            '{{TUGILGAN_SANA}}': tugilgan_text,
+            '{{YOSH}}': yosh,
+            '{{SAMPLE}}': sample_id,
+            '{{ID}}': sample_id,
+            '{{DATE_TIME}}': dt_str,
+            '{{DATE TIME}}': dt_str,
+            '{{DATE}}': dt_str.split()[0] if ' ' in dt_str else dt_str,
+            '{{TIME}}': dt_str.split()[1] if ' ' in dt_str else '',
+        }
+        
+        for old, new in replacements.items():
+            replace_text_in_doc(template_doc, old, str(new))
+        
+        # Paragraflarni ko'chirish (bo'sh paragraflar ham)
+        for para in template_doc.paragraphs:
+            para_element = para._element
+            new_para_element = deepcopy(para_element)
+            doc._body.append(new_para_element)
+        
+        # Jadvallarni ko'chirish
+        for table in template_doc.tables:
+            try:
+                new_tbl_element = deepcopy(table._element)
+                doc._body.append(new_tbl_element)
+            except Exception as e:
+                print(f"[OGOHLANTIRISH] Jadvalni ko'chirishda xato: {e}")
+                try:
+                    new_tbl_element = parse_xml(table._element.xml)
+                    doc._body.append(new_tbl_element)
+                except Exception as e2:
+                    print(f"[XATO] Jadvalni ko'chirishda kritik xato: {e2}")
+        
+        # Ajratuvchi bo'sh qator
+        doc.add_paragraph()
+        return True
+        
+    except Exception as e:
+        print(f"[XATO] Shablonni qo'shishda xato: {template_path} - {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+# [11] insert_simple_header() va insert_blanka_ustuni_header()
+def _set_cell_shading(cell, fill_color_hex: str):
+    """Hujayra fonini rangli qilish (XML orqali)"""
+    tc = cell._tc
+    tcPr = tc.get_or_add_tcPr()
+    shd = OxmlElement('w:shd')
+    shd.set(qn('w:val'), 'clear')
+    shd.set(qn('w:color'), 'auto')
+    shd.set(qn('w:fill'), fill_color_hex)
+    tcPr.append(shd)
+
+def _set_cell_border(cell, top=None, bottom=None, left=None, right=None):
+    """Hujayra chegaralarini sozlash"""
+    tc = cell._tc
+    tcPr = tc.get_or_add_tcPr()
+    tcBorders = OxmlElement('w:tcBorders')
+    for side, val in [('top', top), ('bottom', bottom), ('left', left), ('right', right)]:
+        if val is not None:
+            border = OxmlElement(f'w:{side}')
+            border.set(qn('w:val'), val.get('val', 'single'))
+            border.set(qn('w:sz'), str(val.get('sz', 4)))
+            border.set(qn('w:space'), '0')
+            border.set(qn('w:color'), val.get('color', '000000'))
+            tcBorders.append(border)
+    tcPr.append(tcBorders)
+
+def _add_run_tnr(para, text: str, size_pt: float, bold=False, color_rgb=None, italic=False, highlight=None):
+    """Times New Roman run qo'shish (qisqartma).
+    highlight: WD_COLOR_INDEX qiymati, masalan WD_COLOR_INDEX.YELLOW"""
+    run = para.add_run(text)
+    run.font.name = "Times New Roman"
+    try:
+        run._element.rPr.rFonts.set(qn('w:eastAsia'), "Times New Roman")
+    except Exception:
+        pass
+    run.font.size = Pt(size_pt)
+    run.font.bold = bold
+    run.font.italic = italic
+    if color_rgb:
+        run.font.color.rgb = color_rgb
+    if highlight:
+        run.font.highlight_color = highlight
+    return run
+
+def _add_multiline_norma(para, norma_text: str, size_pt: float = 11, bold_hints: list = None, patient_jins: str = ""):
+    """Ko'p qatorli norma — har bir qism alohida qatorda.
+    bold_hints: bemorga mos keladigan kategoriya nomlari ro'yxati — shu qatorlar qalin ko'rsatiladi.
+    patient_jins: bemor jinsi — qarama-qarshi jins qatorlari hech qachon qalin bo'lmaydi."""
+    if not norma_text or not str(norma_text).strip():
+        _add_run_tnr(para, '-', size_pt)
+        return
+    # ';' va '\n' va "vergul + bo'shliq + har qanday belgi (harf yoki raqam)" bo'yicha ajratish.
+    parts = re.split(r'[;\n]|,\s+(?=\S)', str(norma_text))
+    parts = [p.strip() for p in parts if p and p.strip()]
+    if not parts:
+        _add_run_tnr(para, str(norma_text).strip(), size_pt)
+        return
+
+    jins_up = (patient_jins or '').upper()
+    pt_erkak = jins_up in ("ERKAK", "ЭРКАК", "M", "MALE", "E")
+    pt_ayol  = jins_up in ("AYOL", "АЁЛ", "F", "FEMALE", "A", "WOMEN", "WOMAN")
+    # Yosh/faza hintlarini jins hintlaridan ajratish (faqat "erkak"/"ayol" so'zlari jins hintidir)
+    _GENDER_WORDS = {"erkak", "ayol"}
+    other_hints = [h for h in (bold_hints or []) if h and h.strip().lower() not in _GENDER_WORDS]
+
+    for i, part in enumerate(parts):
+        if i > 0:
+            para.add_run().add_break(WD_BREAK.LINE)
+        is_bold = False
+        if bold_hints:
+            part_lower = part.lower()
+            line_has_erkak = 'erkak' in part_lower
+            line_has_ayol  = 'ayol'  in part_lower
+
+            if pt_ayol and line_has_erkak and not line_has_ayol:
+                # Ayol bemor — faqat erkak deb belgilangan qatorni HECH QACHON qalin qilma
+                is_bold = False
+            elif pt_erkak and line_has_ayol and not line_has_erkak:
+                # Erkak bemor — faqat ayol deb belgilangan qatorni HECH QACHON qalin qilma
+                is_bold = False
+            elif (line_has_erkak or line_has_ayol) and other_hints:
+                # Jins + yosh/faza birgalikda: jins mos bo'lsa, yosh/faza hintig ham mos kelishi shart
+                is_bold = any(h and h.strip().lower() in part_lower for h in other_hints)
+            else:
+                # Jinsiz qator yoki faqat jins bor — oddiy substring moslik
+                for hint in bold_hints:
+                    if hint and hint.strip().lower() in part_lower:
+                        is_bold = True
+                        break
+        _add_run_tnr(para, part, size_pt, bold=is_bold)
+
+def _set_para_spacing(para, before=0, after=0, line_spacing=None):
+    para.paragraph_format.space_before    = Pt(before)
+    para.paragraph_format.space_after     = Pt(after)
+    para.paragraph_format.left_indent     = 0   # chap indent = 0
+    para.paragraph_format.right_indent    = 0   # o'ng indent = 0
+    para.paragraph_format.first_line_indent = 0 # birinchi qator indent = 0
+    if line_spacing is not None:
+        para.paragraph_format.line_spacing_rule = WD_LINE_SPACING.SINGLE
+        para.paragraph_format.line_spacing      = line_spacing
+
+def _set_table_no_border(table):
+    """Jadval chegaralarini yo'q qilish"""
+    tbl = table._tbl
+    tblPr = tbl.find(qn('w:tblPr'))
+    if tblPr is None:
+        tblPr = OxmlElement('w:tblPr')
+        tbl.insert(0, tblPr)
+    tblBorders = OxmlElement('w:tblBorders')
+    for side in ['top', 'left', 'bottom', 'right', 'insideH', 'insideV']:
+        b = OxmlElement(f'w:{side}')
+        b.set(qn('w:val'), 'none')
+        b.set(qn('w:sz'), '0')
+        b.set(qn('w:space'), '0')
+        b.set(qn('w:color'), 'auto')
+        tblBorders.append(b)
+    tblPr.append(tblBorders)
+
+def _set_col_width(table, col_idx, width_cm):
+    """Ustun kengligini o'rnatish"""
+    for row in table.rows:
+        row.cells[col_idx].width = Cm(width_cm)
+
+def _set_cell_margins(cell, top=0, bottom=0, left=0, right=0):
+    """Katak ichki bo'shliqlarini (padding) o'rnatish (sm)"""
+    tc = cell._tc
+    tcPr = tc.get_or_add_tcPr()
+    tcMar = OxmlElement('w:tcMar')
+    for side, val in [('top', top), ('bottom', bottom), ('left', left), ('right', right)]:
+        node = OxmlElement(f'w:{side}')
+        node.set(qn('w:w'), str(int(val * 567)))   # sm → twips (1sm=567twip)
+        node.set(qn('w:type'), 'dxa')
+        tcMar.append(node)
+    tcPr.append(tcMar)
+
+def _format_result_value(raw_value):
+    """JSON natijani 'result:' prefikssiz to'g'ri formatlash."""
+    if not raw_value:
+        return ""
+    raw_str = str(raw_value).strip()
+    if raw_str.startswith('{'):
+        try:
+            result_dict = json.loads(raw_str)
+            if isinstance(result_dict, dict):
+                if 'result' in result_dict:
+                    return str(result_dict['result'])
+                elif 'qon_guruhi' in result_dict:
+                    qg = result_dict.get('qon_guruhi', '')
+                    ro = result_dict.get('rezus_omil', '')
+                    return f"{qg} {ro}".strip()
+                else:
+                    parts = []
+                    for key, val in result_dict.items():
+                        if isinstance(val, (int, float)):
+                            parts.append(f"{key}: {val:.2f}")
+                        else:
+                            parts.append(f"{key}: {val}")
+                    return ", ".join(parts)
+        except Exception:
+            pass
+    return raw_str
+
+def _round_result_to_norma(result_str, norma_text):
+    """Natija qiymatini norma kasr aniqligiga moslab yaxlitlash.
+    Masalan: result='6.353', norma='3.89 - 6.1' → '6.35'
+             result='11.88', norma='0 - 41' → '12'
+    """
+    if not result_str or not norma_text or norma_text.strip() == '-':
+        return result_str
+    try:
+        fv = float(str(result_str).replace(',', '.').strip())
+    except (ValueError, TypeError):
+        return result_str
+    try:
+        import re as _re
+        nums = _re.findall(r'\d+\.?\d*', str(norma_text).split('\n')[0])
+        if not nums:
+            return result_str
+        max_dec = 0
+        for n in nums:
+            if '.' in n:
+                dec = len(n.split('.')[1])
+                if dec > max_dec:
+                    max_dec = dec
+        return f"{fv:.{max_dec}f}"
+    except Exception:
+        return result_str
+
+def _keep_row_together(row):
+    """Jadval qatori sahifa orasida bo'linib ketmasligi uchun."""
+    try:
+        trPr = row._tr.get_or_add_trPr()
+        cantSplit = OxmlElement('w:cantSplit')
+        cantSplit.set(qn('w:val'), '1')
+        trPr.append(cantSplit)
+    except Exception:
+        pass
+
+def _parse_norma_min_max(norma_str, jins=''):
+    """Norma matnidan (min, max) float juftini ajratib oladi.
+    Jinsga bog'liq norma: 'Erkak: 62 – 115\nAyol: 53 – 97' → mos qator.
+    """
+    import re as _re2
+    if not norma_str or str(norma_str).strip() in ('-', ''):
+        return None, None
+    text = str(norma_str).strip()
+    jins_l = (jins or '').lower()
+    if '\n' in text or '|' in text:
+        lines = _re2.split(r'[\n|]', text)
+        sel = None
+        for ln in lines:
+            ll = ln.lower()
+            if jins_l in ('erkak', 'e', 'm', 'male') and ('erkak' in ll):
+                sel = ln; break
+            elif jins_l in ('ayol', 'a', 'f', 'female') and ('ayol' in ll):
+                sel = ln; break
+        text = sel if sel else lines[0]
+    tc = text.replace(',', '.').replace('\u2013', '-').replace('\u2014', '-')
+    m = _re2.search(r'[<\u2264]\s*=?\s*(\d+\.?\d*)', tc)
+    if m:
+        return None, float(m.group(1))
+    m = _re2.search(r'[>\u2265]\s*=?\s*(\d+\.?\d*)', tc)
+    if m:
+        return float(m.group(1)), None
+    m = _re2.search(r'(\d+\.?\d*)\s*-\s*(\d+\.?\d*)', tc)
+    if m:
+        return float(m.group(1)), float(m.group(2))
+    return None, None
+
+
+def _get_result_color_and_arrow(result_value, norma_info, jins=''):
+    """
+    Natijani normaga solishtiradi.
+    Qaytaradi: (RGBColor | None, arrow_str)
+      yuqori => (RED, ' ↑')
+      past   => (BLUE, ' ↓')
+      normal => (None, '')
+    Ustuvorlik: blankada ko'rsatiladigan norma MATN → DB raqamli ustunlar.
+    """
+    try:
+        val_str = str(result_value).replace(',', '.').strip()
+        result_float = float(val_str)
+        jins_lower = (jins or '').lower()
+        # DB raqamli ustunlardan min/max (zaxira)
+        if jins_lower in ('erkak', 'e', 'm', 'male'):
+            db_min = norma_info.get('min_m') if norma_info.get('min_m') is not None else norma_info.get('min')
+            db_max = norma_info.get('max_m') if norma_info.get('max_m') is not None else norma_info.get('max')
+        elif jins_lower in ('ayol', 'a', 'f', 'female'):
+            db_min = norma_info.get('min_f') if norma_info.get('min_f') is not None else norma_info.get('min')
+            db_max = norma_info.get('max_f') if norma_info.get('max_f') is not None else norma_info.get('max')
+        else:
+            db_min = norma_info.get('min')
+            db_max = norma_info.get('max')
+        # Norma MATNIDAN parse — yosh/jins bo'yicha tanlangan satr ishlatiladi
+        # selected_norma: select_norma_by_patient() tomonidan tanlangan (masalan ">3 yosh: 66-85" → "66-85")
+        _norma_for_parse = norma_info.get('selected_norma') or norma_info.get('norma', '')
+        text_min, text_max = _parse_norma_min_max(_norma_for_parse, jins)
+        # Matn parse muvaffaqiyatli bo'lsa — ustuvorlik, aks holda DB ustunlar
+        min_val = text_min if text_min is not None else db_min
+        max_val = text_max if text_max is not None else db_max
+        if max_val is not None and result_float > float(max_val):
+            return RGBColor(0xFF, 0x00, 0x00), ' ↑'
+        if min_val is not None and result_float < float(min_val):
+            return RGBColor(0x00, 0x00, 0xFF), ' ↓'
+    except Exception:
+        pass
+    return None, ''
+
+
+def _get_ifa_result_color(result_str, norma_text):
+    """IFA testlar uchun natija rangini aniqlash (strelkasiz).
+
+    Norma formati: '0-1 Manfiy (-)\n1.1-30 Musbat (+)' yoki teskari
+    (Gepatit D kabi: '1.1-10 Manfiy (-)\n0-1 Musbat (+)').
+
+    Qaytaradi:
+        RGBColor(255,0,0) — Musbat (+) diapazonida
+        None              — Manfiy (-) diapazonida yoki aniqlab bo'lmasa (qora)
+    """
+    try:
+        result_float = float(str(result_str).replace(',', '.').strip())
+    except (ValueError, TypeError):
+        return None
+
+    if not norma_text or str(norma_text).strip() in ('-', ''):
+        return None
+
+    lines = re.split(r'[;\n]|,\s+(?=\S)', str(norma_text))
+
+    def _parse_range_bounds(text):
+        """'0-1', '1.1-30', '<1', '>10' → (min, max) float juft."""
+        t = text.strip()
+        # "N – M" yoki "N-M" (nuqtali sonlar ham)
+        m = re.search(r'(\d+\.?\d*)\s*[-\u2013\u2014]\s*(\d+\.?\d*)', t)
+        if m:
+            return float(m.group(1)), float(m.group(2))
+        # "> N"
+        m = re.search(r'>\s*(\d+\.?\d*)', t)
+        if m:
+            return float(m.group(1)), float('inf')
+        # "< N"
+        m = re.search(r'<\s*(\d+\.?\d*)', t)
+        if m:
+            return float('-inf'), float(m.group(1))
+        return None, None
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        line_lower = line.lower()
+        is_manfiy = 'manfiy' in line_lower
+        is_musbat = 'musbat' in line_lower
+        if not is_manfiy and not is_musbat:
+            continue
+        min_v, max_v = _parse_range_bounds(line)
+        if min_v is None:
+            continue
+        if min_v <= result_float <= max_v:
+            if is_musbat:
+                return RGBColor(0xFF, 0x00, 0x00)   # Qizil — Musbat (+)
+            else:
+                return None                          # Qora  — Manfiy (-)
+
+    return None  # Moslik topilmadi — qora
+
+
+def _create_blood_group_table(doc, raw_value):
+    """
+    QON GURUHI VA REZUS FAKTOR uchun 2 ustunli jadval yaratish.
+    Jadval kengligi: 19 sm (9.5 + 9.5), boshqa jadvallar bilan mos.
+    """
+    heading = doc.add_paragraph()
+    heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(heading, 0, 0, line_spacing=1.0)
+    _add_run_tnr(heading, "QON GURUHI VA REZUS FAKTOR", 13, bold=True,
+                 color_rgb=RGBColor(0x27, 0xae, 0x60))
+    qg, ro = '', ''
+    if raw_value:
+        try:
+            rd = json.loads(str(raw_value)) if str(raw_value).strip().startswith('{') else {}
+            qg = rd.get('qon_guruhi', '')
+            ro = rd.get('rezus_omil', '')
+        except Exception:
+            qg = str(raw_value)
+    HEADER_COLOR = "9DC3E6"
+    table = doc.add_table(rows=1, cols=2)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _apply_table_widths(table, [9.5, 9.5])
+    hdr_cells = table.rows[0].cells
+    _set_cell_shading(hdr_cells[0], HEADER_COLOR)
+    _set_cell_shading(hdr_cells[1], HEADER_COLOR)
+    for hdr_cell, hdr_text in zip(hdr_cells, ["Tahlil nomi", "Natija"]):
+        ph = hdr_cell.paragraphs[0]
+        ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(ph, 0, 0, line_spacing=1)
+        _add_run_tnr(ph, hdr_text, 11, bold=True)
+    for label, value in [("Qon guruhi:", qg or '-'), ("Rezus omil:", ro or '-')]:
+        row = table.add_row()
+        _keep_row_together(row)
+        p_lbl = row.cells[0].paragraphs[0]
+        p_lbl.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        _set_para_spacing(p_lbl, 0, 0, line_spacing=1)
+        _add_run_tnr(p_lbl, label, 11, bold=True)
+        p_val = row.cells[1].paragraphs[0]
+        p_val.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(p_val, 0, 0, line_spacing=1)
+        _add_run_tnr(p_val, value, 11, bold=True)
+
+# Umumiy qon tahlili (BC-20S) — Ko'rsatkich, Qisqa nom, Birlik, Norma, Natija (jami 19 sm)
+CBC_HEMA_ROWS = [
+    ("Leykotsitlar soni", "WBC", "10⁹/L", "4.0 – 9.0"),
+    ("Limfotsitlar soni", "Lymph#", "10⁹/L", "0.8 – 4.0"),
+    ("Monotsit + Eozinofil + Bazofil soni", "Mid#", "10⁹/L", "0.1 – 1.5"),
+    ("Neytrofillar soni", "Gran#", "10⁹/L", "2.0 – 7.0"),
+    ("Limfotsitlar ulushi", "Lymph%", "%", "20 – 40"),
+    ("Monotsit + Eozinofil + Bazofil ulushi", "Mid%", "%", "3 – 15"),
+    ("Neytrofillar ulushi", "Gran%", "%", "40 – 70"),
+    ("Eritrotsitlar soni", "RBC", "10¹²/L", "3.8 – 5.5"),
+    ("Gemoglobin", "HGB", "g/L", "120 – 160"),
+    ("Gematokrit", "HCT", "%", "36 – 48"),
+    ("Eritrotsitlarning o'rtacha hajmi", "MCV", "fL", "80 – 100"),
+    ("Eritrotsitdagi o'rtacha gemoglobin", "MCH", "pg", "27 – 34"),
+    ("Eritrotsitdagi gemoglobin konsentratsiyasi", "MCHC", "g/L", "310 – 360"),
+    ("Eritrotsitlar hajmi variatsiyasi", "RDW-CV", "%", "11 – 16"),
+    ("Eritrotsitlar hajmi tarqalish kengligi", "RDW-SD", "fL", "35 – 56"),
+    ("Trombotsitlar soni", "PLT", "10⁹/L", "150 – 400"),
+    ("Trombotsitlarning o'rtacha hajmi", "MPV", "fL", "7 – 12"),
+    ("Trombotsitlar hajmi variatsiyasi", "PDW", "%", "9 – 17"),
+    ("Trombokrit", "PCT", "%", "0.10 – 0.28"),
+    ("Neytrofil / Limfotsit nisbati", "NLR", "—", "1 – 3"),
+    ("Trombotsit / Limfotsit nisbati", "PLR", "—", "100 – 300"),
+]
+
+def _parse_norma_to_min_max(norma_str):
+    """Norma matnidan (masalan '4.0 – 9.0') min, max olish. 'manfiy' -> 0, 0."""
+    if not norma_str or norma_str in ('—', '-'):
+        return None, None
+    s = str(norma_str).replace(',', '.').replace('–', '-').replace('—', '-').lower()
+    if 'manfiy' in s:
+        return 0.0, 0.0
+    m = re.search(r'([\d.]+)\s*[-–]\s*([\d.]+)', s)
+    if m:
+        try:
+            return float(m.group(1)), float(m.group(2))
+        except Exception:
+            pass
+    m2 = re.search(r'<([\d.]+)', s)
+    if m2:
+        try:
+            return 0.0, float(m2.group(1))
+        except Exception:
+            pass
+    return None, None
+
+def _get_value_color_for_norma(val_str, norma_str, is_yassi_epitiliy=False):
+    """
+    Natija rangini qaytaradi: norma=qora (None), past=ko'k, yuqori=qizil.
+    is_yassi_epitiliy: SEC 1-15 norma — normada qora, yuqori qizil, past ko'k.
+    """
+    if not val_str or str(val_str).strip() in ('-', ''):
+        return None
+    val_clean = str(val_str).strip()
+    norma_lower = str(norma_str or '').lower().strip()
+    val_for_num = val_clean.replace(',', '.')
+    num_match = re.search(r'([\d.]+)', val_for_num)
+
+    # "manfiy" norma uchun maxsus mantiq
+    if 'manfiy' in norma_lower:
+        if num_match:
+            try:
+                v = float(num_match.group(1))
+                # 0 = normal (qora), 0 dan yuqori = qizil
+                return RGBColor(0xFF, 0x00, 0x00) if v > 0 else None
+            except Exception:
+                pass
+        # Raqam yo'q, lekin qiymat bor (masalan "Donador silindr (+)") = qizil
+        return RGBColor(0xFF, 0x00, 0x00)
+
+    # Raqam topilmadi va oddiy norma — taqqoslab bo'lmaydi = qora
+    if not num_match:
+        return None
+    try:
+        val_float = float(num_match.group(1))
+    except Exception:
+        return None
+    min_v, max_v = _parse_norma_to_min_max(norma_str)
+    if min_v is None and max_v is None:
+        return None
+    if val_float > max_v:
+        return RGBColor(0xFF, 0x00, 0x00)  # qizil
+    if val_float < min_v:
+        return RGBColor(0x00, 0x00, 0xFF)  # ko'k
+    return None  # qora
+
+def create_hematology_cbc_table_in_doc(doc: Document, result_data, order_info: dict):
+    """Umumiy qon tahlili (BC-20S) jadvali — Ko'rsatkich, Qisqa nom, Birlik, Norma, Natija.
+    Multi-ref norma: yosh va jinsga qarab norma aniqlanadi.
+    Normadan yuqori: qizil + ↑, past: ko'k + ↓.
+    """
+    rd = {}
+    if result_data:
+        if isinstance(result_data, dict):
+            rd = result_data
+        else:
+            try:
+                rd = json.loads(str(result_data)) if str(result_data).strip().startswith('{') else {}
+            except Exception:
+                rd = {}
+    if not isinstance(rd, dict):
+        rd = {}
+    vals = {k: v for k, v in rd.items() if k not in ('type', 'source', 'sid', 'sno', 'result',
+                                                       'patient_age', 'patient_gender')}
+
+    # Bemor yoshi va jinsi (multi-ref norma uchun)
+    patient_age = rd.get('patient_age', '') or order_info.get('yosh', '') or order_info.get('age', '') or ''
+    patient_gender = rd.get('patient_gender', '') or order_info.get('jins', '') or order_info.get('gender', '') or ''
+
+    heading = doc.add_paragraph()
+    heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(heading, 0, 0, line_spacing=1.0)
+    _add_run_tnr(heading, "UMUMIY QON TAHLILI", 14, bold=True,
+                 color_rgb=RGBColor(0x27, 0xae, 0x60))
+    sample_no = rd.get('sid') or rd.get('sno') or order_info.get('sample_id', '') or ''
+    meta = f"Avtomatik gematologik analizator: Mindray BC-20S namuna sample № {sample_no}".strip()
+    if meta:
+        p_meta = doc.add_paragraph()
+        p_meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(p_meta, 0, 0, line_spacing=1.0)
+        _add_run_tnr(p_meta, meta, 9)
+    HEADER_COLOR = "9DC3E6"
+    table = doc.add_table(rows=1, cols=5)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _apply_table_widths(table, [7.0, 2.0, 3.5, 3.5, 3.0])
+    headers = ["Ko'rsatkich", "Qisqa nom", "Natija", "Norma", "Birlik"]
+    for cell, hdr in zip(table.rows[0].cells, headers):
+        _set_cell_shading(cell, HEADER_COLOR)
+        ph = cell.paragraphs[0]
+        ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(ph, 0, 0, line_spacing=1)
+        _add_run_tnr(ph, hdr, 11, bold=True)
+    KOD_ALIAS = {'Lymph#': 'LYM#', 'Lymph%': 'LYM%', 'Mid#': 'MID#', 'Mid%': 'MID%', 'Gran#': 'GRAN#', 'Gran%': 'GRAN%'}
+    for koorsatkich, kod, birlik, default_norma in CBC_HEMA_ROWS:
+        natija = vals.get(kod) or vals.get(KOD_ALIAS.get(kod, ''))
+        if natija is None:
+            natija = ''
+        natija_str = str(natija).strip() if natija else '-'
+
+        # Multi-ref norma: yosh va jinsga qarab norma aniqlash
+        norma = default_norma
+        arrow = ''
+        color = None
+        # KOD_ALIAS teskari: DB nomlari -> HL7 nomlari (get_multi_ref HL7 param_key ishlatadi)
+        param_key = kod
+        # Alias teskari topish: masalan Lymph# -> LYM#
+        alias_key = KOD_ALIAS.get(kod, '')
+        if _hema_get_multi_ref and patient_age:
+            lo, hi, ref_str = _hema_get_multi_ref(param_key, patient_age, patient_gender)
+            if not ref_str and alias_key:
+                lo, hi, ref_str = _hema_get_multi_ref(alias_key, patient_age, patient_gender)
+            if ref_str:
+                norma = ref_str
+                # Natija rangi va strelka
+                if natija_str and natija_str != '-':
+                    try:
+                        fval = float(natija_str.replace(',', '.'))
+                        if lo is not None and hi is not None:
+                            if fval > hi:
+                                color = RGBColor(0xFF, 0x00, 0x00)  # qizil
+                                arrow = ' \u2191'  # ↑
+                            elif fval < lo:
+                                color = RGBColor(0x00, 0x00, 0xFF)  # ko'k
+                                arrow = ' \u2193'  # ↓
+                    except (ValueError, TypeError):
+                        pass
+        # Multi-ref topilmasa, standart norma bilan rang hisoblash
+        if not color and not arrow:
+            color = _get_value_color_for_norma(natija_str, norma, False)
+            if color:
+                # Rang bor — strelka qo'shish
+                min_v, max_v = _parse_norma_to_min_max(norma)
+                if min_v is not None and max_v is not None and natija_str != '-':
+                    try:
+                        fval = float(natija_str.replace(',', '.'))
+                        if fval > max_v:
+                            arrow = ' \u2191'
+                        elif fval < min_v:
+                            arrow = ' \u2193'
+                    except (ValueError, TypeError):
+                        pass
+
+        # Natija display: qiymat + strelka
+        display_natija = (natija_str + arrow) if natija_str and natija_str != '-' else '-'
+
+        row = table.add_row()
+        _keep_row_together(row)
+        cells = row.cells
+        for i, txt in enumerate([koorsatkich, kod, display_natija, norma, birlik]):
+            p = cells[i].paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER if i > 0 else WD_ALIGN_PARAGRAPH.LEFT
+            _set_para_spacing(p, 0, 0, line_spacing=1)
+            _add_run_tnr(p, txt, 11, bold=(i == 2 and natija_str != '-' and bool(natija_str)),
+                         color_rgb=color if i == 2 else None)
+
+def create_urine_full_table_in_doc(doc: Document, result_data, order_info: dict):
+    """Siydik tahlili — Kimyoviy tahlil (URIT-50) + Cho'kma mikroskopiyasi. Rang: norma=qora, past=ko'k, yuqori=qizil."""
+    rd = {}
+    if result_data:
+        try:
+            rd = json.loads(str(result_data)) if str(result_data).strip().startswith('{') else {}
+        except Exception:
+            rd = {}
+    if not isinstance(rd, dict):
+        rd = {}
+    all_analytes = rd.get('all_analytes', {})
+    mikro = rd.get('mikroskopiya', {})
+    try:
+        from urine_window import PARAM_NAMES as _PNAMES
+    except Exception:
+        _PNAMES = {}
+    MIKRO_FIELDS = [
+        ('SEC', "Epiteliy: yassi", "1.0-15", "ko'ruv maydonida"),
+        ('TEC', "Epiteliy: o'tuvchi", "manfiy", "preparatda"),
+        ('RTEC', "Epiteliy: buyrak", "manfiy", "preparatda"),
+        ('WBC', "Leykotsitlar", "0-7", "ko'ruv maydonida"),
+        ('RBC-D', "Eritrotsitlar: o'zgargan", "1-2", "ko'ruv maydonida"),
+        ('RBC-U', "Eritrotsitlar: o'zgarmagan", "0-1", "ko'ruv maydonida"),
+        ('CAST', "Silindrlar", "manfiy", "preparatda"),
+        ('MUC', "Shilliq", "manfiy", "preparatda"),
+        ('CRY', "Tuzlar", "manfiy", "preparatda"),
+        ('BACT', "Bakteriyalar", "manfiy", "preparatda"),
+        ('YEAST', "Zamburug'lar", "manfiy", "preparatda"),
+    ]
+    URIT_NORMA = {'LEU': '(0) manfiy', 'KET': '(0) manfiy', 'NIT': '(0) manfiy', 'URO': '(3.2-16)  normal',
+                  'BIL': '(0) manfiy', 'GLU': '<2.8', 'PRO': '<0.15', 'SG': '1.010-1.025',
+                  'PH': '5.5-7.0', 'BLD': '<10', 'Vc': '(0) manfiy', 'MA': '<20', 'Ca': '1.5-9.0',
+                  'CR': '2.0-22.0', 'ACR': '<3.4'}
+    URIT_UNITS = {'LEU': 'Leyk/mkl', 'KET': 'Mmol/l', 'NIT': 'Mmol/l', 'URO': 'Mkmol/l',
+                  'BIL': 'Mkmol/l', 'GLU': 'Mmol/l', 'PRO': 'G/l', 'SG': 'g/l',
+                  'PH': '', 'BLD': 'Erit/mkl', 'Vc': 'Mmol/l', 'MA': 'Mg/l',
+                  'Ca': 'Mmol/l', 'CR': 'Mmol/l', 'ACR': 'mg/mmol'}
+    meta = f"Kimyoviy tahlil (URIT-50 Analizator)"
+    if rd.get('sid'):
+        meta += f" Sample ID: {rd.get('sid')}"
+    if rd.get('sno'):
+        meta += f" Sample NO: {rd.get('sno')}"
+    p_meta = doc.add_paragraph()
+    p_meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(p_meta, 0, 0, line_spacing=1.0)
+    _add_run_tnr(p_meta, meta, 9)
+    fizik = rd.get('fizik', {})
+    miqdori = (fizik.get('miqdori') or '').strip()
+    rangi = (fizik.get('rangi') or '').strip()
+    tiniqligi = (fizik.get('tiniqligi') or '').strip()
+    if True:
+        h_fizik = doc.add_paragraph()
+        h_fizik.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(h_fizik, 0, 0, line_spacing=1.0)
+        _add_run_tnr(h_fizik, "FIZIK-KIMYOVIY XOSSALARI", 12, bold=True)
+        tbl_fizik = doc.add_table(rows=1, cols=5)
+        tbl_fizik.style = 'Table Grid'
+        tbl_fizik.alignment = WD_TABLE_ALIGNMENT.CENTER
+        _apply_table_widths(tbl_fizik, [4.5, 2.0, 5.0, 3.5, 4.0])
+        for cell, hdr in zip(tbl_fizik.rows[0].cells, ["Ko'rsatkich", "Kod", "Natija", "Norma", "O'lchov birligi"]):
+            _set_cell_shading(cell, "9DC3E6")
+            ph = cell.paragraphs[0]
+            ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _set_para_spacing(ph, 0, 0, line_spacing=1)
+            _add_run_tnr(ph, hdr, 11, bold=True)
+        _RANGI_QIZIL = {'qizg\'ish', 'qon aralash', 'bulutli', 'qizil'}
+        _RANGI_KOK   = {'shaffof'}
+        _TINIQ_QIZIL = {'xira', 'bulutli', "cho'kindi bilan"}
+        for nomi, kod, natija, norma, birlik in [
+            ("Miqdori", "ml", miqdori, "30-300", "ml"),
+            ("Rangi", "-", rangi, "och sariq", "-"),
+            ("Tiniqligi", "-", tiniqligi, "Tiniq", "-"),
+        ]:
+            row = tbl_fizik.add_row()
+            _keep_row_together(row)
+            if kod == 'ml':
+                fizik_color = _get_value_color_for_norma(natija, norma, False) if natija else RGBColor(0xFF, 0x00, 0x00)
+            elif nomi == "Rangi":
+                if not natija:
+                    fizik_color = RGBColor(0xFF, 0x00, 0x00)
+                elif natija.lower() in _RANGI_QIZIL:
+                    fizik_color = RGBColor(0xFF, 0x00, 0x00)
+                elif natija.lower() in _RANGI_KOK:
+                    fizik_color = RGBColor(0x00, 0x00, 0xFF)
+                else:
+                    fizik_color = None  # och sariq, sariq, to'q sariq → qora
+            else:  # Tiniqligi
+                if not natija:
+                    fizik_color = RGBColor(0xFF, 0x00, 0x00)
+                elif natija.lower() in _TINIQ_QIZIL:
+                    fizik_color = RGBColor(0xFF, 0x00, 0x00)
+                else:
+                    fizik_color = None  # tiniq, biroz xira → qora
+            for i, txt in enumerate([nomi, kod, natija or '-', norma, birlik]):
+                p = row.cells[i].paragraphs[0]
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER if i in (1, 2, 4) else WD_ALIGN_PARAGRAPH.LEFT
+                _set_para_spacing(p, 0, 0, line_spacing=1)
+                _add_run_tnr(p, txt, 11, bold=(i == 2 and bool(natija)), color_rgb=fizik_color if i == 2 else None)
+    HEADER_COLOR = "9DC3E6"
+    table = doc.add_table(rows=1, cols=5)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _apply_table_widths(table, [4.5, 2.0, 5.0, 3.5, 4.0])
+    for cell, hdr in zip(table.rows[0].cells, ["Ko'rsatkich", "Kod", "Natija", "Norma", "O'lchov birligi"]):
+        _set_cell_shading(cell, HEADER_COLOR)
+        ph = cell.paragraphs[0]
+        ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(ph, 0, 0, line_spacing=1)
+        _add_run_tnr(ph, hdr, 11, bold=True)
+    # Analizator * belgisi asosida patologik natijalarni aniqlash
+    abnormal_set = set(rd.get('abnormal_params') or [])
+    has_analyzer_flags = 'abnormal_params' in rd
+    # Blankada to'liq nomlar (UI dan farqli)
+    _BLANK_NAMES = {'ACR': "Mikroalbumin/Kreatinin nisbati"}
+    # ACR haqiqiy qiymatini MA/CR dan hisoblash
+    _acr_calculated = None
+    try:
+        _ma_s = (all_analytes.get('MA') or '').strip()
+        _cr_s = (all_analytes.get('CR') or '').strip()
+        if _ma_s and _cr_s and '<' not in _ma_s and '>' not in _ma_s:
+            _ma_n = float(re.search(r'([\d.]+)', _ma_s).group(1))
+            _cr_n = float(re.search(r'([\d.]+)', _cr_s).group(1))
+            if _cr_n > 0:
+                _acr_calculated = round(_ma_n / _cr_n, 1)
+    except Exception:
+        pass
+    for code in ['LEU', 'KET', 'NIT', 'URO', 'BIL', 'GLU', 'PRO', 'SG', 'PH', 'BLD', 'Vc', 'MA', 'Ca', 'CR', 'ACR']:
+        name = _BLANK_NAMES.get(code) or _PNAMES.get(code, code)
+        val = (all_analytes.get(code) or '').strip()
+        # 11-parametrli poloskа: MA, Ca, CR, ACR yo'q bo'lsa — qatorni o'tkazib yuborish
+        if code in ('MA', 'Ca', 'CR', 'ACR') and not val:
+            continue
+        # ACR: birlikni olib tashlash + kategoriya matni + haqiqiy qiymat
+        if code == 'ACR' and val:
+            val_raw = re.sub(r'\s*mg/mmol\s*$', '', val, flags=re.IGNORECASE).strip()
+            if val_raw.startswith('<'):
+                # < 3.4 → Norma (sog'lom buyrak)
+                val = "<3.4 Norma"
+            elif val_raw.startswith('>'):
+                # > 33.9 → Klinik albuminuriya
+                if _acr_calculated is not None:
+                    val = f"{_acr_calculated} Klinik albuminuriya"
+                else:
+                    val = f"{val_raw} Klinik albuminuriya"
+            elif '-' in val_raw:
+                # 3.4-33.9 → Mikroalbuminuriya
+                if _acr_calculated is not None:
+                    val = f"{_acr_calculated} Mikroalbuminuriya"
+                else:
+                    val = f"{val_raw} Mikroalbuminuriya"
+            else:
+                val = val_raw
+        norma = URIT_NORMA.get(code, '-')
+        birlik = URIT_UNITS.get(code, '')
+        if has_analyzer_flags:
+            # Analizator * belgisi bor — shu asosda rang
+            color = RGBColor(0xFF, 0x00, 0x00) if code in abnormal_set else None
+        else:
+            # Eski ma'lumotlar — norma bo'yicha taqqoslash
+            if not val:
+                color = RGBColor(0xFF, 0x00, 0x00)
+            else:
+                color = _get_value_color_for_norma(val, norma, False)
+        row = table.add_row()
+        _keep_row_together(row)
+        cells = row.cells
+        for i, txt in enumerate([name, code, val or '-', norma, birlik]):
+            p = cells[i].paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER if i in (1, 2, 4) else WD_ALIGN_PARAGRAPH.LEFT
+            _set_para_spacing(p, 0, 0, line_spacing=1)
+            _add_run_tnr(p, txt, 11, bold=(i == 2 and bool(val)), color_rgb=color if i == 2 else None)
+    h2 = doc.add_paragraph()
+    h2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(h2, 0, 0, line_spacing=1.0)
+    _add_run_tnr(h2, "CHO'KMA MIKROSKOPIYASI", 12, bold=True)
+    tbl2 = doc.add_table(rows=1, cols=5)
+    tbl2.style = 'Table Grid'
+    tbl2.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _apply_table_widths(tbl2, [4.5, 2.0, 5.0, 3.5, 4.0])
+    for cell, hdr in zip(tbl2.rows[0].cells, ["Ko'rsatkich", "Kod", "Natija", "Norma", "O'lchov birligi"]):
+        _set_cell_shading(cell, HEADER_COLOR)
+        ph = cell.paragraphs[0]
+        ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(ph, 0, 0, line_spacing=1)
+        _add_run_tnr(ph, hdr, 11, bold=True)
+    for kod, nomi, norma, birlik in MIKRO_FIELDS:
+        val = (mikro.get(kod) or '').strip()
+        is_sec = (kod == 'SEC')
+        if not val:
+            color = RGBColor(0xFF, 0x00, 0x00)  # bo'sh natija qizil
+        else:
+            color = _get_value_color_for_norma(val, norma, is_sec)
+        row = tbl2.add_row()
+        _keep_row_together(row)
+        cells = row.cells
+        for i, txt in enumerate([nomi, kod, val or '-', norma, birlik]):
+            p = cells[i].paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER if i in (1, 2, 4) else WD_ALIGN_PARAGRAPH.LEFT
+            _set_para_spacing(p, 0, 0, line_spacing=1)
+            _add_run_tnr(p, txt, 11, bold=(i == 2 and bool(val)), color_rgb=color if i == 2 else None)
+
+def _apply_table_widths(table, widths_cm):
+    """
+    Jadval ustun kengliklarini to'liq XML orqali qat'iy o'rnatish.
+    tblGrid + tblW + tblLayout(fixed) + har bir katak tcW — hammasi twips da.
+    1 sm = 567 twip.
+    """
+    table.autofit = False
+    tbl = table._tbl
+
+    # 1. tblPr
+    tblPr = tbl.find(qn('w:tblPr'))
+    if tblPr is None:
+        tblPr = OxmlElement('w:tblPr')
+        tbl.insert(0, tblPr)
+
+    # 2. tblLayout = fixed
+    tblLayout = tblPr.find(qn('w:tblLayout'))
+    if tblLayout is None:
+        tblLayout = OxmlElement('w:tblLayout')
+        tblPr.append(tblLayout)
+    tblLayout.set(qn('w:type'), 'fixed')
+
+    # 3. tblW = jami kenglik
+    tblW = tblPr.find(qn('w:tblW'))
+    if tblW is None:
+        tblW = OxmlElement('w:tblW')
+        tblPr.append(tblW)
+    tblW.set(qn('w:w'), str(int(sum(widths_cm) * 567)))
+    tblW.set(qn('w:type'), 'dxa')
+
+    # 4. tblGrid — ustun grid kengliklari
+    existing_grid = tbl.find(qn('w:tblGrid'))
+    if existing_grid is not None:
+        tbl.remove(existing_grid)
+    tblGrid = OxmlElement('w:tblGrid')
+    for w in widths_cm:
+        gc = OxmlElement('w:gridCol')
+        gc.set(qn('w:w'), str(int(w * 567)))
+        tblGrid.append(gc)
+    tbl.insert(list(tbl).index(tblPr) + 1, tblGrid)
+
+    # 5. Har bir katak tcW
+    for row in table.rows:
+        for ci, w in enumerate(widths_cm):
+            if ci < len(row.cells):
+                tc = row.cells[ci]._tc
+                tcPr = tc.get_or_add_tcPr()
+                tcW = tcPr.find(qn('w:tcW'))
+                if tcW is None:
+                    tcW = OxmlElement('w:tcW')
+                    tcPr.insert(0, tcW)
+                tcW.set(qn('w:w'), str(int(w * 567)))
+                tcW.set(qn('w:type'), 'dxa')
+
+# ─── KLINIKA MA'LUMOTLARI (o'zgartirish uchun shu yerda) ────────────────────
+KLINIKA_NOMI       = "AZIZ MEDLINE"
+KLINIKA_SUB        = "xususiy laboratoriyasi"
+KLINIKA_MANZIL     = "Surxondaryo vil., Sherobod tumani, Qo'rg'on MFY,\nY. Oxunboboev ko'chasi, 57E-uy"
+KLINIKA_TEL        = "Tel.: (998) 99-673-13-42"
+KLINIKA_GREEN      = RGBColor(0x1e, 0x99, 0x43)   # #1E9943 — premium klinik yashil
+KLINIKA_LIGHT_G    = "D6EAD6"                      # bemor bloki fon — och yashil
+KLINIKA_HEADER_G   = "1A7A40"                      # sarlavha fon — o'rta yashil
+# ────────────────────────────────────────────────────────────────────────────
+
+def _generate_barcode_bytes(data: str, module_w: int = 2, bar_height: int = 55) -> 'io.BytesIO':
+    """
+    Code 128C barcode (raqamli juftliklar).
+    Faqat raqamlar uchun. Toq uzunlikda '0' qo'shiladi.
+    PIL yordamida PNG baytlar qaytaradi.
+    """
+    try:
+        from PIL import Image as PilImage, ImageDraw as PilDraw, ImageFont as PilFont
+        import io as _io
+
+        CODE128_W = [
+            (2,1,2,2,2,2),(2,2,2,1,2,2),(2,2,2,2,2,1),(1,2,1,2,2,3),(1,2,1,3,2,2),
+            (1,3,1,2,2,2),(1,2,2,2,1,3),(1,2,2,3,1,2),(1,3,2,2,1,2),(2,2,1,2,1,3),
+            (2,2,1,3,1,2),(2,3,1,2,1,2),(1,1,2,2,3,2),(1,2,2,1,3,2),(1,2,2,2,3,1),
+            (1,1,3,2,2,2),(1,2,3,1,2,2),(1,2,3,2,2,1),(2,2,3,2,1,1),(2,2,1,1,3,2),
+            (2,2,1,2,3,1),(2,1,3,2,1,2),(2,2,3,1,1,2),(3,1,2,1,3,1),(3,1,1,2,2,2),
+            (3,2,1,1,2,2),(3,2,1,2,2,1),(3,1,2,2,1,2),(3,2,2,1,1,2),(3,2,2,2,1,1),
+            (2,1,2,1,2,3),(2,1,2,3,2,1),(2,3,2,1,2,1),(1,1,1,3,2,3),(1,3,1,1,2,3),
+            (1,3,1,3,2,1),(1,1,2,3,1,3),(1,3,2,1,1,3),(1,3,2,3,1,1),(2,1,1,3,1,3),
+            (2,3,1,1,1,3),(2,3,1,3,1,1),(1,1,2,1,3,3),(1,1,2,3,3,1),(1,3,2,1,3,1),
+            (1,1,3,1,2,3),(1,1,3,3,2,1),(1,3,3,1,2,1),(3,1,3,1,2,1),(2,1,1,3,3,1),
+            (2,3,1,1,3,1),(2,1,3,1,1,3),(2,1,3,3,1,1),(2,1,3,1,3,1),(3,1,1,1,2,3),
+            (3,1,1,3,2,1),(3,3,1,1,2,1),(3,1,2,1,1,3),(3,1,2,3,1,1),(3,3,2,1,1,1),
+            (3,1,4,1,1,1),(2,2,1,4,1,1),(4,3,1,1,1,1),(1,1,1,2,2,4),(1,1,1,4,2,2),
+            (1,2,1,1,2,4),(1,2,1,4,2,1),(1,4,1,1,2,2),(1,4,1,2,2,1),(1,1,2,2,1,4),
+            (1,1,2,4,1,2),(1,2,2,1,1,4),(1,2,2,4,1,1),(1,4,2,2,1,1),(1,1,4,2,1,2),
+            (1,2,4,1,1,2),(1,2,4,2,1,1),(4,1,1,2,1,2),(4,2,1,1,1,2),(4,2,1,2,1,1),
+            (2,1,2,1,4,1),(2,1,4,1,2,1),(4,1,2,1,2,1),(1,1,1,1,4,3),(1,1,1,3,4,1),
+            (1,3,1,1,4,1),(1,1,4,1,1,3),(1,1,4,3,1,1),(4,1,1,1,1,3),(4,1,1,3,1,1),
+            (1,1,3,1,4,1),(1,1,4,1,3,1),(3,1,1,1,4,1),(4,1,1,1,3,1),(2,1,1,4,1,2),
+            (2,1,1,2,1,4),(2,1,1,2,3,2),(2,3,3,1,1,2),
+            (1,1,1,2,4,2),(1,2,1,2,4,1),(1,1,4,2,2,1),(1,2,4,1,2,1),(4,2,2,1,1,1),(2,1,1,1,4,2),
+            (2,1,1,4,1,2),(2,1,1,2,1,4),(2,1,1,2,3,2),
+        ]
+        STOP_W = (2,3,3,1,1,1,2)
+
+        if len(data) % 2 == 1:
+            data = '0' + data
+
+        pairs = [int(data[i:i+2]) for i in range(0, len(data), 2)]
+        symbols = [105] + pairs
+        checksum = 105 + sum(v * (i+1) for i, v in enumerate(pairs))
+        symbols.append(checksum % 103)
+
+        def to_px(widths):
+            return [bit for i, w in enumerate(widths) for bit in [(i%2==0)] * (w*module_w)]
+
+        quiet = [False] * (8 * module_w)
+        pixels = quiet[:]
+        for sym in symbols:
+            pixels.extend(to_px(CODE128_W[sym]))
+        pixels.extend(to_px(STOP_W))
+        pixels.extend([True] * module_w)
+        pixels.extend(quiet)
+
+        img = PilImage.new('RGB', (len(pixels), bar_height), (255, 255, 255))
+        draw = PilDraw.Draw(img)
+        for x, blk in enumerate(pixels):
+            if blk:
+                draw.line([(x, 0), (x, bar_height - 1)], fill=(0, 0, 0))
+
+        buf = _io.BytesIO()
+        # PNG maksimal siqish (compress_level=9) + optimize
+        img.save(buf, format='PNG', compress_level=9, optimize=True)
+        buf.seek(0)
+        return buf
+    except Exception as e:
+        print(f"   [OGOHLANTIRISH] Barcode yaratishda xato: {e}")
+        return None
+
+
+def _parse_date_from_sample_id(sample_id) -> str:
+    """
+    sample_id dan buyurtma sanasini chiqaradi.
+    Format: YYMMDDxxxxxx  (masalan: 260314001650 → '14.03.2026')
+    Agar format noto'g'ri bo'lsa None qaytaradi.
+    """
+    try:
+        s = str(sample_id or '').strip()
+        if len(s) >= 6:
+            yy = s[0:2]   # "26" → 2026
+            mm = s[2:4]   # "03"
+            dd = s[4:6]   # "14"
+            y, m, d = int(yy) + 2000, int(mm), int(dd)
+            if 1 <= m <= 12 and 1 <= d <= 31:
+                return f"{dd}.{mm}.{y}"
+    except Exception:
+        pass
+    return None
+
+
+def insert_premium_header(doc: Document, order_info: dict):
+    """
+    Professional 3-ustunli header.
+    Layout (2-rasm uslubida):
+    ┌──────────────────────┬──────────────────────────────┬──────────────────┐
+    │  "Buyurtma №"        │   AZIZ MEDLINE (katta yashil)│   [LOGO IMAGE]   │
+    │  [BARCODE IMAGE]     │   xususiy laboratoriyasi      │   (agar mavjud)  │
+    │  260217000706        │   Manzil                      │                  │
+    │  01.03.2026          │   Tel.: ...                   │                  │
+    └──────────────────────┴──────────────────────────────┴──────────────────┘
+    ─────────────────── (yashil separator) ──────────────────────────────────
+    ┌─────────────────────────┬──────────────────────┬────────────────────────┐
+    │ F.I.SH. (sarlavha)     │ Tug'ilgan sana        │ Jins                   │
+    │ [qiymat]               │ [qiymat]              │ [qiymat]               │
+    └─────────────────────────┴──────────────────────┴────────────────────────┘
+    """
+    import io as _io
+
+    config = load_blanka_config()
+    logo_path = config.get('logo_path', LOGO_DEFAULT_PATH)
+
+    # ── Margin ──────────────────────────────────────────────────────
+    for section in doc.sections:
+        section.page_width    = Cm(21.0)  # A4 eni
+        section.page_height   = Cm(29.7)  # A4 bo'yi
+        section.top_margin    = Cm(1.0)   # tepadan 1sm
+        section.bottom_margin = Cm(1.0)   # pastdan 1sm
+        section.left_margin   = Cm(1.0)   # chapdan 1sm  → 21-1-1=19sm ishlatiladi
+        section.right_margin  = Cm(1.0)   # o'ngdan 1sm
+        section.header_distance = Cm(0.5) # kolontitul: sahifa chetidan 0.5sm
+        section.footer_distance = Cm(0.5) # pastki kolontitul: sahifa chetidan 0.5sm
+
+    # ── Ma'lumotlarni olish ─────────────────────────────────────────
+    fish       = (order_info.get('fish') or '').strip()
+    yosh       = str(order_info.get('yosh') or '')
+    jins       = (order_info.get('jins') or '')
+    sample_id  = str(order_info.get('sample_id') or order_info.get('order_id') or '')
+    # Tahlil kuni: sample_id ning dastlabki 6 xonasidan (YYMMDD) olinadi
+    date_only = _parse_date_from_sample_id(sample_id) or datetime.now().strftime("%d.%m.%Y")
+
+    # Tug'ilgan sana formatlash
+    tug_sana = order_info.get('tugilgan_sana', '')
+    if tug_sana:
+        try:
+            if isinstance(tug_sana, str) and '-' in tug_sana:
+                p = tug_sana.split('-')
+                tug_text = f"{p[2]}.{p[1]}.{p[0]}" if len(p) == 3 else tug_sana
+            else:
+                tug_text = str(tug_sana)
+        except Exception:
+            tug_text = str(tug_sana)
+        if yosh:
+            tug_text = f"{tug_text} ({yosh} yosh)"
+    elif yosh:
+        tug_text = f"{yosh} yosh"
+    else:
+        tug_text = "—"
+
+    if jins in ('Erkak', 'E', 'M', 'erkak', 'm', 'male', 'Мужчина'):
+        jins_text = "Erkak"
+    elif jins in ('Ayol', 'A', 'F', 'ayol', 'f', 'female', 'Женщина'):
+        jins_text = "Ayol"
+    else:
+        jins_text = jins or "—"
+
+    # ═══════════════════════════════════════════════════════════════
+    # 1-BLOK: 3-ustunli header jadvali (barcode | klinika | logo)
+    # ═══════════════════════════════════════════════════════════════
+    top_table = doc.add_table(rows=1, cols=3)
+    top_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _set_table_no_border(top_table)
+    # Ustun kengliklari: chap=4.0, markaz=11.0, o'ng=4.0  (jami=19sm)
+    _apply_table_widths(top_table, [4.0, 11.0, 4.0])
+
+    # Qator balandligi: kamida 3.5sm (matn ko'p bo'lsa jadval o'sadi)
+    hdr_row = top_table.rows[0]
+    hdr_row.height = Cm(3.2)
+    hdr_row.height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
+
+    # ── CHAP: Barcode ─────────────────────────────────────────────
+    left_cell = top_table.rows[0].cells[0]
+    _set_cell_border(left_cell,
+        top    = {'val': 'none', 'sz': 0, 'color': 'auto'},
+        bottom = {'val': 'none', 'sz': 0, 'color': 'auto'},
+        left   = {'val': 'none', 'sz': 0, 'color': 'auto'},
+        right  = {'val': 'none', 'sz': 0, 'color': 'auto'},
+    )
+    _set_cell_margins(left_cell, top=0, bottom=0, left=0, right=0)
+
+    # "Buyurtma №" label
+    p_label = left_cell.paragraphs[0]
+    p_label.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(p_label, 0, 0)
+    r_label = _add_run_tnr(p_label, "Buyurtma №", 13)
+    r_label.font.color.rgb = RGBColor(0x00, 0x00, 0x00)   # qora rang
+
+    # Barcode image
+    barcode_buf = _generate_barcode_bytes(sample_id or '000000', module_w=2, bar_height=45)
+    if barcode_buf:
+        p_bc = left_cell.add_paragraph()
+        p_bc.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(p_bc, 0, 0)
+        try:
+            p_bc.add_run().add_picture(barcode_buf, width=Cm(3.8))
+        except Exception as e:
+            print(f"   [OGOHLANTIRISH] Barcode rasmi qo'shishda xato: {e}")
+            _add_run_tnr(p_bc, sample_id, 13, bold=True, color_rgb=KLINIKA_GREEN)
+    else:
+        p_bc = left_cell.add_paragraph()
+        p_bc.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(p_bc, 0, 0)
+        _add_run_tnr(p_bc, sample_id, 13, bold=True, color_rgb=KLINIKA_GREEN)
+
+    # ID raqam (sananing tepasida, alohida Word matni)
+    p_id = left_cell.add_paragraph()
+    p_id.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(p_id, 0, 0)
+    _add_run_tnr(p_id, sample_id or '', 13)
+
+    # Sana
+    p_dt = left_cell.add_paragraph()
+    p_dt.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(p_dt, 0, 0)
+    _add_run_tnr(p_dt, date_only, 13)
+
+    # ── MARKAZ: Klinika ma'lumotlari ────────────────────────────────
+    mid_cell = top_table.rows[0].cells[1]
+    _set_cell_border(mid_cell,
+        top    = {'val': 'none','sz':0,'color':'auto'},
+        bottom = {'val': 'none','sz':0,'color':'auto'},
+        left   = {'val': 'none','sz':0,'color':'auto'},
+        right  = {'val': 'none','sz':0,'color':'auto'},
+    )
+
+    pm = mid_cell.paragraphs[0]
+    pm.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(pm, 0, 0, line_spacing=1)
+    _add_run_tnr(pm, KLINIKA_NOMI, 20, bold=True, color_rgb=KLINIKA_GREEN)
+
+    pm2 = mid_cell.add_paragraph()
+    pm2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(pm2, 0, 0, line_spacing=1)
+    _add_run_tnr(pm2, KLINIKA_SUB, 16, bold=True)
+
+    pm3 = mid_cell.add_paragraph()
+    pm3.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(pm3, 0, 0, line_spacing=1)
+    _add_run_tnr(pm3, KLINIKA_MANZIL, 13)
+
+    pm4 = mid_cell.add_paragraph()
+    pm4.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(pm4, 0, 0, line_spacing=1)
+    _add_run_tnr(pm4, KLINIKA_TEL, 13, bold=True, color_rgb=KLINIKA_GREEN)
+
+    # ── O'NG: Logo ──────────────────────────────────────────────────
+    right_cell = top_table.rows[0].cells[2]
+    _set_cell_border(right_cell,
+        top    = {'val': 'none', 'sz': 0, 'color': 'auto'},
+        bottom = {'val': 'none', 'sz': 0, 'color': 'auto'},
+        left   = {'val': 'none', 'sz': 0, 'color': 'auto'},
+        right  = {'val': 'none', 'sz': 0, 'color': 'auto'},
+    )
+    _set_cell_margins(right_cell, top=0, bottom=0, left=0, right=0)
+
+    pr = right_cell.paragraphs[0]
+    pr.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(pr, 0, 0)
+
+    if logo_path and os.path.exists(logo_path):
+        try:
+            pr.add_run().add_picture(logo_path, width=Cm(3.2), height=Cm(3.2))
+            print(f"   [OK] Logo qo'shildi: {logo_path}")
+        except Exception as e:
+            print(f"   [OGOHLANTIRISH] Logo qo'shishda xato: {e}")
+            _add_run_tnr(pr, "🔬", 24)
+    else:
+        # Logo yo'q: placeholder (klinika initials)
+        _add_run_tnr(pr, "AML", 22, bold=True, color_rgb=KLINIKA_GREEN)
+        pr2 = right_cell.add_paragraph()
+        pr2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(pr2, 0, 0)
+        _add_run_tnr(pr2, "Logotip", 7, color_rgb=RGBColor(0xAA, 0xAA, 0xAA))
+        if logo_path:
+            pr3 = right_cell.add_paragraph()
+            pr3.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _set_para_spacing(pr3, 0, 0)
+            _add_run_tnr(pr3, f"({os.path.basename(logo_path)})", 6, color_rgb=RGBColor(0xCC, 0xCC, 0xCC), italic=True)
+
+    # ═══════════════════════════════════════════════════════════════
+    # 3-BLOK: Bemor ma'lumotlari (F.I.SH | Tug'ilgan sana | Jins)
+    # ═══════════════════════════════════════════════════════════════
+    pat_table = doc.add_table(rows=2, cols=3)
+    pat_table.style = 'Table Grid'
+    pat_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    # Klinik jadval bilan bir xil stil va kenglik: 6.5+6.5+6.0=19sm
+    _apply_table_widths(pat_table, [6.5, 6.5, 6.0])
+
+    # Sarlavha qatori — och ko'k fon
+    HDR_BLUE = "2E75B6"   # och ko'k rang (kraskada kam sarflanadi)
+    for ci, hdr in enumerate(["F.I.SH.", "Tug'ilgan sana", "Jins"]):
+        c = pat_table.rows[0].cells[ci]
+        _set_cell_shading(c, HDR_BLUE)
+        _set_cell_border(c,
+            top    = {'val':'single','sz':4,'color':'2E75B6'},
+            bottom = {'val':'single','sz':4,'color':'2E75B6'},
+            left   = {'val':'single','sz':4,'color':'2E75B6'},
+            right  = {'val':'single','sz':4,'color':'2E75B6'},
+        )
+        ph = c.paragraphs[0]
+        ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(ph, 0, 0)
+        r = _add_run_tnr(ph, hdr, 12, bold=True)
+        r.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+
+    # Ma'lumot qatori
+    for ci, val in enumerate([fish or "—", tug_text, jins_text]):
+        c = pat_table.rows[1].cells[ci]
+        _set_cell_shading(c, "E6E6E6")
+        _set_cell_border(c,
+            top    = {'val':'single','sz':2,'color':'2E75B6'},
+            bottom = {'val':'single','sz':6,'color':'2E75B6'},
+            left   = {'val':'single','sz':4,'color':'2E75B6'},
+            right  = {'val':'single','sz':4,'color':'2E75B6'},
+        )
+        pv = c.paragraphs[0]
+        pv.alignment = WD_ALIGN_PARAGRAPH.CENTER if ci > 0 else WD_ALIGN_PARAGRAPH.LEFT
+        _set_para_spacing(pv, 0, 0)
+        _add_run_tnr(pv, val, 12, bold=(ci == 0))
+
+
+def insert_simple_header(doc: Document, order_info: dict):
+    """Eski oddiy header — endi insert_premium_header ga yo'naltiradi"""
+    insert_premium_header(doc, order_info)
+
+def insert_blanka_ustuni_header(doc: Document, order_info: dict):
+    config = load_blanka_config()
+    blanka_path = config.get('blanka_ustuni_path', r"G:\DASTUR\URIT 50\Standart shablonlar\blanka ustuni.docx")
+    if not os.path.exists(blanka_path):
+        print(f"   [OGOHLANTIRISH] Blanka ustuni shablon topilmadi: {blanka_path}, premium header ishlatilmoqda")
+        insert_premium_header(doc, order_info)
+        return
+    try:
+        header_doc = Document(blanka_path)
+        for section in doc.sections:
+            section.page_width      = Cm(21.0)  # A4 eni
+            section.page_height     = Cm(29.7)  # A4 bo'yi
+            section.top_margin      = Cm(1.0)   # Matn yuqoridan 1sm
+            section.left_margin     = Cm(1.0)   # Matn chapdan 1sm
+            section.right_margin    = Cm(1.0)   # Matn o'ngdan 1sm
+            section.bottom_margin   = Cm(1.0)   # Matn pastdan 1sm
+            section.header_distance = Cm(0.5)   # Yuqori kolontitul: sahifa chetidan 0.5sm
+            section.footer_distance = Cm(0.5)   # Pastki kolontitul: sahifa chetidan 0.5sm
+            # Yuqori kolontitulni bo'shating (mazmun yo'q, joy olmasin)
+            try:
+                hdr = section.header
+                for para in hdr.paragraphs:
+                    for run in para.runs:
+                        run.text = ''
+                    para.clear()
+            except Exception:
+                pass
+        nomeratsiya = ""
+        if order_info.get('id'):
+            bemor_id = str(order_info.get('id'))
+            if len(bemor_id) >= 2:
+                nomeratsiya = bemor_id[-2:]
+            elif len(bemor_id) == 1:
+                nomeratsiya = "0" + bemor_id
+        elif order_info.get('sample_id'):
+            sample_id = str(order_info.get('sample_id'))
+            if len(sample_id) >= 2:
+                nomeratsiya = sample_id[-2:]
+            elif len(sample_id) == 1:
+                nomeratsiya = "0" + sample_id
+        if not nomeratsiya:
+            kod = order_info.get('kod_yollanma') or order_info.get('natija_kodi') or ""
+            if kod and len(kod) >= 2:
+                nomeratsiya = kod[-2:]
+            else:
+                nomeratsiya = "00"
+        fish = order_info.get('fish', '') or order_info.get('kod_yollanma', '') or order_info.get('natija_kodi', '') or ''
+        fish_value = (fish or '').strip()
+        tugilgan_sana = order_info.get('tugilgan_sana', '')
+        yosh = order_info.get('yosh', '')
+        if yosh:
+            tugilgan_text = f"{yosh} yosh"
+        elif tugilgan_sana:
+            try:
+                if isinstance(tugilgan_sana, str) and '-' in tugilgan_sana:
+                    parts = tugilgan_sana.split('-')
+                    if len(parts) == 3:
+                        tugilgan_text = f"{parts[2]}.{parts[1]}.{parts[0]}"
+                    else:
+                        tugilgan_text = tugilgan_sana
+                else:
+                    tugilgan_text = str(tugilgan_sana)
+            except:
+                tugilgan_text = str(tugilgan_sana) if tugilgan_sana else ""
+        else:
+            tugilgan_text = ""
+        # Tahlil kuni: sample_id ning dastlabki 6 xonasidan (YYMMDD) olinadi
+        _sid_for_date = str(order_info.get('sample_id') or order_info.get('order_id') or '')
+        dt_str = _parse_date_from_sample_id(_sid_for_date) or datetime.now().strftime("%d.%m.%Y")
+        bemor_id_str = str(order_info.get('id', '')) or str(order_info.get('order_id', '')) or nomeratsiya
+        for para in header_doc.paragraphs:
+            if "{{TAHLIL KATEGORIYASI YOKI SHABLON NOMI}}" in para.text:
+                continue
+            para_element = para._element
+            new_para_element = deepcopy(para_element)
+            doc._body.append(new_para_element)
+        for table in header_doc.tables:
+            try:
+                tbl_element = table._element
+                new_tbl_element = deepcopy(tbl_element)
+                doc._body.append(new_tbl_element)
+            except Exception as e:
+                print(f"   [OGOHLANTIRISH] Jadvalni ko'chirishda xato: {e}")
+                try:
+                    tbl_element = table._element
+                    tbl_xml = tbl_element.xml
+                    new_tbl_element = parse_xml(tbl_xml)
+                    doc._body.append(new_tbl_element)
+                except Exception as e2:
+                    print(f"   [XATO] Jadvalni ko'chirishda xato: {e2}")
+        replace_text_in_doc(doc, "{{FISH}}", fish_value)
+        replace_text_in_doc(doc, "{{NOMERATSIYA}}", nomeratsiya)
+        replace_text_in_doc(doc, "{{TUGILGAN_SANA}}", tugilgan_text)
+        replace_text_in_doc(doc, "{{DATE_TIME}}", dt_str)
+        replace_text_in_doc(doc, "{{DATE TIME}}", dt_str)
+        replace_text_in_doc(doc, "{{DATE}}", dt_str.split()[0] if " " in dt_str else dt_str)
+        replace_text_in_doc(doc, "{{TIME}}", dt_str.split()[1] if " " in dt_str else "")
+        replace_text_in_doc(doc, "{{ID}}", bemor_id_str)
+        replace_text_in_doc(doc, "{{№}}", bemor_id_str)
+        replace_text_in_doc(doc, "{{SAMPLE}}", order_info.get('sample_id', '') or nomeratsiya)
+        replace_text_in_doc(doc, "{{YOSH}}", yosh or "")
+        # Shablondan ko'chirilgan barcha jadvallarni markazlashtirish
+        # (natijalar jadvali o'ng tomoni bilan teng bo'lishi uchun)
+        for table in doc.tables:
+            try:
+                table.alignment = WD_TABLE_ALIGNMENT.CENTER
+            except Exception:
+                pass
+        print(f"   [OK] Blanka ustuni header qo'shildi")
+    except Exception as e:
+        print(f"   [OGOHLANTIRISH] Blanka ustuni header qo'shishda xato: {e}")
+        import traceback
+        traceback.print_exc()
+        insert_simple_header(doc, order_info)
+
+# [12] create_results_table() va create_simple_table_for_tests()
+def _is_qondan_mazok_test(test_name: str) -> bool:
+    """Qondan mazok (morfologiya) testimi tekshiradi."""
+    tl = test_name.lower()
+    return 'qondan' in tl and 'mazok' in tl
+
+def _is_ginekologik_test(test_name: str) -> bool:
+    """Test ginekologik/urologik surtmami yoki yo'qmi tekshiradi."""
+    if _is_qondan_mazok_test(test_name):
+        return False
+    tl = test_name.lower()
+    return any(k in tl for k in ['ginekolog', 'surtma', 'mazok', 'urologik'])
+
+def _is_hematology_cbc_test(test_name: str) -> bool:
+    tn = (test_name or '').lower()
+    return any(x in tn for x in ['qonning umumiy tahlili', 'umumiy qon tahlili', 'umumiy qon']) and \
+           not any(x in tn for x in ['qon guruhi', 'rezus', 'ivish', 'qib', 'echt'])
+
+def _is_urine_umumiy_test(test_name: str) -> bool:
+    tn = (test_name or '').lower()
+    return any(x in tn for x in ['siydikning umumiy tahlili', 'umumiy siydik tahlili', 'umumiy siydik'])
+
+def _is_bilirubin_test(test_name: str) -> bool:
+    tn = (test_name or '').lower()
+    return 'bilirubin' in tn or '\u0431\u0438\u043b\u0438\u0440\u0443\u0431\u0438\u043d' in tn
+
+def _is_lipid_spektri_test(test_name: str) -> bool:
+    tn = (test_name or '').lower()
+    return ('lipid spektri' in tn or 'lipid paneli' in tn
+            or 'lipidlar spektori' in tn or 'lipidlar paneli' in tn)
+
+def _is_buyrak_paneli_test(test_name: str) -> bool:
+    tn = (test_name or '').lower()
+    return 'buyrak paneli' in tn or 'buyrak panel' in tn
+
+def _is_gtt_test(test_name: str) -> bool:
+    """Glyukozaga tolerantlik testi (GTT) ekanligini tekshirish."""
+    tn = (test_name or '').lower()
+    return 'tolerantlik' in tn or 'gtt' in tn
+
+def _get_revmoproba_component_normas(test_name: str) -> dict:
+    """tahlillar_norma.result_template dan RF/CRP/ASLO normalari uchun {key: norma} lug'at qaytaradi."""
+    import json as _j
+    conn = db_conn()
+    if not conn:
+        return {}
+    try:
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT result_template FROM tahlillar_norma WHERE tahlil_nomi = %s", (test_name,))
+        row = cursor.fetchone()
+        if row and row.get('result_template'):
+            tmpl = _j.loads(row['result_template'])
+            result = {}
+            for comp in tmpl.get('components', []):
+                key = comp.get('key', '')
+                norma = (comp.get('norma') or '').strip()
+                unit = (comp.get('unit') or '').strip()
+                if key:
+                    result[key] = {'norma': norma, 'unit': unit}
+            return result
+        return {}
+    except Exception:
+        return {}
+    finally:
+        try: cursor.close()
+        except: pass
+        try: conn.close()
+        except: pass
+
+def _is_revmoproba_qolda_test(test_name: str) -> bool:
+    tn = (test_name or '').lower()
+    return ('revmoproba' in tn or ('revmo' in tn and 'proba' in tn)) and 'avtomat' not in tn
+
+def _is_revmoproba_auto_test(test_name: str) -> bool:
+    tn = (test_name or '').lower()
+    if 'revmoproba' in tn and 'avtomat' in tn:
+        return True
+    if ('rf ' in tn or 'revmatoid' in tn) and 'avtomat' in tn:
+        return True
+    if ('crp' in tn or 's-reaktiv' in tn) and 'avtomat' in tn:
+        return True
+    if ('aslo' in tn or 'antistreptolizin' in tn) and 'avtomat' in tn:
+        return True
+    return False
+
+def _is_revmoproba_full_auto_test(test_name: str) -> bool:
+    """Faqat 'REVMOPROBA to'liq (avtomat)' — RF+CRP+ASLO birlashtirilgan test."""
+    tn = (test_name or '').lower()
+    return 'revmoproba' in tn and 'avtomat' in tn
+
+def _create_bilirubin_section(doc, bili_tests: list, test_results: dict, order_info: dict):
+    """BILIRUBIN (umumiy, bog'langan, erkin) bo'limini alohida jadval bilan yaratish."""
+    jins = (order_info.get('jins') or '') if order_info else ''
+    bili_result_data = {}
+    for t in bili_tests:
+        test_id = t.get('id')
+        raw = (test_results.get(test_id) if test_results else '') or ''
+        if raw and isinstance(raw, str) and raw.strip().startswith('{'):
+            try:
+                rd = json.loads(raw)
+                if isinstance(rd, dict) and any(k in rd for k in ['umumiy', 'bog_langan', 'erkin']):
+                    bili_result_data = rd
+                    break
+                elif isinstance(rd, dict) and 'result' in rd:
+                    bili_result_data = {'umumiy': rd['result']}
+            except Exception:
+                pass
+        elif raw:
+            try:
+                bili_result_data = {'umumiy': float(str(raw).replace(',', '.'))}
+            except Exception:
+                bili_result_data = {'umumiy': raw}
+
+    heading = doc.add_paragraph()
+    heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(heading, 0, 0, line_spacing=1.0)
+    _add_run_tnr(heading, "BILIRUBIN  (umumiy, bog\u2018langan, erkin)", 14, bold=True,
+                 color_rgb=RGBColor(0x27, 0xae, 0x60))
+
+    BILI_ROWS = [
+        ("Umumiy Bilirubin",        "umumiy",     "3,4 \u2013 20,5", "mkmol/l"),
+        ("Bog\u2018langan Bilirubin", "bog_langan", "0,86 \u2013 5,3",  "mkmol/l"),
+        ("Erkin Bilirubin",         "erkin",      "1,7 \u2013 17,1",  "mkmol/l"),
+    ]
+    HEADER_COLOR = "9DC3E6"
+    table = doc.add_table(rows=1, cols=4)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _apply_table_widths(table, [7.0, 4.0, 4.0, 4.0])
+    for cell, hdr in zip(table.rows[0].cells, ["Tahlil nomi", "Natija", "Norma", "O'lchov birligi"]):
+        _set_cell_shading(cell, HEADER_COLOR)
+        ph = cell.paragraphs[0]
+        ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(ph, 0, 0, line_spacing=1)
+        _add_run_tnr(ph, hdr, 11, bold=True)
+    for row_name, key, norma, unit in BILI_ROWS:
+        row = table.add_row()
+        _keep_row_together(row)
+        val = bili_result_data.get(key, '')
+        val_str = str(val) if val != '' else ''
+        cells_r = row.cells
+        p0 = cells_r[0].paragraphs[0]
+        p0.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        _set_para_spacing(p0, 0, 0, line_spacing=1)
+        _add_run_tnr(p0, row_name, 11, bold=True)
+        p1 = cells_r[1].paragraphs[0]
+        p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(p1, 0, 0, line_spacing=1)
+        _mn, _mx = _parse_norma_min_max(norma, jins)
+        _rc, _ra = _get_result_color_and_arrow(val_str, {"min": _mn, "max": _mx}, jins)
+        _add_run_tnr(p1, val_str + (_ra or ''), 11, bold=True, color_rgb=_rc)
+        p2 = cells_r[2].paragraphs[0]
+        p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(p2, 0, 0, line_spacing=1)
+        _add_multiline_norma(p2, norma, 11)
+        p3 = cells_r[3].paragraphs[0]
+        p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(p3, 0, 0, line_spacing=1)
+        _add_run_tnr(p3, unit, 11)
+    doc.add_paragraph()
+
+
+def _create_lipid_spektri_section(doc, lipid_tests: list, test_results: dict, order_info: dict):
+    """LIPID SPEKTRI bo'limini alohida jadval bilan yaratish (Bilirubin kabi)."""
+    jins = (order_info.get('jins') or '') if order_info else ''
+    lipid_data = {}
+    for t in lipid_tests:
+        test_id = t.get('id')
+        raw = (test_results.get(test_id) if test_results else '') or ''
+        if raw and isinstance(raw, str) and raw.strip().startswith('{'):
+            try:
+                rd = json.loads(raw)
+                if isinstance(rd, dict):
+                    lipid_data = rd
+                    break
+            except Exception:
+                pass
+
+    # Agar panel JSON bo'sh bo'lsa — individual member test natijalaridan olish
+    # Usul 1: test_results ichidan tc/hdl/ldl/tg kalitli JSON qidirish
+    _lipid_id_to_key = {43: 'tc', 44: 'tg', 123: 'ldl', 124: 'hdl'}
+    if not any(lipid_data.get(k) for k in ('tc', 'hdl', 'ldl', 'tg')):
+        for tid, raw in (test_results or {}).items():
+            raw_s = str(raw).strip()
+            if raw_s.startswith('{'):
+                try:
+                    rd2 = json.loads(raw_s)
+                    for key in ('tc', 'hdl', 'ldl', 'tg'):
+                        if rd2.get(key) and not lipid_data.get(key):
+                            lipid_data[key] = rd2[key]
+                except Exception:
+                    pass
+    # Usul 2: member tahlil_id → order_item.id orqali yakka natijalardan to'ldirish
+    # (result: "5.4" formatidagi yakka natijalar uchun)
+    if not any(lipid_data.get(k) for k in ('tc', 'hdl', 'ldl', 'tg')):
+        _lipid_tahlil_keys = {43: 'tc', 44: 'tg', 123: 'ldl', 124: 'hdl'}
+        for _lipid_test in lipid_tests:
+            _l_tid = _lipid_test.get('tahlil_id')
+            if _l_tid in _lipid_tahlil_keys and _lipid_test.get('id') in (test_results or {}):
+                _raw_m = str(test_results[_lipid_test['id']]).strip()
+                if _raw_m.startswith('{'):
+                    try:
+                        _rd_m = json.loads(_raw_m)
+                        _val_m = _rd_m.get('result') or _rd_m.get('value')
+                    except Exception:
+                        _val_m = None
+                else:
+                    _val_m = _raw_m
+                if _val_m:
+                    try:
+                        lipid_data[_lipid_tahlil_keys[_l_tid]] = float(str(_val_m).replace(',', '.'))
+                    except Exception:
+                        lipid_data[_lipid_tahlil_keys[_l_tid]] = _val_m
+
+    # Normalarni DB dan olish
+    norma_map = {}
+    try:
+        conn = db_conn()
+        if conn:
+            cur = conn.cursor(dictionary=True)
+            cur.execute("SELECT result_template FROM tahlillar_norma WHERE tahlil_nomi = %s", ('LIPID SPEKTRI',))
+            row = cur.fetchone()
+            if row and row.get('result_template'):
+                tmpl = json.loads(row['result_template'])
+                for comp in tmpl.get('components', []):
+                    norma_map[comp['key']] = {
+                        'name': comp.get('name', ''),
+                        'norma': comp.get('norma', ''),
+                        'unit': comp.get('unit', ''),
+                        'readonly': comp.get('readonly', False)
+                    }
+            cur.close()
+            conn.close()
+    except Exception:
+        pass
+
+    # Tahlil nomlarini DB dan tahlillar.id bo'yicha olish (TC=43, TG=44, LDL=123, HDL=124)
+    _lipid_id_to_key = {43: 'tc', 44: 'tg', 123: 'ldl', 124: 'hdl'}
+    _lipid_db_names = {}
+    try:
+        _conn_ln = db_conn()
+        if _conn_ln:
+            _cur_ln = _conn_ln.cursor(dictionary=True)
+            _cur_ln.execute("SELECT id, nomi FROM tahlillar WHERE id IN (43, 44, 123, 124)")
+            for _r_ln in _cur_ln.fetchall():
+                _k_ln = _lipid_id_to_key.get(_r_ln['id'])
+                if _k_ln:
+                    _lipid_db_names[_k_ln] = _r_ln['nomi']
+            _cur_ln.close()
+            _conn_ln.close()
+    except Exception:
+        pass
+
+    LIPID_ROWS = [
+        (_lipid_db_names.get('tc', "TC — Umumiy xolesterin"),
+         "tc",      "Maqbul: < 5.2\nYuqori xavf: ≥ 6.2",       "mmol/L"),
+        (_lipid_db_names.get('hdl', "HDL — Yuqori zichlikli lipoprotein"),
+         "hdl",     "Erkak: ≥ 1.0\nAyol: ≥ 1.2\n(Yuqori — yaxshi!)", "mmol/L"),
+        (_lipid_db_names.get('ldl', "LDL — Past zichlikli lipoprotein"),
+         "ldl",     "Maqbul: < 3.4\nYuqori xavf: ≥ 4.1",        "mmol/L"),
+        (_lipid_db_names.get('tg', "TG — Trigliseridlar"),
+         "tg",      "Maqbul: 0.7 – 1.7\nYuqori: ≥ 2.3",         "mmol/L"),
+        ("VLDL-xolesterin (hisoblangan)",
+         "vldl",    "0.26 – 1.04",  "mmol/L"),
+        ("Non-HDL xolesterin (hisoblangan)",
+         "non_hdl", "Maqbul: < 3.4\nYuqori xavf: ≥ 4.2", "mmol/L"),
+        ("Aterogenlik koeffisienti (KA)\n(hisoblangan)",
+         "ka",
+         "< 3.0 xavf past\n3.0–4.0 o'rtacha\n> 4.0 yuqori xavf", ""),
+        ("TC/HDL nisbati (hisoblangan)",
+         "tc_hdl",  "< 5.0",        ""),
+        ("LDL/HDL nisbati (hisoblangan)",
+         "ldl_hdl", "< 3.5",        ""),
+        ("TG/HDL nisbati (hisoblangan)",
+         "tg_hdl",  "< 1.5",        ""),
+    ]
+
+    # DB dan yangilangan normalarni ishlatish
+    for i, (name, key, norma, unit) in enumerate(LIPID_ROWS):
+        if key in norma_map:
+            db_norma = norma_map[key].get('norma', '')
+            db_unit = norma_map[key].get('unit', '')
+            if db_norma:
+                LIPID_ROWS[i] = (name, key, db_norma, db_unit or unit)
+
+    heading = doc.add_paragraph()
+    heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(heading, 0, 0, line_spacing=1.0)
+    _add_run_tnr(heading, "LIPID SPEKTRI", 14, bold=True,
+                 color_rgb=RGBColor(0x27, 0xae, 0x60))
+
+    HEADER_COLOR = "9DC3E6"
+    table = doc.add_table(rows=1, cols=4)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _apply_table_widths(table, [7.0, 4.0, 4.0, 4.0])
+    for cell, hdr in zip(table.rows[0].cells, ["Tahlil nomi", "Natija", "Norma", "O'lchov birligi"]):
+        _set_cell_shading(cell, HEADER_COLOR)
+        ph = cell.paragraphs[0]
+        ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(ph, 0, 0, line_spacing=1)
+        _add_run_tnr(ph, hdr, 11, bold=True)
+    for row_name, key, norma, unit in LIPID_ROWS:
+        row = table.add_row()
+        _keep_row_together(row)
+        val = lipid_data.get(key, '')
+        val_str = str(val) if val != '' else ''
+        cells_r = row.cells
+        p0 = cells_r[0].paragraphs[0]
+        p0.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        _set_para_spacing(p0, 0, 0, line_spacing=1)
+        _add_run_tnr(p0, row_name, 11, bold=True)
+        p1 = cells_r[1].paragraphs[0]
+        p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(p1, 0, 0, line_spacing=1)
+        _mn, _mx = _parse_norma_min_max(norma, jins)
+        _rc, _ra = _get_result_color_and_arrow(val_str, {"min": _mn, "max": _mx}, jins)
+        _add_run_tnr(p1, val_str + (_ra or ''), 11, bold=True, color_rgb=_rc)
+        p2 = cells_r[2].paragraphs[0]
+        p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(p2, 0, 0, line_spacing=1)
+        _add_multiline_norma(p2, norma, 11)
+        p3 = cells_r[3].paragraphs[0]
+        p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(p3, 0, 0, line_spacing=1)
+        _add_run_tnr(p3, unit, 11)
+    doc.add_paragraph()
+
+
+def _create_buyrak_paneli_section(doc, buyrak_tests: list, test_results: dict, order_info: dict):
+    """BUYRAK PANELI bo'limini alohida jadval bilan yaratish (Bilirubin kabi)."""
+    buyrak_data = {}
+    for t in buyrak_tests:
+        test_id = t.get('id')
+        raw = (test_results.get(test_id) if test_results else '') or ''
+        if raw and isinstance(raw, str) and raw.strip().startswith('{'):
+            try:
+                rd = json.loads(raw)
+                if isinstance(rd, dict):
+                    buyrak_data = rd
+                    break
+            except Exception:
+                pass
+
+    # Agar panel JSON bo'sh bo'lsa — individual member test natijalaridan olish
+    # Usul 1: test_results ichidan panel key larni qidirish
+    _buyrak_keys = ('mochevina', 'kreatinin', 'siydik_kislota', 'albumin')
+    if not any(buyrak_data.get(k) for k in _buyrak_keys):
+        for tid, raw in (test_results or {}).items():
+            raw_s = str(raw).strip()
+            if raw_s.startswith('{'):
+                try:
+                    rd2 = json.loads(raw_s)
+                    for key in _buyrak_keys:
+                        if rd2.get(key) and not buyrak_data.get(key):
+                            buyrak_data[key] = rd2[key]
+                    for key in ('bun', 'bun_cr', 'gfr', 'umumiy_azot'):
+                        if rd2.get(key) and not buyrak_data.get(key):
+                            buyrak_data[key] = rd2[key]
+                except Exception:
+                    pass
+    # Usul 2: member tahlil_id → order_item.id orqali yakka natijalardan to'ldirish
+    # tahlil_id: 42=mochevina, 41=kreatinin, 35=albumin, 50=siydik_kislota
+    _buyrak_tahlil_keys = {42: 'mochevina', 41: 'kreatinin', 35: 'albumin', 50: 'siydik_kislota'}
+    if not any(buyrak_data.get(k) for k in _buyrak_keys):
+        for _bt in buyrak_tests:
+            _b_tid = _bt.get('tahlil_id')
+            if _b_tid in _buyrak_tahlil_keys and _bt.get('id') in (test_results or {}):
+                _raw_b = str(test_results[_bt['id']]).strip()
+                if _raw_b.startswith('{'):
+                    try:
+                        _rd_b = json.loads(_raw_b)
+                        _val_b = _rd_b.get('result') or _rd_b.get('value')
+                    except Exception:
+                        _val_b = None
+                else:
+                    _val_b = _raw_b
+                if _val_b:
+                    try:
+                        buyrak_data[_buyrak_tahlil_keys[_b_tid]] = float(str(_val_b).replace(',', '.'))
+                    except Exception:
+                        buyrak_data[_buyrak_tahlil_keys[_b_tid]] = _val_b
+    # BUN va Kreatinin/Mochevina nisbatini hisoblash
+    import math as _math_bp
+    if buyrak_data.get('mochevina') and buyrak_data.get('kreatinin'):
+        try:
+            _bun = round(float(buyrak_data['mochevina']) * 28.02 / 60.06, 2)
+            buyrak_data['bun'] = _bun
+        except Exception:
+            pass
+    # Kreatinin(µmol/L) / Mochevina(mmol/L) nisbati — norma 10-20
+    if buyrak_data.get('mochevina') and buyrak_data.get('kreatinin'):
+        try:
+            _moch_v = float(buyrak_data['mochevina'])
+            if _moch_v > 0:
+                buyrak_data['bun_cr'] = round(float(buyrak_data['kreatinin']) / _moch_v, 1)
+        except Exception:
+            pass
+    # Umumiy azot miqdori: Mochevina-N + Kreatinin-N + Siydik kislota-N (mmol/L)
+    # Mochevina (mmol/L) × 28/60; Kreatinin (µmol/L) × 42/(113.12×1000); Siydik kislota (µmol/L) × 56/(168.11×1000)
+    if True:
+        try:
+            _m_az = float(buyrak_data.get('mochevina') or 0)
+            _kr_az = float(buyrak_data.get('kreatinin') or 0)
+            _sk_az = float(buyrak_data.get('siydik_kislota') or 0)
+            if _m_az or _kr_az or _sk_az:
+                _umaz = (_m_az * 28 / 60) + (_kr_az * 42 / (113.12 * 1000)) + (_sk_az * 56 / (168.11 * 1000))
+                buyrak_data['umumiy_azot'] = round(_umaz, 2)
+        except Exception:
+            pass
+    if buyrak_data.get('kreatinin') and order_info:
+        try:
+            _yosh_r = order_info.get('yosh')
+            _jins_r = (order_info.get('jins') or '').lower()
+            _yosh_i = int(_yosh_r) if _yosh_r else None
+            _kr_f = float(buyrak_data['kreatinin'])
+            if _yosh_i and _yosh_i >= 18 and _kr_f > 0:
+                _is_f = 'ayol' in _jins_r or _jins_r in ('f', 'w', 'female')
+                if _is_f:
+                    _kappa, _alpha, _mult = 61.9, -0.241, 142
+                else:
+                    _kappa, _alpha, _mult = 79.6, -0.302, 142
+                _ratio = _kr_f / _kappa
+                if _ratio <= 1.0:
+                    _gfr = _mult * _math_bp.pow(_ratio, _alpha) * _math_bp.pow(0.9938, _yosh_i)
+                else:
+                    _gfr = _mult * _math_bp.pow(_ratio, -1.200) * _math_bp.pow(0.9938, _yosh_i)
+                if _is_f:
+                    _gfr *= 1.012
+                buyrak_data['gfr'] = round(_gfr, 1)
+        except Exception:
+            pass
+
+    # Tahlil nomlarini va normalarini DB dan individual tahlil ID bo'yicha olish
+    jins_bp = (order_info.get('jins') or '') if order_info else ''
+    yosh_bp = order_info.get('yosh') if order_info else None
+    try:
+        yosh_bp_int = int(yosh_bp) if yosh_bp else 0
+    except Exception:
+        yosh_bp_int = 0
+
+    _buyrak_id_to_key = {42: 'mochevina', 41: 'kreatinin', 35: 'albumin', 50: 'siydik_kislota'}
+    _buyrak_db_names = {}
+    _comp_norma_info = {}  # key -> norma_info dict (individual test DB normasi)
+    try:
+        _conn_bn = db_conn()
+        if _conn_bn:
+            _cur_bn = _conn_bn.cursor(dictionary=True)
+            _cur_bn.execute("SELECT id, nomi FROM tahlillar WHERE id IN (42, 41, 35, 50)")
+            for _r_bn in _cur_bn.fetchall():
+                _k_bn = _buyrak_id_to_key.get(_r_bn['id'])
+                if _k_bn:
+                    _buyrak_db_names[_k_bn] = _r_bn['nomi']
+            _cur_bn.close()
+            _conn_bn.close()
+    except Exception:
+        pass
+
+    # Har bir komponent uchun get_test_norma() — xuddi yakka tahlillar kabi
+    for _bid, _bkey in _buyrak_id_to_key.items():
+        _bname = _buyrak_db_names.get(_bkey, '')
+        _ni = get_test_norma(_bname, jins_bp, 'BIO', yosh_bp_int, tahlil_id=_bid)
+        if _ni and _ni.get('norma') and str(_ni.get('norma')).strip() not in ('', '-'):
+            _comp_norma_info[_bkey] = _ni
+
+    BUYRAK_ROWS = [
+        (_buyrak_db_names.get('mochevina', "Mochevina (qon karbamid azoti)"),
+         "mochevina",     "2.5 – 8.3",   "mmol/L"),
+        (_buyrak_db_names.get('kreatinin', "Kreatinin (mushak metabolizmi qoldiq mahsuloti)"),
+         "kreatinin",
+         "Erkak: 62 – 115\nAyol: 53 – 97",
+         "mkmol/L"),
+        (_buyrak_db_names.get('siydik_kislota', "Siydik kislotasi (purin almashinuvi mahsuloti)"),
+         "siydik_kislota",
+         "Erkak: 210 – 420\nAyol: 150 – 350",
+         "mkmol/L"),
+        (_buyrak_db_names.get('albumin', "Albumin (qon oqsili, buyrak filtri ko'rsatkichi)"),
+         "albumin",       "35 – 52",     "g/L"),
+        ("Mochevina azoti (BUN)\n(hisoblangan)",
+         "bun",           "1.1 – 3.9",   "mmol/L"),
+        ("Kreatinin / Mochevina nisbati\n(hisoblangan)",
+         "bun_cr",        "10 – 20",     "µmol/mmol"),
+        ("Umumiy azot miqdori\n(hisoblangan)",
+         "umumiy_azot",   "1.2 – 4.1",   "mmol/L"),
+        ("GFR — Klubochkaviy filtrlash tezligi\n(CKD-EPI formulasi, avtomatik hisoblangan)",
+         "gfr",
+         "≥ 90 — 1-bosqich: Normal\n60–89 — 2-bosqich: Yengil pasayish\n45–59 — 3a-bosqich: O'rtacha pasayish\n30–44 — 3b-bosqich: O'rtacha–og'ir\n15–29 — 4-bosqich: Og'ir\n< 15  — 5-bosqich: Buyrak yetishmovchiligi",
+         "ml/min/1.73m²"),
+    ]
+
+    heading = doc.add_paragraph()
+    heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(heading, 0, 0, line_spacing=1.0)
+    _add_run_tnr(heading, "BUYRAK PANELI", 14, bold=True,
+                 color_rgb=RGBColor(0x27, 0xae, 0x60))
+
+    HEADER_COLOR = "9DC3E6"
+    table = doc.add_table(rows=1, cols=4)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _apply_table_widths(table, [7.0, 4.0, 4.0, 4.0])
+    for cell, hdr in zip(table.rows[0].cells, ["Tahlil nomi", "Natija", "Norma", "O'lchov birligi"]):
+        _set_cell_shading(cell, HEADER_COLOR)
+        ph = cell.paragraphs[0]
+        ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(ph, 0, 0, line_spacing=1)
+        _add_run_tnr(ph, hdr, 11, bold=True)
+    for row_name, key, norma, unit in BUYRAK_ROWS:
+        row = table.add_row()
+        _keep_row_together(row)
+        val = buyrak_data.get(key, '')
+        val_str = str(val) if val != '' else ''
+        cells_r = row.cells
+        p0 = cells_r[0].paragraphs[0]
+        p0.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        _set_para_spacing(p0, 0, 0, line_spacing=1)
+        _add_run_tnr(p0, row_name, 11, bold=True)
+        p1 = cells_r[1].paragraphs[0]
+        p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(p1, 0, 0, line_spacing=1)
+        # DB dan yuklangan norma_info (individual tahlil ID bo'yicha), yo'q bo'lsa hardcoded
+        _ni = _comp_norma_info.get(key)
+        if _ni:
+            _norma_display = _ni.get('norma', norma)
+            _unit_display = _ni.get('unit', '') or unit
+            _rc, _ra = _get_result_color_and_arrow(val_str, _ni, jins_bp)
+        else:
+            _norma_display = norma
+            _unit_display = unit
+            _mn, _mx = _parse_norma_min_max(norma, jins_bp)
+            _rc, _ra = _get_result_color_and_arrow(val_str, {"norma": norma, "min": _mn, "max": _mx}, jins_bp)
+        # GFR uchun norma matnini qiymatga qarab qisqartirish
+        if key == 'gfr' and val_str:
+            try:
+                _gfr_num = float(val_str)
+                if _gfr_num >= 90:
+                    _norma_display = "Normal"
+                    _rc = None  # rang yo'q
+                    _ra = None
+                elif _gfr_num >= 60:
+                    _norma_display = "60–89 — 2-bosqich: Yengil pasayish"
+                elif _gfr_num >= 45:
+                    _norma_display = "45–59 — 3a-bosqich: O'rtacha pasayish"
+                elif _gfr_num >= 30:
+                    _norma_display = "30–44 — 3b-bosqich: O'rtacha–og'ir"
+                elif _gfr_num >= 15:
+                    _norma_display = "15–29 — 4-bosqich: Og'ir"
+                else:
+                    _norma_display = "< 15 — 5-bosqich: Buyrak yetishmovchiligi"
+            except Exception:
+                pass
+        _add_run_tnr(p1, val_str + (_ra or ''), 11, bold=True, color_rgb=_rc)
+        p2 = cells_r[2].paragraphs[0]
+        p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(p2, 0, 0, line_spacing=1)
+        _add_multiline_norma(p2, _norma_display, 11)
+        p3 = cells_r[3].paragraphs[0]
+        p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(p3, 0, 0, line_spacing=1)
+        _add_run_tnr(p3, _unit_display, 11)
+    doc.add_paragraph()
+
+
+def _add_revmo_row_to_table(table, sub_name, val_str, norma_str, unit_str, jins):
+    """REVMOPROBA jadvaliga bitta qator qo'shish (RF/CRP/ASLO)."""
+    row = table.add_row()
+    _keep_row_together(row)
+    cells_r = row.cells
+    p0 = cells_r[0].paragraphs[0]
+    p0.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    _set_para_spacing(p0, 0, 0, line_spacing=1)
+    _add_run_tnr(p0, sub_name, 11, bold=True)
+    p1 = cells_r[1].paragraphs[0]
+    p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(p1, 0, 0, line_spacing=1)
+    val_display = str(val_str).strip() if val_str else '-'
+    # Norma ob'ektini tuzish (rang/o'q uchun)
+    _rm_min, _rm_max = _parse_norma_min_max(norma_str, jins)
+    _norma_info = {"norma": norma_str, "unit": unit_str, "type": "text", "min": _rm_min, "max": _rm_max}
+    res_color, res_arrow = _get_result_color_and_arrow(val_display, _norma_info, jins)
+    # Manfiy (-) norma bo'lsa va natija boshqacha bo'lsa — qizil rang
+    if (not res_color and val_display != '-'
+            and norma_str and 'manfiy' in norma_str.lower()
+            and 'manfiy' not in val_display.lower()):
+        res_color = RGBColor(0xCC, 0x00, 0x00)
+    _add_run_tnr(p1, val_display + (res_arrow or ''), 11, bold=True, color_rgb=res_color)
+    p2 = cells_r[2].paragraphs[0]
+    p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(p2, 0, 0, line_spacing=1)
+    _add_multiline_norma(p2, norma_str or '-', 11)
+    p3 = cells_r[3].paragraphs[0]
+    p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(p3, 0, 0, line_spacing=1)
+    _add_run_tnr(p3, unit_str or '', 11)
+
+def _create_revmoproba_auto_section(doc, revmo_tests: list, test_results: dict, order_info: dict):
+    """REVMOPROBA to'liq (avtomat) bo'limini 3 ta alohida qator bilan yaratish."""
+    jins = (order_info.get('jins') or '')
+
+    heading = doc.add_paragraph()
+    heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(heading, 0, 0, line_spacing=1.0)
+    _add_run_tnr(heading, "REVMOPROBA to\u2018liq (avtomat)", 14, bold=True,
+                 color_rgb=RGBColor(0x27, 0xae, 0x60))
+
+    HEADER_COLOR = "9DC3E6"
+    table = doc.add_table(rows=1, cols=4)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _apply_table_widths(table, [7.0, 4.0, 4.0, 4.0])
+    for cell, hdr in zip(table.rows[0].cells, ["Tahlil nomi", "Natija", "Norma", "O'lchov birligi"]):
+        _set_cell_shading(cell, HEADER_COLOR)
+        ph = cell.paragraphs[0]
+        ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(ph, 0, 0, line_spacing=1)
+        _add_run_tnr(ph, hdr, 11, bold=True)
+
+    for t in revmo_tests:
+        test_id = t.get('id')
+        test_name = t.get('nomi', '')
+        raw_val = (test_results.get(test_id) if test_results else '') or ''
+        rd = {}
+        if raw_val and isinstance(raw_val, str) and raw_val.strip().startswith('{'):
+            try:
+                rd = json.loads(raw_val)
+            except Exception:
+                pass
+        # DB dan komponent normalari (RF:"0-14", CRP:"0-5", ASLO:"0-150")
+        comp_normas = _get_revmoproba_component_normas(test_name)
+        rf_n = comp_normas.get('rf', {})
+        crp_n = comp_normas.get('crp', {})
+        aslo_n = comp_normas.get('aslo', {})
+        _add_revmo_row_to_table(table, "CRP (S-reaktivniy belok) avtomat",
+                                rd.get('crp', ''),
+                                crp_n.get('norma', '-'), crp_n.get('unit', 'mg/l'), jins)
+        _add_revmo_row_to_table(table, "RF (Revmatoidniy faktor) avtomat",
+                                rd.get('rf', ''),
+                                rf_n.get('norma', '-'), rf_n.get('unit', 'ME/ml'), jins)
+        _add_revmo_row_to_table(table, "ASLO (Antistreptolizin-O) avtomat",
+                                rd.get('aslo', ''),
+                                aslo_n.get('norma', '-'), aslo_n.get('unit', 'ME/ml'), jins)
+    doc.add_paragraph()
+
+def _create_revmoproba_qolda_section(doc, revmo_tests: list, test_results: dict, order_info: dict):
+    """REVMOPROBA to'liq (qo'lda) bo'limini 3 ta alohida qator bilan yaratish.
+    Har bir komponent norma: Manfiy (-)"""
+    jins = (order_info.get('jins') or '')
+
+    heading = doc.add_paragraph()
+    heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(heading, 0, 0, line_spacing=1.0)
+    _add_run_tnr(heading, "REVMOPROBA to\u2018liq (qo\u02bblda)", 14, bold=True,
+                 color_rgb=RGBColor(0x27, 0xae, 0x60))
+
+    HEADER_COLOR = "9DC3E6"
+    table = doc.add_table(rows=1, cols=4)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _apply_table_widths(table, [7.0, 4.0, 4.0, 4.0])
+    for cell, hdr in zip(table.rows[0].cells, ["Tahlil nomi", "Natija", "Norma", "O'lchov birligi"]):
+        _set_cell_shading(cell, HEADER_COLOR)
+        ph = cell.paragraphs[0]
+        ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(ph, 0, 0, line_spacing=1)
+        _add_run_tnr(ph, hdr, 11, bold=True)
+
+    for t in revmo_tests:
+        test_id = t.get('id')
+        test_name = t.get('nomi', '')
+        raw_val = (test_results.get(test_id) if test_results else '') or ''
+        rd = {}
+        if raw_val and isinstance(raw_val, str) and raw_val.strip().startswith('{'):
+            try:
+                rd = json.loads(raw_val)
+            except Exception:
+                pass
+        comp_normas = _get_revmoproba_component_normas(test_name)
+        rf_n = comp_normas.get('rf', {})
+        crp_n = comp_normas.get('crp', {})
+        aslo_n = comp_normas.get('aslo', {})
+        _add_revmo_row_to_table(table, "CRP (S-reaktivniy belok)",
+                                rd.get('crp', ''),
+                                crp_n.get('norma', 'Manfiy (-)'), crp_n.get('unit', 'mg/l'), jins)
+        _add_revmo_row_to_table(table, "RF (Revmatoidniy faktor)",
+                                rd.get('rf', ''),
+                                rf_n.get('norma', 'Manfiy (-)'), rf_n.get('unit', 'ME/ml'), jins)
+        _add_revmo_row_to_table(table, "ASLO (Antistreptolizin-O)",
+                                rd.get('aslo', ''),
+                                aslo_n.get('norma', 'Manfiy (-)'), aslo_n.get('unit', 'ME/ml'), jins)
+    doc.add_paragraph()
+
+def create_results_table(doc: Document, tests: list, group: str, order_info: dict, test_results: dict = None):
+    # Ginekologik va qon guruhi testlarni ajratish
+    blood_tests   = [t for t in tests if is_categorical_test(t.get('nomi', ''))]
+    hema_cbc_tests = [t for t in tests if _is_hematology_cbc_test(t.get('nomi', ''))]
+    urine_umumiy_tests = [t for t in tests if _is_urine_umumiy_test(t.get('nomi', ''))]
+    ginek_tests   = [t for t in tests if _is_ginekologik_test(t.get('nomi', ''))]
+    regular_tests = [t for t in tests if not _is_ginekologik_test(t.get('nomi', ''))
+                                      and not is_categorical_test(t.get('nomi', ''))
+                                      and not _is_hematology_cbc_test(t.get('nomi', ''))
+                                      and not _is_urine_umumiy_test(t.get('nomi', ''))
+                                      and not _is_qondan_mazok_test(t.get('nomi', ''))
+                                      and not _is_gtt_test(t.get('nomi', ''))]
+
+    jins = order_info.get('jins', '')
+    yosh = order_info.get('yosh', 0)
+    try:
+        yosh_int = int(yosh) if yosh else 0
+    except:
+        yosh_int = 0
+
+    # ── ODDIY 4 USTUNLI JADVAL ──────────────────────────────────────
+    if regular_tests:
+        table = doc.add_table(rows=1, cols=4)
+        table.style = 'Table Grid'
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER
+
+        HEADER_COLOR = "9DC3E6"
+        headers = ["Tahlil nomi", "Natija", "Norma", "O'lchov birligi"]
+        for cell, hdr in zip(table.rows[0].cells, headers):
+            _set_cell_shading(cell, HEADER_COLOR)
+            ph = cell.paragraphs[0]
+            ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _set_para_spacing(ph, 0, 0, line_spacing=1)
+            _add_run_tnr(ph, hdr, 11, bold=True)
+        widths = [7.0, 3.0, 6.0, 3.0] if group == "IFA" else [7.0, 4.0, 4.0, 4.0]
+        _apply_table_widths(table, widths)
+
+        for test in regular_tests:
+            test_id   = test.get('id')
+            test_name = test.get('nomi', 'N/A')
+            test_name_lower = test_name.lower()
+
+            raw_val = None
+            if test_results and test_id in test_results:
+                raw_val = test_results[test_id]
+
+            # KOAGULOGRAMMA to'liq — JSON bo'lsa kengaytirish, aks holda header
+            if 'koagulogramma' in test_name_lower and ("to'liq" in test_name_lower or 'toliq' in test_name_lower):
+                koag_expanded = False
+                if raw_val and isinstance(raw_val, str) and raw_val.strip().startswith('{'):
+                    try:
+                        kd = json.loads(raw_val)
+                        if isinstance(kd, dict) and any(k in kd for k in ['pt_sek', 'tt', 'achtv', 'fibrinogen']):
+                            # Header qator
+                            hrow = table.add_row()
+                            _keep_row_together(hrow)
+                            hmerged = hrow.cells[0].merge(hrow.cells[3])
+                            _set_cell_shading(hmerged, "9DC3E6")
+                            hph = hmerged.paragraphs[0]
+                            hph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            _set_para_spacing(hph, 0, 0, line_spacing=1)
+                            _add_run_tnr(hph, test_name, 11, bold=True)
+                            # Sub-qatorlar
+                            _koag_rows = [
+                                ("PT sekundalarda",          kd.get('pt_sek'),     "13 – 15",     "sek"),
+                                ("PT bo'yicha Kviku (%)",    kd.get('pt_kviku'),   "70,0 – 100,0", "%"),
+                                ("MNO / INR",               kd.get('pt_mno'),     "0,90 – 1,15",  "INR"),
+                                ("TT (Tromboplastin vaqti)", kd.get('tt'),         "11 – 18",     "sek"),
+                                ("ACHTV",                    kd.get('achtv'),      "25 – 40",     "sek"),
+                                ("Fibrinogen",               kd.get('fibrinogen'), "2,0 – 4,0",   "g/l"),
+                            ]
+                            for sub_n, sub_v, sub_nr, sub_u in _koag_rows:
+                                if sub_v is None:
+                                    continue
+                                kr = table.add_row()
+                                _keep_row_together(kr)
+                                kc = kr.cells
+                                kp0 = kc[0].paragraphs[0]
+                                kp0.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                                _set_para_spacing(kp0, 0, 0, line_spacing=1)
+                                _add_run_tnr(kp0, sub_n, 11, bold=True)
+                                kp1 = kc[1].paragraphs[0]
+                                kp1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                _set_para_spacing(kp1, 0, 0, line_spacing=1)
+                                _add_run_tnr(kp1, str(sub_v), 11, bold=True)
+                                kp2 = kc[2].paragraphs[0]
+                                kp2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                _set_para_spacing(kp2, 0, 0, line_spacing=1)
+                                _add_multiline_norma(kp2, sub_nr, 11)
+                                kp3 = kc[3].paragraphs[0]
+                                kp3.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                _set_para_spacing(kp3, 0, 0, line_spacing=1)
+                                _add_run_tnr(kp3, sub_u, 11)
+                            koag_expanded = True
+                    except Exception:
+                        pass
+                if not koag_expanded:
+                    # Header qator (natija yo'q)
+                    row = table.add_row()
+                    _keep_row_together(row)
+                    merged = row.cells[0].merge(row.cells[3])
+                    _set_cell_shading(merged, "9DC3E6")
+                    ph = merged.paragraphs[0]
+                    ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    _set_para_spacing(ph, 0, 0, line_spacing=1)
+                    _add_run_tnr(ph, test_name, 11, bold=True)
+                continue
+
+            # COAG JSON kengaytirish: protrombin va individual sub-testlar uchun
+            _KOAG_ROWS_DEF = [
+                ("PT sekundalarda",          'pt_sek',     "13 \u2013 15",     "sek"),
+                ("PT bo\u2019yicha Kviku (%)", 'pt_kviku', "70,0 \u2013 100,0", "%"),
+                ("MNO / INR",                'pt_mno',     "0,90 \u2013 1,15", "INR"),
+                ("TT (Tromboplastin vaqti)", 'tt',         "11 \u2013 18",     "sek"),
+                ("ACHTV",                    'achtv',      "25 \u2013 40",     "sek"),
+                ("Fibrinogen",               'fibrinogen', "2,0 \u2013 4,0",   "g/l"),
+            ]
+            _COAG_SUB_DETECT = [
+                'pt sekundalarda', "pt bo'yicha", 'mno / inr', 'mno/inr',
+                'tromboplastin', 'achtv', 'fibrinogen',
+                'protrombin', 'prothrombin', 'pt/mno', 'pti',
+            ]
+            pt_expanded = False
+            if any(k in test_name_lower for k in _COAG_SUB_DETECT):
+                if raw_val and isinstance(raw_val, str) and raw_val.strip().startswith('{'):
+                    try:
+                        rd = json.loads(raw_val)
+                        if isinstance(rd, dict):
+                            _sub_rows = [(n, rd.get(k), nr, u) for n, k, nr, u in _KOAG_ROWS_DEF if rd.get(k) is not None]
+                            if _sub_rows:
+                                # Header qator
+                                _hr = table.add_row()
+                                _keep_row_together(_hr)
+                                _hm = _hr.cells[0].merge(_hr.cells[3])
+                                _set_cell_shading(_hm, "9DC3E6")
+                                _hph = _hm.paragraphs[0]
+                                _hph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                _set_para_spacing(_hph, 0, 0, line_spacing=1)
+                                _add_run_tnr(_hph, test_name, 11, bold=True)
+                                for _sn, _sv, _snr, _su in _sub_rows:
+                                    _kr = table.add_row()
+                                    _keep_row_together(_kr)
+                                    _kc = _kr.cells
+                                    _kp0 = _kc[0].paragraphs[0]
+                                    _kp0.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                                    _set_para_spacing(_kp0, 0, 0, line_spacing=1)
+                                    _add_run_tnr(_kp0, _sn, 11, bold=True)
+                                    _kp1 = _kc[1].paragraphs[0]
+                                    _kp1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                    _set_para_spacing(_kp1, 0, 0, line_spacing=1)
+                                    _add_run_tnr(_kp1, str(_sv), 11, bold=True)
+                                    _kp2 = _kc[2].paragraphs[0]
+                                    _kp2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                    _set_para_spacing(_kp2, 0, 0, line_spacing=1)
+                                    _add_multiline_norma(_kp2, _snr, 11)
+                                    _kp3 = _kc[3].paragraphs[0]
+                                    _kp3.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                    _set_para_spacing(_kp3, 0, 0, line_spacing=1)
+                                    _add_run_tnr(_kp3, _su, 11)
+                                pt_expanded = True
+                    except Exception:
+                        pass
+            if pt_expanded:
+                continue
+
+            # Oddiy qator
+            row   = table.add_row()
+            _keep_row_together(row)
+            cells = row.cells
+
+            # Tahlil nomi
+            p0 = cells[0].paragraphs[0]
+            p0.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            _set_para_spacing(p0, 0, 0, line_spacing=1)
+            _add_run_tnr(p0, test_name, 11, bold=True)
+
+            # Natija
+            result_value = _format_result_value(raw_val) if raw_val else ""
+
+            # Norma: faqat qo'lda kiritilgan oynadan (norma/norma_text kalit) -> bazadan -> zaxira
+            # BK-280 'ref' va 'norma' (analyzer ref) blankada ko'rsatilmaydi — DB normasi ustuvor
+            norma_from_win, unit_from_win, analyzer_ref = None, None, None
+            if raw_val and isinstance(raw_val, str) and raw_val.strip().startswith('{'):
+                try:
+                    rd = json.loads(raw_val)
+                    if isinstance(rd, dict):
+                        src = rd.get('source', '')
+                        # BK-280 manbaidan kelgan normani faqat min/max zaxirasi sifatida saqlash
+                        if src == 'BK-280':
+                            analyzer_ref = rd.get('analyzer_ref') or rd.get('norma') or rd.get('ref') or ''
+                        else:
+                            norma_from_win = rd.get('norma') or rd.get('norma_text')
+                        unit_from_win = rd.get('birlik') or rd.get('unit') or rd.get('o_lchov_birligi')
+                except Exception:
+                    pass
+            emizikli_flag = order_info.get('emizikli', 0) if order_info else 0
+            cycle_note_val = order_info.get('cycle_note', '') or ''
+            menopauza_flag = order_info.get('menopauza', 0) if order_info else 0
+            homiladorlik_hafta_val = order_info.get('homiladorlik_hafta', None) if order_info else None
+            norma_info = get_test_norma(test_name, jins, group, yosh_int,
+                                       norma_from_window=norma_from_win, unit_from_window=unit_from_win,
+                                       tahlil_id=test.get('tahlil_id'), emizikli=emizikli_flag,
+                                       cycle_note=cycle_note_val, menopauza=menopauza_flag,
+                                       homiladorlik_hafta=homiladorlik_hafta_val)
+            # DB da min/max yo'q bo'lsa, analizator ref dan zaxira sifatida olish
+            if analyzer_ref and norma_info.get('min') is None and norma_info.get('max') is None:
+                try:
+                    import re as _re2
+                    _nums = _re2.findall(r'[\d.]+', str(analyzer_ref).split('\n')[0])
+                    if len(_nums) >= 2:
+                        norma_info['min'] = float(_nums[0])
+                        norma_info['max'] = float(_nums[1])
+                except Exception:
+                    pass
+            bold_hints = norma_info.get('bold_hints', [])
+            norma_text_for_color = norma_info.get('norma', '')
+            # Natijani norma kasr aniqligiga moslab yaxlitlash
+            if result_value and norma_text_for_color and norma_text_for_color.strip() != '-':
+                result_value = _round_result_to_norma(result_value, norma_text_for_color)
+            elif result_value and analyzer_ref:
+                result_value = _round_result_to_norma(result_value, analyzer_ref)
+            if group == "IFA":
+                # IFA testlar: Manfiy=qora, Musbat=qizil, strelka yo'q
+                result_color = _get_ifa_result_color(result_value, norma_text_for_color)
+                display_result = result_value if result_value else ""
+            else:
+                result_color, arrow = _get_result_color_and_arrow(result_value, norma_info, jins)
+                display_result = result_value + arrow if result_value else ""
+
+            p1 = cells[1].paragraphs[0]
+            p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _set_para_spacing(p1, 0, 0, line_spacing=1)
+            _add_run_tnr(p1, display_result, 11, bold=True, color_rgb=result_color)
+
+            # Norma — ko'p qatorli, bemorga mos kelgan qator qalin
+            norma_text = norma_info.get('norma', '-')
+            p2 = cells[2].paragraphs[0]
+            p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _set_para_spacing(p2, 0, 0, line_spacing=1)
+            _add_multiline_norma(p2, norma_text, 11, bold_hints=bold_hints, patient_jins=jins)
+
+            # O'lchov birligi
+            unit_text = norma_info.get('unit', '')
+            p3 = cells[3].paragraphs[0]
+            p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _set_para_spacing(p3, 0, 0, line_spacing=1)
+            _add_run_tnr(p3, unit_text, 11)
+
+    # ── UMUMIY QON TAHLILI (BC-20S) — faqat oynadan chaqirilganda (ma'lumot bor bo'lsa)
+    for test in hema_cbc_tests:
+        test_id = test.get('id')
+        tahlil_id = test.get('tahlil_id')
+        raw_value = (test_results.get(test_id) or test_results.get(tahlil_id) if test_results else '') or ''
+        has_hema = False
+        try:
+            rd = json.loads(raw_value) if isinstance(raw_value, str) and raw_value.strip().startswith('{') else (raw_value if isinstance(raw_value, dict) else {})
+            vals = {k: v for k, v in (rd or {}).items() if k not in ('type', 'source', 'sid', 'sno', 'result')}
+            if vals:
+                has_hema = True
+        except Exception:
+            pass
+        if has_hema:
+            create_hematology_cbc_table_in_doc(doc, raw_value, order_info)
+
+    # ── SIYDIKNING UMUMIY TAHLILI (URIT-50) — faqat oynadan chaqirilganda (ma'lumot bor bo'lsa)
+    for test in urine_umumiy_tests:
+        test_id = test.get('id')
+        tahlil_id = test.get('tahlil_id')
+        raw_value = (test_results.get(test_id) or test_results.get(tahlil_id) if test_results else '') or ''
+        has_urine = False
+        try:
+            rd = json.loads(raw_value) if isinstance(raw_value, str) and raw_value.strip().startswith('{') else (raw_value if isinstance(raw_value, dict) else {})
+            aa = rd.get('all_analytes', {}) or {}
+            mikro = rd.get('mikroskopiya', {}) or {}
+            fizik = rd.get('fizik', {}) or {}
+            if any((v or '').strip() for v in aa.values()) or any((v or '').strip() for v in mikro.values()) or any((v or '').strip() for v in fizik.values()):
+                has_urine = True
+        except Exception:
+            pass
+        if has_urine:
+            create_urine_full_table_in_doc(doc, raw_value, order_info)
+
+    # ── QON GURUHI VA REZUS FAKTOR - 2 ustunli jadval ───────────────
+    for test in blood_tests:
+        test_id = test.get('id')
+        raw_value = (test_results.get(test_id, '') if test_results else '') or ''
+        _create_blood_group_table(doc, raw_value)
+
+    # ── GINEKOLOGIK JADVAL ──────────────────────────────────────────
+    for test in ginek_tests:
+        test_id = test.get('id')
+        result_data = '{}'
+        if test_results and test_id in test_results:
+            result_data = str(test_results[test_id])
+        create_ginekologik_table_in_doc(doc, result_data, order_info)
+
+def create_simple_table_for_tests(doc: Document, tests: list, order_info: dict, test_results: dict = None):
+    # Ginekologik va qon guruhi testlarni ajratib olish
+    blood_tests   = [t for t in tests if is_categorical_test(t.get('nomi', ''))]
+    regular_tests = [t for t in tests if not _is_ginekologik_test(t.get('nomi', ''))
+                                      and not is_categorical_test(t.get('nomi', ''))]
+    ginek_tests   = [t for t in tests if _is_ginekologik_test(t.get('nomi', ''))]
+
+    jins = order_info.get('jins', '')
+    yosh = order_info.get('yosh', 0)
+    try:
+        yosh_int = int(yosh) if yosh else 0
+    except:
+        yosh_int = 0
+
+    if regular_tests:
+        table = doc.add_table(rows=1, cols=4)
+        table.style = 'Table Grid'
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER
+
+        HEADER_COLOR = "9DC3E6"
+        headers = ["Tahlil nomi", "Natija", "Norma", "O'lchov birligi"]
+        for cell, hdr in zip(table.rows[0].cells, headers):
+            _set_cell_shading(cell, HEADER_COLOR)
+            ph = cell.paragraphs[0]
+            ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _set_para_spacing(ph, 0, 0, line_spacing=1)
+            _add_run_tnr(ph, hdr, 11, bold=True)
+        is_ifa = any('ifa' in (t.get('nomi') or '').lower() or 'ифа' in (t.get('nomi') or '').lower() for t in regular_tests)
+        widths = [7.0, 3.0, 6.0, 3.0] if is_ifa else [7.0, 4.0, 4.0, 4.0]
+        _apply_table_widths(table, widths)
+
+        for test in regular_tests:
+            row   = table.add_row()
+            _keep_row_together(row)
+            cells = row.cells
+            test_id   = test.get('id')
+            test_name = test.get('nomi', 'N/A')
+
+            p0 = cells[0].paragraphs[0]
+            p0.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            _set_para_spacing(p0, 0, 0, line_spacing=1)
+            _add_run_tnr(p0, test_name, 11, bold=True)
+
+            result_value = ""
+            raw_val = None
+            if test_results and test_id in test_results:
+                raw_val = test_results[test_id]
+                result_value = _format_result_value(raw_val)
+
+            # Norma: faqat qo'lda kiritilgan oynadan -> bazadan; BK-280 ref zaxira min/max uchun
+            norma_from_win, unit_from_win, analyzer_ref2 = None, None, None
+            if raw_val and isinstance(raw_val, str) and raw_val.strip().startswith('{'):
+                try:
+                    rd = json.loads(raw_val)
+                    if isinstance(rd, dict):
+                        src = rd.get('source', '')
+                        if src == 'BK-280':
+                            analyzer_ref2 = rd.get('analyzer_ref') or rd.get('norma') or rd.get('ref') or ''
+                        else:
+                            norma_from_win = rd.get('norma') or rd.get('norma_text')
+                        unit_from_win = rd.get('birlik') or rd.get('unit') or rd.get('o_lchov_birligi')
+                except Exception:
+                    pass
+            emizikli_flag = order_info.get('emizikli', 0) if order_info else 0
+            cycle_note_val = order_info.get('cycle_note', '') or ''
+            menopauza_flag = order_info.get('menopauza', 0) if order_info else 0
+            homiladorlik_hafta_val = order_info.get('homiladorlik_hafta', None) if order_info else None
+            norma_info = get_test_norma(test_name, jins, "TEMPLATE", yosh_int,
+                                       norma_from_window=norma_from_win, unit_from_window=unit_from_win,
+                                       tahlil_id=test.get('tahlil_id'), emizikli=emizikli_flag,
+                                       cycle_note=cycle_note_val, menopauza=menopauza_flag,
+                                       homiladorlik_hafta=homiladorlik_hafta_val)
+            if analyzer_ref2 and norma_info.get('min') is None and norma_info.get('max') is None:
+                try:
+                    import re as _re3
+                    _ns = _re3.findall(r'[\d.]+', str(analyzer_ref2).split('\n')[0])
+                    if len(_ns) >= 2:
+                        norma_info['min'] = float(_ns[0])
+                        norma_info['max'] = float(_ns[1])
+                except Exception:
+                    pass
+            bold_hints = norma_info.get('bold_hints', [])
+            print(f"[BLANK DEBUG] {test_name}: emizikli={order_info.get('emizikli')}, menopauza={order_info.get('menopauza')}, hafta={order_info.get('homiladorlik_hafta')}, cycle_note={order_info.get('cycle_note')}, jins={jins} → bold_hints={bold_hints}, norma_from_win={norma_from_win is not None}")
+            result_color, arrow = _get_result_color_and_arrow(result_value, norma_info, jins)
+            display_result = result_value + arrow if result_value else ""
+
+            p1 = cells[1].paragraphs[0]
+            p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _set_para_spacing(p1, 0, 0, line_spacing=1)
+            _add_run_tnr(p1, display_result, 11, bold=True, color_rgb=result_color)
+
+            norma_text = norma_info.get('norma', '-')
+            p2 = cells[2].paragraphs[0]
+            p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _set_para_spacing(p2, 0, 0, line_spacing=1)
+            _add_multiline_norma(p2, norma_text, 11, bold_hints=bold_hints, patient_jins=jins)
+
+            unit_text = norma_info.get('unit', '')
+            p3 = cells[3].paragraphs[0]
+            p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _set_para_spacing(p3, 0, 0, line_spacing=1)
+            _add_run_tnr(p3, unit_text, 11)
+
+    # Qon guruhi - 2 ustunli jadval
+    for test in blood_tests:
+        test_id = test.get('id')
+        raw_value = (test_results.get(test_id, '') if test_results else '') or ''
+        _create_blood_group_table(doc, raw_value)
+
+    # Ginekologik jadval
+    for test in ginek_tests:
+        test_id = test.get('id')
+        result_data = '{}'
+        if test_results and test_id in test_results:
+            result_data = str(test_results[test_id])
+        create_ginekologik_table_in_doc(doc, result_data, order_info)
+
+# [13] add_footer() va add_page_footer_to_doc()
+def add_footer(doc: Document, order_info: dict):
+    """
+    Pastki jadval: Test vaqti | Laborant vrach: _____ | Murodov A.X
+    Jadvaldan oldin 0.5sm bo'sh joy, matn qalin (bold).
+    """
+    dt_str = datetime.now().strftime("%d.%m.%Y %H:%M")
+    vrach_name = order_info.get('vrach_name', 'Murodov A.X') if order_info else 'Murodov A.X'
+
+    # Jadval oldida 0.5sm bo'sh joy
+    spacer = doc.add_paragraph()
+    _set_para_spacing(spacer, 0, 0, line_spacing=1)
+    spacer.paragraph_format.space_before = Cm(0.5)
+
+    sign_table = doc.add_table(rows=1, cols=3)
+    sign_table.style = 'Light Grid Accent 1'
+    sign_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _apply_table_widths(sign_table, [7.0, 5.0, 7.0])
+
+    cells = sign_table.rows[0].cells
+    contents = [
+        f"Chop etilgan vaqt: {dt_str}",
+        "Laborant vrach:",
+        vrach_name,
+    ]
+    aligns = [WD_ALIGN_PARAGRAPH.LEFT, WD_ALIGN_PARAGRAPH.CENTER, WD_ALIGN_PARAGRAPH.RIGHT]
+
+    for cell, text, align in zip(cells, contents, aligns):
+        para = cell.paragraphs[0]
+        para.alignment = align
+        _set_para_spacing(para, 2, 2, line_spacing=1)
+        _add_run_tnr(para, text, 10, bold=True)
+
+def add_page_footer_to_doc(doc: Document, order_info: dict):
+    dt_str = datetime.now().strftime("%d.%m.%Y")
+    time_str = datetime.now().strftime("%H:%M")
+    for section in doc.sections:
+        footer = section.footer
+        for para in footer.paragraphs:
+            footer._element.remove(para._element)
+        footer_table = footer.add_table(rows=1, cols=2, width=Inches(6.5))
+        footer_table.style = None
+        footer_table.columns[0].width = Cm(10)
+        footer_table.columns[1].width = Cm(7)
+        left_cell = footer_table.rows[0].cells[0]
+        left_para = left_cell.paragraphs[0]
+        left_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        left_run = left_para.add_run(f"Sana: {dt_str}   Vaqt: {time_str}")
+        left_run.font.name = "Times New Roman"
+        left_run._element.rPr.rFonts.set(qn('w:eastAsia'), "Times New Roman")
+        left_run.font.size = Pt(9)
+        right_cell = footer_table.rows[0].cells[1]
+        right_para = right_cell.paragraphs[0]
+        right_para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        page_field = OxmlElement('w:fldSimple')
+        page_field.set(qn('w:instr'), 'PAGE')
+        right_para._element.append(page_field)
+        right_para.add_run(" / ")
+        numpages_field = OxmlElement('w:fldSimple')
+        numpages_field.set(qn('w:instr'), 'NUMPAGES')
+        right_para._element.append(numpages_field)
+        right_para.add_run(" sahifa")
+        for run in right_para.runs:
+            run.font.name = "Times New Roman"
+            run._element.rPr.rFonts.set(qn('w:eastAsia'), "Times New Roman")
+            run.font.size = Pt(9)
+        section.footer_distance = Cm(0.5)  # 0.5sm sahifa chetidan (printerda ko'rinadi)
+
+# [14] create_unified_blank() - single DOCX with all sections
+def create_unified_blank(order_id: int, order_info: dict, organized: dict, test_results: dict = None):
+    doc = Document()
+    is_first_section = True
+    header_added = False
+    if not header_added:
+        insert_blanka_ustuni_header(doc, order_info)
+        header_added = True
+        is_first_section = False
+
+    # KLINIK MA'LUMOTLAR — blankada qizil katak (menstrual sikl, emizikli, menopauza, homiladorlik, gormon dori)
+    emizikli_val = order_info.get('emizikli', 0) if order_info else 0
+    cycle_day_val = order_info.get('cycle_day', '') or ''
+    cycle_note_val = (order_info.get('cycle_note', '') or '').strip()
+    menopauza_val = order_info.get('menopauza', 0) if order_info else 0
+    homiladorlik_hafta_val = order_info.get('homiladorlik_hafta', None) if order_info else None
+    gormon_dori_val = (order_info.get('gormon_dori', '') or '').strip() if order_info else ''
+    # cycle_note da ham "emizikli" bo'lsa emizikli sifatida ko'rish
+    _cn_lower = cycle_note_val.lower()
+    _is_emi = emizikli_val == 1 or ('emizikli' in _cn_lower and 'emas' not in _cn_lower)
+
+    # Klinik ma'lumotlar qatorlarini yig'ish
+    _clinical_items = []
+    if cycle_day_val:
+        _clinical_items.append(f"Menstrual siklning {cycle_day_val}-kuni")
+    if menopauza_val == 1:
+        _clinical_items.append("Menopauza")
+    if homiladorlik_hafta_val:
+        try:
+            _h = int(homiladorlik_hafta_val)
+            if _h <= 12: _tr = "1-trimestr"
+            elif _h <= 27: _tr = "2-trimestr"
+            else: _tr = "3-trimestr"
+            _clinical_items.append(f"Homilador ({_h}-hafta, {_tr})")
+        except (ValueError, TypeError):
+            pass
+    if _is_emi:
+        _clinical_items.append("Emizikli")
+    if gormon_dori_val:
+        _clinical_items.append(f"Gormon dori: {gormon_dori_val}")
+    # cycle_note dan qo'shimcha faza ma'lumoti (agar boshqa joyda ko'rsatilmagan bo'lsa)
+    if cycle_note_val and not _is_emi and not menopauza_val and not homiladorlik_hafta_val:
+        _faza = cycle_note_val.replace("Menstruatsiya bo'lmaydi", "").strip(" ,;-")
+        if _faza and _faza not in str(_clinical_items):
+            _clinical_items.append(_faza)
+
+    if _clinical_items:
+        # Ustunlar sonini aniqlash (max 3 ustun)
+        _num_cols = min(len(_clinical_items), 3)
+        _it = doc.add_table(rows=1, cols=_num_cols)
+        _it.style = 'Table Grid'
+        _it.alignment = WD_TABLE_ALIGNMENT.CENTER
+        _col_widths = {1: [19.0], 2: [9.5, 9.5], 3: [6.5, 6.5, 6.0]}
+        _apply_table_widths(_it, _col_widths.get(_num_cols, [6.5]*_num_cols))
+
+        # Agar 3 dan ko'p bo'lsa, birinchi 2 tani alohida katakka, qolganlarini oxirigiga birlashtirish
+        if len(_clinical_items) <= 3:
+            _display_items = _clinical_items
+        else:
+            _display_items = _clinical_items[:2] + [", ".join(_clinical_items[2:])]
+
+        for _ci, _ctxt in enumerate(_display_items):
+            if _ci >= _num_cols:
+                break
+            _c = _it.rows[0].cells[_ci]
+            _p = _c.paragraphs[0]
+            _p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _set_para_spacing(_p, 1, 1, line_spacing=1)
+            if _ctxt:
+                _run = _p.add_run(_ctxt)
+                _run.font.name = "Times New Roman"
+                try:
+                    _run._element.rPr.rFonts.set(qn('w:eastAsia'), "Times New Roman")
+                except Exception:
+                    pass
+                _run.font.size = Pt(10)
+                _run.font.bold = True
+                _run.font.color.rgb = RGBColor(0xFF, 0x00, 0x00)  # Qizil
+
+    if organized['with_templates']:
+        for template_name, template_tests in organized['with_templates'].items():
+            category_para = doc.add_paragraph()
+            category_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _set_para_spacing(category_para, 2, 2, line_spacing=1)
+            category_run = category_para.add_run(template_name)
+            category_run.font.name = "Times New Roman"
+            category_run._element.rPr.rFonts.set(qn('w:eastAsia'), "Times New Roman")
+            category_run.font.size = Pt(14)
+            category_run.font.bold = True
+            category_run.font.color.rgb = RGBColor(0x27, 0xae, 0x60)
+            template_path = template_tests[0]['template_path']
+            tests_for_template = [item['test'] for item in template_tests]
+            try:
+                success = extract_tables_from_docx(
+                    source_path=template_path,
+                    target_doc=doc,
+                    section_title=None,
+                    order_info=order_info
+                )
+                if not success:
+                    create_simple_table_for_tests(doc, tests_for_template, order_info, test_results)
+            except Exception as e:
+                print(f"   [OGOHLANTIRISH] Shablon qo'shishda xato: {e}")
+                create_simple_table_for_tests(doc, tests_for_template, order_info, test_results)
+            is_first_section = False
+    if organized['by_group']:
+        # EXPRESS guruhini alohida ko'rsatish
+        express_tests = organized['by_group'].get('EXPRESS', [])
+        if express_tests:
+            h = doc.add_paragraph()
+            h.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _set_para_spacing(h, 0, 0, line_spacing=1.0)
+            run = h.add_run("EKSPRESS TESTLAR NATIJALARI")
+            run.font.name = "Times New Roman"
+            run._element.rPr.rFonts.set(qn('w:eastAsia'), "Times New Roman")
+            run.font.size = Pt(14)
+            run.font.bold = True
+            run.font.color.rgb = RGBColor(0x27, 0xae, 0x60)
+            create_results_table(doc, express_tests, "EXPRESS", order_info, test_results)
+            is_first_section = False
+
+        # Qolgan guruhlar
+        other_tests = [t for g, tests in organized['by_group'].items()
+                       if g != 'EXPRESS' for t in tests]
+        if other_tests:
+            test_groups = group_tests_by_category(other_tests)
+            group_order = ["GEM", "BIO", "TEST", "IFA", "COAG", "URINE"]
+            for group in [g for g in group_order if g in test_groups]:
+                group_tests_list = test_groups[group]
+
+                if group == "BIO":
+                    # Bilirubin, revmoproba avtomat (faqat to'liq) va qo'lda testlarni ajratish
+                    # Yakka RF/CRP/ASLO avtomat testlar bio_only ga qo'shiladi (oddiy qator sifatida)
+                    bili_tests    = [t for t in group_tests_list if _is_bilirubin_test(t.get('nomi', ''))]
+                    gtt_tests     = [t for t in group_tests_list if _is_gtt_test(t.get('nomi', ''))]
+                    revmo_auto    = [t for t in group_tests_list if _is_revmoproba_full_auto_test(t.get('nomi', ''))]
+                    revmo_qolda_b = [t for t in group_tests_list if _is_revmoproba_qolda_test(t.get('nomi', ''))]
+                    lipid_tests   = [t for t in group_tests_list if _is_lipid_spektri_test(t.get('nomi', ''))]
+                    buyrak_tests  = [t for t in group_tests_list if _is_buyrak_paneli_test(t.get('nomi', ''))]
+                    # Panel tarkibidagi yakka testlar (tahlil_id bo'yicha) bio_only dan chiqariladi,
+                    # aks holda blankada panel + yakka test ikki marta ko'rinadi.
+                    _panel_skip_ids = set()
+                    if lipid_tests:
+                        _panel_skip_ids |= LIPID_PANEL_MEMBER_IDS
+                    if buyrak_tests:
+                        _panel_skip_ids |= BUYRAK_PANEL_MEMBER_IDS
+                    bio_only      = [t for t in group_tests_list
+                                     if not _is_bilirubin_test(t.get('nomi', ''))
+                                     and not _is_gtt_test(t.get('nomi', ''))
+                                     and not _is_revmoproba_full_auto_test(t.get('nomi', ''))
+                                     and not _is_revmoproba_qolda_test(t.get('nomi', ''))
+                                     and not _is_lipid_spektri_test(t.get('nomi', ''))
+                                     and not _is_buyrak_paneli_test(t.get('nomi', ''))
+                                     and t.get('tahlil_id') not in _panel_skip_ids]
+
+                    if bio_only:
+                        guruh_nomi = get_group_name_from_db(group)
+                        h = doc.add_paragraph()
+                        h.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        _set_para_spacing(h, 0, 0, line_spacing=1.0)
+                        run = h.add_run(guruh_nomi)
+                        run.font.name = "Times New Roman"
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), "Times New Roman")
+                        run.font.size = Pt(14)
+                        run.font.bold = True
+                        run.font.color.rgb = RGBColor(0x27, 0xae, 0x60)
+                        create_results_table(doc, bio_only, group, order_info, test_results)
+                        is_first_section = False
+
+                    if bili_tests:
+                        _create_bilirubin_section(doc, bili_tests, test_results, order_info)
+                        is_first_section = False
+
+                    if lipid_tests:
+                        _create_lipid_spektri_section(doc, lipid_tests, test_results, order_info)
+                        is_first_section = False
+
+                    if buyrak_tests:
+                        _create_buyrak_paneli_section(doc, buyrak_tests, test_results, order_info)
+                        is_first_section = False
+
+                    if gtt_tests:
+                        for _gt in gtt_tests:
+                            _gt_id  = _gt.get('id')
+                            _gt_raw = (test_results.get(_gt_id) if test_results else '') or ''
+                            if _gt_raw and str(_gt_raw).strip().startswith('{'):
+                                create_gtt_table_in_doc(doc, _gt_raw, order_info)
+                                is_first_section = False
+
+                    if revmo_qolda_b:
+                        _create_revmoproba_qolda_section(doc, revmo_qolda_b, test_results, order_info)
+                        is_first_section = False
+
+                    if revmo_auto:
+                        _create_revmoproba_auto_section(doc, revmo_auto, test_results, order_info)
+                        is_first_section = False
+
+                elif group == "TEST":
+                    # TEST guruhidan maxsus jadval talab qiluvchi testlarni ajratish
+                    _SPEC_KEYS = [
+                        'urologik', 'mujskoy', 'erkaklar', 'ginekolog', 'surtma', 'mazok',
+                        'brutsellez', 'brusellez', 'heddelson', 'xeddelson', 'rayta',
+                        'najas', 'pepsinogen', 'nechiporenko', 'nicheporenko',
+                        'zimnitskiy', 'spermogramma', 'torch', 'qondan',
+                        'tolerantlik', 'gtt',
+                    ]
+                    revmo_auto_t  = [t for t in group_tests_list
+                                     if _is_revmoproba_full_auto_test(t.get('nomi', ''))]
+                    revmo_qolda_t = [t for t in group_tests_list
+                                     if _is_revmoproba_qolda_test(t.get('nomi', ''))]
+                    special_t     = [t for t in group_tests_list
+                                     if not _is_revmoproba_full_auto_test(t.get('nomi', ''))
+                                     and not _is_revmoproba_qolda_test(t.get('nomi', ''))
+                                     and any(k in t.get('nomi', '').lower() for k in _SPEC_KEYS)]
+                    test_only     = [t for t in group_tests_list
+                                     if not _is_revmoproba_full_auto_test(t.get('nomi', ''))
+                                     and not _is_revmoproba_qolda_test(t.get('nomi', ''))
+                                     and not any(k in t.get('nomi', '').lower() for k in _SPEC_KEYS)]
+
+                    if test_only:
+                        guruh_nomi = get_group_name_from_db(group)
+                        h = doc.add_paragraph()
+                        h.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        _set_para_spacing(h, 0, 0, line_spacing=1.0)
+                        run = h.add_run(guruh_nomi)
+                        run.font.name = "Times New Roman"
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), "Times New Roman")
+                        run.font.size = Pt(14)
+                        run.font.bold = True
+                        run.font.color.rgb = RGBColor(0x27, 0xae, 0x60)
+                        create_results_table(doc, test_only, group, order_info, test_results)
+                        is_first_section = False
+
+                    if revmo_qolda_t:
+                        _create_revmoproba_qolda_section(doc, revmo_qolda_t, test_results, order_info)
+                        is_first_section = False
+
+                    if revmo_auto_t:
+                        _create_revmoproba_auto_section(doc, revmo_auto_t, test_results, order_info)
+                        is_first_section = False
+
+                    # Maxsus jadval bo'limlari (har biri alohida sarlavha + jadval)
+                    # Pepsinogen faqat bir marta ko'rsatiladi (ikkala test bir jadvalda)
+                    _peps_shown_test = False
+                    for t in special_t:
+                        tname = t.get('nomi', '')
+                        tnl   = tname.lower()
+                        tid   = t.get('id')
+                        rj    = test_results.get(tid, '') if tid else ''
+                        ok    = rj and rj.strip() not in ('{}', '', 'None')
+                        if any(k in tnl for k in ['urologik', 'mujskoy', 'erkaklar']):
+                            if ok: create_urologik_table_in_doc(doc, rj, order_info)
+                        elif 'qondan' in tnl and 'mazok' in tnl:
+                            # GEM guruhida CBC bo'lsa u yerda ko'rsatiladi, bu yerda qayta ko'rsatma
+                            _cbc_in_gem = any(
+                                _is_hematology_cbc_test((_t.get('nomi') or ''))
+                                for _g2, _tl2 in organized.get('by_group', {}).items()
+                                for _t in _tl2
+                            )
+                            if ok and not _cbc_in_gem:
+                                create_qondan_mazok_table_in_doc(doc, rj, order_info)
+                        elif any(k in tnl for k in ['ginekolog', 'surtma', 'mazok']):
+                            if ok: create_ginekologik_table_in_doc(doc, rj, order_info)
+                        elif any(k in tnl for k in ['brutsellez', 'brusellez', 'heddelson', 'xeddelson', 'rayta']):
+                            if ok: create_brusellez_table_in_doc(doc, rj, order_info)
+                        elif 'najas' in tnl:
+                            if ok: create_najas_table_in_doc(doc, rj, order_info)
+                        elif 'pepsinogen' in tnl:
+                            if ok and not _peps_shown_test:
+                                create_pepsinogen_table_in_doc(doc, rj, order_info)
+                                _peps_shown_test = True
+                        elif any(k in tnl for k in ['nechiporenko', 'nicheporenko']):
+                            if ok: create_nechiporenko_table_in_doc(doc, rj, order_info)
+                        elif 'zimnitskiy' in tnl:
+                            if ok: create_zimnitskiy_table_in_doc(doc, rj, order_info)
+                        elif 'spermogramma' in tnl:
+                            if ok: create_spermogramma_table_in_doc(doc, rj, order_info)
+                        elif 'torch' in tnl:
+                            if ok: create_torch_table_in_doc(doc, rj, order_info)
+                        elif _is_gtt_test(tnl):
+                            if ok: create_gtt_table_in_doc(doc, rj, order_info)
+                        is_first_section = False
+
+                elif group == "URINE":
+                    # URINE guruhida nicheporenko/zimnitskiy maxsus jadval bilan chiqariladi
+                    _URINE_SPEC_KEYS = ['nechiporenko', 'nicheporenko', 'zimnitskiy']
+                    urine_special = [t for t in group_tests_list
+                                     if any(k in (t.get('nomi', '') or '').lower() for k in _URINE_SPEC_KEYS)]
+                    urine_normal  = [t for t in group_tests_list if t not in urine_special]
+
+                    if urine_normal:
+                        guruh_nomi = get_group_name_from_db(group)
+                        h = doc.add_paragraph()
+                        h.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        _set_para_spacing(h, 0, 0, line_spacing=1.0)
+                        run = h.add_run(guruh_nomi)
+                        run.font.name = "Times New Roman"
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), "Times New Roman")
+                        run.font.size = Pt(14)
+                        run.font.bold = True
+                        run.font.color.rgb = RGBColor(0x27, 0xae, 0x60)
+                        create_results_table(doc, urine_normal, group, order_info, test_results)
+                        is_first_section = False
+
+                    for t in urine_special:
+                        tname = t.get('nomi', '')
+                        tnl   = tname.lower()
+                        tid   = t.get('id')
+                        rj    = test_results.get(tid, '') if tid else ''
+                        ok    = rj and str(rj).strip() not in ('{}', '', 'None')
+                        if any(k in tnl for k in ['nechiporenko', 'nicheporenko']):
+                            if ok:
+                                create_nechiporenko_table_in_doc(doc, rj, order_info)
+                        elif 'zimnitskiy' in tnl:
+                            if ok:
+                                create_zimnitskiy_table_in_doc(doc, rj, order_info)
+                        is_first_section = False
+
+                elif group == "IFA":
+                    # Pepsinogen testlarini IFA guruhidan ajratish
+                    pepsinogen_t = [t for t in group_tests_list
+                                    if 'pepsinogen' in (t.get('nomi') or '').lower()]
+                    ifa_regular  = [t for t in group_tests_list if t not in pepsinogen_t]
+
+                    if ifa_regular:
+                        guruh_nomi = get_group_name_from_db(group)
+                        h = doc.add_paragraph()
+                        h.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        _set_para_spacing(h, 0, 0, line_spacing=1.0)
+                        run = h.add_run(guruh_nomi)
+                        run.font.name = "Times New Roman"
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), "Times New Roman")
+                        run.font.size = Pt(14)
+                        run.font.bold = True
+                        run.font.color.rgb = RGBColor(0x27, 0xae, 0x60)
+                        create_results_table(doc, ifa_regular, group, order_info, test_results)
+                        is_first_section = False
+
+                    if pepsinogen_t:
+                        # Birinchi natijasi bor pepsinogen testni topish
+                        peps_json = None
+                        for pt in pepsinogen_t:
+                            rj = test_results.get(pt.get('id'), '') if test_results else ''
+                            if rj and str(rj).strip() not in ('{}', '', 'None'):
+                                peps_json = rj
+                                break
+                        if peps_json:
+                            create_pepsinogen_table_in_doc(doc, peps_json, order_info)
+                        is_first_section = False
+
+                else:
+                    guruh_nomi = get_group_name_from_db(group)
+                    # GEM guruhida faqat CBC testlar bo'lsa, guruh sarlavhasi kerak emas
+                    # (create_hematology_cbc_table_in_doc o'zi "UMUMIY QON TAHLILI" sarlavha qo'shadi)
+                    _all_cbc_only = all(_is_hematology_cbc_test(t.get('nomi', ''))
+                                        for t in group_tests_list)
+                    if not _all_cbc_only:
+                        h = doc.add_paragraph()
+                        h.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        _set_para_spacing(h, 0, 0, line_spacing=1.0)
+                        run = h.add_run(guruh_nomi)
+                        run.font.name = "Times New Roman"
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), "Times New Roman")
+                        run.font.size = Pt(14)
+                        run.font.bold = True
+                        run.font.color.rgb = RGBColor(0x27, 0xae, 0x60)
+                    create_results_table(doc, group_tests_list, group, order_info, test_results)
+                    # GEM guruhida CBC bo'lsa qondan mazok morfologiyasini qo'shish
+                    _has_cbc_in_group = any(_is_hematology_cbc_test(t.get('nomi', ''))
+                                            for t in group_tests_list)
+                    if _has_cbc_in_group:
+                        # Barcha testlardan qondan mazok ni topish
+                        _all_by_group = [t for _g, _tl in organized.get('by_group', {}).items()
+                                         for t in _tl]
+                        _mazok_tests = [t for t in _all_by_group
+                                        if 'qondan' in (t.get('nomi') or '').lower()
+                                        and 'mazok' in (t.get('nomi') or '').lower()]
+                        for _mt in _mazok_tests:
+                            _mj = test_results.get(_mt['id'], '')
+                            if _mj and str(_mj).strip() not in ('{}', '', 'None'):
+                                create_qondan_mazok_table_in_doc(doc, _mj, order_info)
+                                break
+                    is_first_section = False
+    try:
+        add_page_footer_to_doc(doc, order_info)
+    except Exception as e:
+        print(f"   [OGOHLANTIRISH] Footer qo'shishda xato: {e}")
+    try:
+        add_footer(doc, order_info)
+    except Exception as e:
+        print(f"   [OGOHLANTIRISH] Footer (laborant vrach) qo'shishda xato: {e}")
+    return doc
+
+# [15] get_save_dir() va create_filename()
+def get_save_dir():
+    """
+    Blankalar saqlanadigan papkani qaytaradi.
+    Format: G:\Қилинган анализлар\DD.MM.YYYY\
+    Papka mavjud bo'lmasa avtomatik yaratiladi.
+    """
+    try:
+        today = datetime.now().strftime("%d.%m.%Y")
+        save_dir = os.path.join(BASE_DIR, today)
+        
+        # BASE_DIR mavjud emasligini tekshir
+        if not os.path.exists(BASE_DIR):
+            os.makedirs(BASE_DIR, exist_ok=True)
+        
+        # Sana papkasini yaratish (mavjud bo'lsa o'tkazib yuboradi)
+        os.makedirs(save_dir, exist_ok=True)
+        
+        return save_dir
+    except Exception as e:
+        print(f"[XATO] Saqlash papkasini yaratishda xato: {e}")
+        # Fallback: dastur papkasiga saqlash
+        fallback_dir = os.path.join(SCRIPT_DIR, "Blankalar", datetime.now().strftime("%d.%m.%Y"))
+        os.makedirs(fallback_dir, exist_ok=True)
+        return fallback_dir
+
+def create_filename(order_info: dict, group: str, order_id: int, tests_count: int):
+    sample_id = order_info.get('sample_id', '') or str(order_id)
+    fish = (order_info.get('fish') or '').strip()
+    tugilgan_sana = order_info.get('tugilgan_sana', '')
+    yil = ""
+    if tugilgan_sana:
+        try:
+            if isinstance(tugilgan_sana, str) and '-' in tugilgan_sana:
+                yil = tugilgan_sana.split('-')[0]
+            else:
+                yil = str(tugilgan_sana)[:4]
+        except:
+            pass
+    group_display = GROUP_DISPLAY.get(group, group)
+    def clean_filename(text):
+        forbidden = r'[\/\\:*?"<>|]'
+        return re.sub(forbidden, '_', text).strip()
+    if fish and yil:
+        fname = f"{group_display} - {sample_id} {clean_filename(fish)} {yil}.docx"
+    elif fish:
+        fname = f"{group_display} - {sample_id} {clean_filename(fish)}.docx"
+    else:
+        fname = f"{group_display} - {sample_id}.docx"
+    return fname
+
+# OneDrive PDF nusxa saqlash
+# Universal path: OneDrive muhit o'zgaruvchisidan yoki home papkadan topiladi
+# Har qanday foydalanuvchi nomida ishlaydi (alfatech.uz, User, yoki boshqa)
+def _get_onedrive_natijalar(date_str=None):
+    """OneDrive\\Natijalar\\DD.MM.YYYY papkasini qaytaradi (universal, foydalanuvchi nomiga bog'liq emas).
+    date_str: 'DD.MM.YYYY' formatida, None bo'lsa bugungi sana ishlatiladi.
+    """
+    import datetime
+    if date_str is None:
+        date_str = datetime.date.today().strftime("%d.%m.%Y")
+    # 1-usul: OneDrive muhit o'zgaruvchisi (eng ishonchli)
+    onedrive_root = os.environ.get('OneDrive') or os.environ.get('OneDriveConsumer')
+    # 2-usul: home papkadan topish
+    if not onedrive_root:
+        home = os.path.expanduser('~')
+        candidate = os.path.join(home, 'OneDrive')
+        if os.path.exists(candidate):
+            onedrive_root = candidate
+    # 3-usul: fallback — dastur papkasi yonida
+    if not onedrive_root:
+        onedrive_root = os.path.join(os.path.expanduser('~'), 'Natijalar_PDF')
+    return os.path.join(onedrive_root, 'Natijalar', date_str)
+
+def save_pdf_to_onedrive(docx_path, date_str=None):
+    """DOCX faylni ixcham PDF ga aylantirib OneDrive\\Natijalar\\DD.MM.YYYY papkaga saqlaydi.
+    Eski PDF mavjud bo'lsa ustiga yozadi.
+    DOCX ni vaqtinchalik nusxalab ishlaydi — original faylni blokirovka qilmaydi.
+    Fon threadda ishlaydi — pythoncom.CoInitialize() kerak.
+    """
+    import shutil
+    import tempfile
+    import time
+    tmp_docx = None
+    word = None
+    try:
+        # COM ni thread uchun ishga tushirish (MAJBURIY)
+        try:
+            import pythoncom
+            pythoncom.CoInitialize()
+        except Exception:
+            pass
+
+        if not os.path.exists(docx_path):
+            print(f"[PDF] DOCX topilmadi: {docx_path}")
+            return None
+        # Sana bo'yicha papka (DD.MM.YYYY)
+        save_dir = _get_onedrive_natijalar(date_str)
+        if not os.path.exists(save_dir):
+            try:
+                os.makedirs(save_dir, exist_ok=True)
+                print(f"[PDF] Papka yaratildi: {save_dir}")
+            except Exception as e:
+                print(f"[PDF] Papka yaratib bo'lmadi: {e}")
+                return None
+        # PDF fayl nomi
+        base_name = os.path.splitext(os.path.basename(docx_path))[0]
+        pdf_path = os.path.join(save_dir, base_name + ".pdf")
+        abs_pdf = os.path.abspath(pdf_path)
+        # Eski PDF mavjud bo'lsa o'chirish
+        if os.path.exists(pdf_path):
+            try:
+                os.remove(pdf_path)
+            except Exception:
+                pass
+        # DOCX ni vaqtinchalik papkaga nusxalash
+        time.sleep(3)  # Word faylni yozib bo'lishini kutish
+        tmp_dir = tempfile.mkdtemp(prefix="pdf_conv_")
+        tmp_docx = os.path.join(tmp_dir, os.path.basename(docx_path))
+        shutil.copy2(docx_path, tmp_docx)
+        abs_tmp = os.path.abspath(tmp_docx)
+        # win32com orqali ixcham PDF yaratish (ExportAsFixedFormat — kichik hajm)
+        try:
+            import win32com.client
+            word = win32com.client.DispatchEx("Word.Application")
+            word.Visible = False
+            word.DisplayAlerts = False
+            doc = word.Documents.Open(abs_tmp, ReadOnly=True)
+            doc.ExportAsFixedFormat(
+                abs_pdf,
+                ExportFormat=17,       # wdExportFormatPDF
+                OptimizeFor=0,         # wdExportOptimizeForPrint (yuqori sifat, Times New Roman)
+                CreateBookmarks=0,     # wdExportCreateNoBookmarks
+                DocStructureTags=False,
+                BitmapMissingFonts=False,
+                IncludeDocProps=False
+            )
+            doc.Close(SaveChanges=False)
+            print(f"[PDF] Saqlandi: {pdf_path}")
+        except Exception as e:
+            print(f"[PDF] win32com xato: {e}")
+        finally:
+            try:
+                if word:
+                    word.Quit()
+                    word = None
+            except Exception:
+                pass
+        # docx2pdf fallback (agar win32com ishlamasa)
+        if not os.path.exists(pdf_path) and PDF_AVAILABLE:
+            try:
+                convert(abs_tmp, abs_pdf)
+                print(f"[PDF] docx2pdf orqali saqlandi: {pdf_path}")
+            except Exception as e:
+                print(f"[PDF] docx2pdf xato: {e}")
+        if os.path.exists(pdf_path):
+            _sz_before = os.path.getsize(pdf_path) / 1024
+            print(f"[PDF] Dastlabki hajm: {_sz_before:.0f} KB")
+
+            # ── 1-USUL: Ghostscript (eng kuchli siqish, agar o'rnatilgan bo'lsa) ──
+            def _find_ghostscript():
+                import shutil, glob
+                for _nm in ['gswin64c', 'gswin32c', 'gs']:
+                    _p = shutil.which(_nm)
+                    if _p:
+                        return _p
+                for _pat in [
+                    r'C:\Program Files\gs\gs*\bin\gswin64c.exe',
+                    r'C:\Program Files (x86)\gs\gs*\bin\gswin32c.exe',
+                ]:
+                    _ms = glob.glob(_pat)
+                    if _ms:
+                        return sorted(_ms)[-1]
+                return None
+
+            _gs = _find_ghostscript()
+            if _gs:
+                _gs_tmp = pdf_path + ".gs.tmp"
+                try:
+                    import subprocess
+                    subprocess.run([
+                        _gs,
+                        '-sDEVICE=pdfwrite',
+                        '-dCompatibilityLevel=1.4',
+                        '-dPDFSETTINGS=/screen',   # eng kichik hajm
+                        '-dNOPAUSE', '-dQUIET', '-dBATCH',
+                        '-dEmbedAllFonts=false',
+                        '-dSubsetFonts=false',
+                        '-dCompressFonts=true',
+                        '-dDetectDuplicateImages=true',
+                        f'-sOutputFile={_gs_tmp}',
+                        pdf_path
+                    ], capture_output=True, timeout=60)
+                    if os.path.exists(_gs_tmp) and os.path.getsize(_gs_tmp) > 1000:
+                        _sz_gs = os.path.getsize(_gs_tmp) / 1024
+                        if _sz_gs < _sz_before:
+                            os.replace(_gs_tmp, pdf_path)
+                            print(f"[PDF] Ghostscript: {_sz_before:.0f} KB -> {_sz_gs:.0f} KB")
+                            _sz_before = _sz_gs
+                        else:
+                            os.remove(_gs_tmp)
+                    elif os.path.exists(_gs_tmp):
+                        os.remove(_gs_tmp)
+                except Exception as _e:
+                    print(f"[PDF] Ghostscript xato: {_e}")
+                    try:
+                        if os.path.exists(_gs_tmp):
+                            os.remove(_gs_tmp)
+                    except Exception:
+                        pass
+
+            # ── 2-USUL: pikepdf (agar o'rnatilgan bo'lsa, fallback) ──
+            try:
+                import pikepdf
+                _FONT_DESC = pikepdf.Name('/FontDescriptor')
+                _tmp_compressed = pdf_path + ".pk.tmp"
+                with pikepdf.open(pdf_path) as _pdf:
+                    # XMP Metadata o'chirish
+                    if '/Metadata' in _pdf.Root:
+                        del _pdf.Root['/Metadata']
+                    # Info dictionary tozalash
+                    if '/Info' in _pdf.trailer:
+                        _pdf.trailer['/Info'] = pikepdf.Dictionary()
+                    # Sahifa thumbnaillarini o'chirish
+                    for _pg in _pdf.pages:
+                        if '/Thumb' in _pg:
+                            del _pg['/Thumb']
+                    # GLOBAL: barcha indirect obyektlardan FontDescriptor topib FontFile olib tashlash
+                    for _obj in _pdf.objects:
+                        try:
+                            if not isinstance(_obj, pikepdf.Dictionary):
+                                continue
+                            _otype = _obj.get('/Type')
+                            if _otype == _FONT_DESC:
+                                for _sk in ['/FontFile', '/FontFile2', '/FontFile3']:
+                                    if _sk in _obj:
+                                        del _obj[_sk]
+                        except Exception:
+                            pass
+                    _pdf.save(
+                        _tmp_compressed,
+                        compress_streams=True,
+                        object_stream_mode=pikepdf.ObjectStreamMode.generate,
+                        linearize=False,
+                    )
+                if os.path.exists(_tmp_compressed):
+                    _sz_pk = os.path.getsize(_tmp_compressed) / 1024
+                    if _sz_pk < _sz_before:
+                        os.replace(_tmp_compressed, pdf_path)
+                        print(f"[PDF] pikepdf: {_sz_before:.0f} KB -> {_sz_pk:.0f} KB")
+                        _sz_before = _sz_pk
+                    else:
+                        os.remove(_tmp_compressed)
+            except ImportError:
+                pass  # pikepdf yo'q — pymupdf ishlatiladi
+            except Exception as _e:
+                print(f"[PDF] pikepdf xato: {_e}")
+                try:
+                    if os.path.exists(pdf_path + ".pk.tmp"):
+                        os.remove(pdf_path + ".pk.tmp")
+                except Exception:
+                    pass
+
+            # ── 3-USUL: pymupdf/fitz — embedded font stripping + garbage collect ──
+            try:
+                import fitz  # pymupdf
+                _tmp_fitz = pdf_path + ".fz.tmp"
+                _fdoc = fitz.open(pdf_path)
+                # Barcha FontDescriptor lardan FontFile olib tashlash
+                for _xref in range(1, _fdoc.xref_length()):
+                    try:
+                        _s = _fdoc.xref_object(_xref)
+                        # FontDescriptor ni aniqlaymiz
+                        if '/FontDescriptor' not in _s and '/Type/FontDescriptor' not in _s:
+                            continue
+                        for _fk in ['FontFile', 'FontFile2', 'FontFile3']:
+                            if '/' + _fk in _s:
+                                _fdoc.xref_set_key(_xref, _fk, 'null')
+                    except Exception:
+                        pass
+                # garbage=4: orphan streamlarni tozalash, deflate+clean
+                _fdoc.save(_tmp_fitz, garbage=4, deflate=True, clean=True)
+                _fdoc.close()
+                if os.path.exists(_tmp_fitz) and os.path.getsize(_tmp_fitz) > 1000:
+                    _sz_fz = os.path.getsize(_tmp_fitz) / 1024
+                    if _sz_fz < _sz_before:
+                        os.replace(_tmp_fitz, pdf_path)
+                        print(f"[PDF] pymupdf: {_sz_before:.0f} KB -> {_sz_fz:.0f} KB")
+                    else:
+                        os.remove(_tmp_fitz)
+                elif os.path.exists(_tmp_fitz):
+                    os.remove(_tmp_fitz)
+            except ImportError:
+                print(f"[PDF] pymupdf o'rnatilmagan")
+            except Exception as _e:
+                print(f"[PDF] pymupdf xato: {_e}")
+                try:
+                    if os.path.exists(pdf_path + ".fz.tmp"):
+                        os.remove(pdf_path + ".fz.tmp")
+                except Exception:
+                    pass
+
+            _sz = os.path.getsize(pdf_path) / 1024
+            print(f"[PDF] Yakuniy hajm: {_sz:.0f} KB — {pdf_path}")
+            return pdf_path
+        print(f"[PDF] PDF yaratilmadi!")
+        return None
+    except Exception as e:
+        print(f"[PDF] Umumiy xato: {e}")
+        return None
+    finally:
+        # COM ni tozalash
+        try:
+            import pythoncom
+            pythoncom.CoUninitialize()
+        except Exception:
+            pass
+        # Vaqtinchalik fayllarni tozalash
+        try:
+            if tmp_docx and os.path.exists(tmp_docx):
+                os.remove(tmp_docx)
+                os.rmdir(os.path.dirname(tmp_docx))
+        except Exception:
+            pass
+
+# [16] create_blanks_for_order() - PUBLIC entry point
+def create_blanks_for_order(order_id: int, test_results: dict = None, file_exists_callback=None):
+    order_info = get_order_info(order_id)
+    if not order_info:
+        return []
+    all_tests = get_order_tests(order_id)
+    if not all_tests:
+        return []
+    if test_results is None:
+        test_results = {}
+        try:
+            conn = db_conn()
+            if conn:
+                cursor = conn.cursor(dictionary=True)
+                cursor.execute("SELECT id FROM results WHERE order_id = %s ORDER BY id DESC LIMIT 1", (order_id,))
+                result_row = cursor.fetchone()
+                if result_row:
+                    result_id = result_row['id']
+                    cursor.execute("SELECT tahlil_nomi, qiymat, tahlil_id FROM result_items WHERE result_id = %s", (result_id,))
+                    for row in cursor.fetchall():
+                        tahlil_id = row.get('tahlil_id')
+                        if tahlil_id:
+                            test_results[tahlil_id] = row['qiymat']
+                        else:
+                            for test in all_tests:
+                                if test.get('nomi') == row['tahlil_nomi']:
+                                    test_results[test['id']] = row['qiymat']
+                                    break
+                # test_results jadvalidan ham yuklash (chaqirilgan oynadan norma bo'lishi mumkin)
+                cursor.execute("""
+                    SELECT test_name, result_data FROM test_results
+                    WHERE order_id = %s AND result_data IS NOT NULL AND result_data != '' AND result_data != '{}'
+                """, (str(order_id),))
+                for row in cursor.fetchall():
+                    tn = (row.get('test_name') or '').strip()
+                    rd = row.get('result_data') or ''
+                    for test in all_tests:
+                        if (test.get('nomi') or '').strip() == tn:
+                            tid = test.get('id')
+                            if tid and rd and (isinstance(rd, str) and rd.strip().startswith('{') or isinstance(rd, dict)):
+                                test_results[tid] = rd if isinstance(rd, str) else json.dumps(rd, ensure_ascii=False)
+                            break
+                cursor.close()
+                conn.close()
+        except Exception as e:
+            if 'conn' in locals():
+                try:
+                    conn.close()
+                except:
+                    pass
+    # ── Panel member testlarini blankadan chiqarish ───────────────────────────
+    # Buyurtmada "Lipid spektri" yoki "Buyrak paneli" bo'lsa,
+    # ularning tarkibidagi yakka testlar (tahlil_id) blankada QAYTA ko'rsatilmaydi.
+    _has_lipid_panel_b  = any(_is_lipid_spektri_test(t.get('nomi', ''))  for t in all_tests)
+    _has_buyrak_panel_b = any(_is_buyrak_paneli_test(t.get('nomi', '')) for t in all_tests)
+    if _has_lipid_panel_b or _has_buyrak_panel_b:
+        _skip_bl = set()
+        if _has_lipid_panel_b:
+            _skip_bl |= LIPID_PANEL_MEMBER_IDS
+        if _has_buyrak_panel_b:
+            _skip_bl |= BUYRAK_PANEL_MEMBER_IDS
+        all_tests = [t for t in all_tests if t.get('tahlil_id') not in _skip_bl]
+    # ─────────────────────────────────────────────────────────────────────────
+
+    # ── DB dan joriy test nomlarini tahlil_id orqali yuklash ─────────────────
+    # Tahlil nomi bazada o'zgargan bo'lsa, blankada yangi nomni ko'rsatish uchun.
+    try:
+        _tahlil_ids = [t['tahlil_id'] for t in all_tests if t.get('tahlil_id')]
+        if _tahlil_ids:
+            _conn_n = db_conn()
+            if _conn_n:
+                _cur_n = _conn_n.cursor(dictionary=True)
+                _ph_n = ','.join(['%s'] * len(_tahlil_ids))
+                _cur_n.execute(f"SELECT id, nomi FROM tahlillar WHERE id IN ({_ph_n})", _tahlil_ids)
+                _db_names = {row['id']: row['nomi'] for row in _cur_n.fetchall() if row.get('nomi')}
+                _cur_n.close()
+                # Har bir testning nomini DB dan yangilash (order_items.nomi emas, DB.nomi)
+                for t in all_tests:
+                    tid_val = t.get('tahlil_id')
+                    if tid_val and tid_val in _db_names:
+                        t['nomi'] = _db_names[tid_val]
+    except Exception as _ne:
+        print(f"[OGOHLANTIRISH] DB test nomlarini yuklashda xato: {_ne}")
+    # ─────────────────────────────────────────────────────────────────────────
+
+    # Bir xil nomli testlar deduplication: natijasi bori qolsin
+    _seen = {}
+    for t in all_tests:
+        tname = (t.get('nomi') or '').strip()
+        tid = t.get('id')
+        has_res = tid in test_results and bool(test_results.get(tid))
+        if tname not in _seen:
+            _seen[tname] = t
+        else:
+            existing_tid = _seen[tname].get('id')
+            existing_has_res = existing_tid in test_results and bool(test_results.get(existing_tid))
+            if has_res and not existing_has_res:
+                _seen[tname] = t
+    all_tests = list(_seen.values())
+
+    organized = organize_tests_by_template(all_tests, order_id=order_id)
+    try:
+        unified_doc = create_unified_blank(order_id, order_info, organized, test_results)
+        save_dir = get_save_dir()
+        sample_id = order_info.get('sample_id', '') or str(order_id)
+        fish = (order_info.get('fish') or '').strip() if order_info.get('fish') else ''
+        tugilgan_sana = order_info.get('tugilgan_sana', '')
+        telefon = (order_info.get('telefon') or '').strip()
+        yil = ''
+        if tugilgan_sana:
+            try:
+                if isinstance(tugilgan_sana, str) and '-' in tugilgan_sana:
+                    yil = tugilgan_sana.split('-')[0]
+                else:
+                    yil = str(tugilgan_sana)[:4]
+            except:
+                pass
+        def clean_filename(text):
+            if not text:
+                return ''
+            forbidden = r'[\/\\:*?"<>|]'
+            return re.sub(forbidden, '_', str(text)).strip()
+        # Fayl nomi: sample_id + FISH + tug'ilgan yil + telefon
+        name_parts = [sample_id]
+        if fish:
+            name_parts.append(clean_filename(fish))
+        if yil:
+            name_parts.append(yil)
+        if telefon:
+            name_parts.append(clean_filename(telefon))
+        file_name = f"{' '.join(name_parts)}.docx"
+        full_path = os.path.join(save_dir, file_name)
+        if os.path.exists(full_path):
+            if file_exists_callback:
+                response = file_exists_callback(full_path)
+                if not response:
+                    return [full_path]
+        unified_doc.save(full_path)
+        if os.path.exists(full_path):
+            return [full_path]
+        else:
+            return []
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return []
+
+# [17] generate_unified_blank() - Yangi funksiya: test_results jadvalidan natijalarni o'qib blanka yaratish
+def generate_unified_blank(order_id):
+    """
+    Order ID asosida yagona unified blanka yaratish
+    test_results jadvalidan natijalarni o'qib, turli test turlarini qo'llab-quvvatlaydi
+    """
+    try:
+        conn = db_conn()
+        if not conn:
+            return None
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT o.id as order_id,
+                   o.bemor_id,
+                   o.sana_vaqt,
+                   o.sample_id,
+                   o.emizikli,
+                   o.cycle_day,
+                   o.cycle_note,
+                   o.menopauza,
+                   o.homiladorlik_hafta,
+                   o.gormon_dori,
+                   o.klinik_izoh,
+                   b.fish as patient_name,
+                   b.yosh as age,
+                   b.jins as gender,
+                   b.tugilgan_sana,
+                   b.telefon,
+                   b.shifokor,
+                   b.kod_yollanma,
+                   b.natija_kodi
+            FROM orders o
+            LEFT JOIN bemorlar b ON o.bemor_id = b.id
+            WHERE o.id = %s OR o.sample_id = %s
+            LIMIT 1
+        """, (order_id, order_id))
+        order_info = cursor.fetchone()
+        if not order_info:
+            cursor.close()
+            conn.close()
+            return None
+        order_info['fish'] = order_info.get('patient_name', '')
+        order_info['yosh'] = order_info.get('age', '')
+        order_info['jins'] = order_info.get('gender', '')
+        cursor.execute("""
+            SELECT tr.*, tn.guruh, tn.type as test_type_from_norma, tn.standard_blank_path,
+                   tr.filled_template_path
+            FROM test_results tr
+            LEFT JOIN tahlillar_norma tn ON tr.test_name = tn.tahlil_nomi
+            WHERE tr.order_id = %s
+            ORDER BY tn.guruh, tr.test_name
+        """, (str(order_id),))
+        results_raw = cursor.fetchall()
+        cursor.close()
+        conn.close()
+
+        # ── DEDUPLICATION: bir xil test_name bo'lsa, natijali versiyasi qolsin ──
+        seen_names = {}
+        for r in results_raw:
+            name = (r.get('test_name') or '').strip()
+            if not name:
+                continue
+            has_data = bool(r.get('result_data') and r.get('result_data') not in ('{}', ''))
+            if name not in seen_names:
+                seen_names[name] = r
+            else:
+                existing = seen_names[name]
+                existing_has_data = bool(existing.get('result_data') and existing.get('result_data') not in ('{}', ''))
+                if has_data and not existing_has_data:
+                    seen_names[name] = r
+        results = list(seen_names.values())
+
+        config = load_blanka_config()
+        template_path = config.get('blanka_ustuni_path', '')
+        if not template_path or not os.path.exists(template_path):
+            doc = Document()
+        else:
+            doc = Document(template_path)
+        insert_blanka_ustuni_header(doc, order_info)
+
+        # KLINIK MA'LUMOTLAR — blankada qizil katak (menstrual sikl, emizikli, menopauza, homiladorlik, gormon dori)
+        _emizikli_g = order_info.get('emizikli', 0) or 0
+        _cycle_day_g = order_info.get('cycle_day', '') or ''
+        _cycle_note_g = (order_info.get('cycle_note', '') or '').strip()
+        _menopauza_g = order_info.get('menopauza', 0) or 0
+        _homiladorlik_hafta_g = order_info.get('homiladorlik_hafta', None)
+        _gormon_dori_g = (order_info.get('gormon_dori', '') or '').strip()
+        _cn_g_lower = _cycle_note_g.lower()
+        _is_emi_g = _emizikli_g == 1 or ('emizikli' in _cn_g_lower and 'emas' not in _cn_g_lower)
+
+        # Klinik ma'lumotlar qatorlarini yig'ish
+        _clinical_g = []
+        if _cycle_day_g:
+            _clinical_g.append(f"Menstrual siklning {_cycle_day_g}-kuni")
+        if _menopauza_g == 1:
+            _clinical_g.append("Menopauza")
+        if _homiladorlik_hafta_g:
+            try:
+                _hg = int(_homiladorlik_hafta_g)
+                if _hg <= 12: _trg = "1-trimestr"
+                elif _hg <= 27: _trg = "2-trimestr"
+                else: _trg = "3-trimestr"
+                _clinical_g.append(f"Homilador ({_hg}-hafta, {_trg})")
+            except (ValueError, TypeError):
+                pass
+        if _is_emi_g:
+            _clinical_g.append("Emizikli")
+        if _gormon_dori_g:
+            _clinical_g.append(f"Gormon dori: {_gormon_dori_g}")
+
+        if _clinical_g:
+            _num_cols_g = min(len(_clinical_g), 3)
+            _it = doc.add_table(rows=1, cols=_num_cols_g)
+            _it.style = 'Table Grid'
+            _it.alignment = WD_TABLE_ALIGNMENT.CENTER
+            _cw = {1: [19.0], 2: [9.5, 9.5], 3: [6.5, 6.5, 6.0]}
+            _apply_table_widths(_it, _cw.get(_num_cols_g, [6.5]*_num_cols_g))
+            if len(_clinical_g) <= 3:
+                _disp_g = _clinical_g
+            else:
+                _disp_g = _clinical_g[:2] + [", ".join(_clinical_g[2:])]
+            for _ci2, _ctxt2 in enumerate(_disp_g):
+                if _ci2 >= _num_cols_g:
+                    break
+                _cc = _it.rows[0].cells[_ci2]
+                _pp = _cc.paragraphs[0]
+                _pp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                _set_para_spacing(_pp, 1, 1, line_spacing=1)
+                if _ctxt2:
+                    _rn = _pp.add_run(_ctxt2)
+                    _rn.font.name = "Times New Roman"
+                    try:
+                        _rn._element.rPr.rFonts.set(qn('w:eastAsia'), "Times New Roman")
+                    except Exception:
+                        pass
+                    _rn.font.size = Pt(10)
+                    _rn.font.bold = True
+                    _rn.font.color.rgb = RGBColor(0xFF, 0x00, 0x00)
+
+        # ============================================================
+        # 1-QADAM: Har bir test uchun eng to'g'ri shablon faylini topish
+        # Ustuvorlik tartibi:
+        #   1) filled_template_path (foydalanuvchi to'ldirgan fayl)
+        #   2) standard_blank_path  (tahlillar_norma jadvalidagi yo'l)
+        #   3) STANDART_SHABLON_MAPPING (kod ichidagi lug'at)
+        # ============================================================
+        
+        # standard_templates_to_add: test_name -> to'ldirilgan yoki bo'sh shablon yo'li
+        standard_templates_to_add = {}
+        
+        for r in results:
+            test_name = (r.get('test_name') or '').strip()
+            if not test_name:
+                continue
+            # Hematologiya CBC uchun shablon ishlatilmaydi — create_hematology_cbc_table_in_doc ishlatiladi
+            if _is_hematology_cbc_test(test_name):
+                continue
+            
+            best_path = None
+            
+            # Bosqich 1: filled_template_path (foydalanuvchi to'ldirgan)
+            fp = (r.get('filled_template_path') or '').strip()
+            if fp and os.path.exists(fp):
+                best_path = fp
+            
+            # Bosqich 2: standard_blank_path (tahlillar_norma jadvalidan)
+            if not best_path:
+                sp = (r.get('standard_blank_path') or '').strip()
+                if sp and os.path.exists(sp):
+                    best_path = sp
+            
+            # Bosqich 3: STANDART_SHABLON_MAPPING lug'atidan
+            if not best_path:
+                found_path, _ = get_standard_blank_template_for_test(test_name)
+                if found_path and os.path.exists(found_path):
+                    best_path = found_path
+            
+            if best_path:
+                standard_templates_to_add[test_name] = best_path
+        
+        # ============================================================
+        # 2-QADAM: Topilgan shablonlardan FAQAT jadvallarni blankaga qo'shish
+        # ============================================================
+        
+        for test_name, template_path_for_test in standard_templates_to_add.items():
+            doc.add_paragraph()
+            # extract_tables_from_docx funksiyasi orqali jadvallarni ko'chirish
+            success = extract_tables_from_docx(
+                source_path=template_path_for_test,
+                target_doc=doc,
+                section_title=test_name.upper(),  # "GINEKOLOGIK SURTMA"
+                order_info=order_info
+            )
+            if not success:
+                print(f"[OGOHLANTIRISH] {test_name} uchun jadval qo'shilmadi")
+        
+        # ============================================================
+        # 3-QADAM: Standart shabloni bor testlarni remaining results dan olib tashlash
+        # (ular quyida "Ekspress" yoki boshqa guruh sifatida qayta ko'rinmasligi uchun)
+        # ============================================================
+        
+        results_without_template = [
+            r for r in results
+            if (r.get('test_name') or '').strip() not in standard_templates_to_add
+        ]
+        # test_name -> tahlil_id xaritasi (norma olish uchun)
+        name_to_tahlil_id = {}
+        try:
+            conn2 = db_conn()
+            if conn2:
+                cur2 = conn2.cursor(dictionary=True)
+                cur2.execute("SELECT tahlil_id, COALESCE(oi.nomi, t.nomi) as nomi FROM order_items oi LEFT JOIN tahlillar t ON oi.tahlil_id = t.id WHERE oi.order_id = %s", (str(order_id),))
+                for row in cur2.fetchall():
+                    n = (row.get('nomi') or '').strip()
+                    if n:
+                        name_to_tahlil_id[n] = row.get('tahlil_id')
+                cur2.close()
+                conn2.close()
+        except Exception:
+            pass
+        
+        # Umumiy qon tahlili (BC-20S) — avval to'liq test, yo'q bo'lsa parametrlarni agregatsiya
+        hema_done = False
+        for r in results_without_template:
+            test_name = (r.get('test_name') or '').strip()
+            result_data = r.get('result_data') or '{}'
+            if _is_hematology_cbc_test(test_name):
+                try:
+                    rd = json.loads(result_data) if isinstance(result_data, str) and result_data.strip().startswith('{') else (result_data if isinstance(result_data, dict) else {})
+                    vals = {k: v for k, v in (rd or {}).items() if k not in ('type', 'source', 'sid', 'sno', 'result')}
+                    if vals:
+                        create_hematology_cbc_table_in_doc(doc, result_data, order_info)
+                        hema_done = True
+                        results_without_template = [x for x in results_without_template if (x.get('test_name') or '').strip() != test_name]
+                        # CBC dan keyin qondan mazok morfologiyasini qo'shish
+                        for _mr in results_without_template:
+                            _mn = (_mr.get('test_name') or '').strip().lower()
+                            if 'qondan' in _mn and 'mazok' in _mn:
+                                _md = (_mr.get('result_data') or '').strip()
+                                if _md and _md not in ('{}', 'None'):
+                                    create_qondan_mazok_table_in_doc(doc, _md, order_info)
+                                    results_without_template = [x for x in results_without_template
+                                                                if not ('qondan' in (x.get('test_name') or '').lower()
+                                                                        and 'mazok' in (x.get('test_name') or '').lower())]
+                                break
+                        break
+                except Exception:
+                    pass
+        
+        if not hema_done:
+            HEMA_PARAM_NAMES = {kod for _, kod, _, _ in CBC_HEMA_ROWS}
+            hema_aggregated = {}
+            hema_sample_id = None
+            for r in results_without_template:
+                tn = (r.get('test_name') or '').strip()
+                if tn in HEMA_PARAM_NAMES:
+                    rd = r.get('result_data') or '{}'
+                    try:
+                        data = json.loads(rd) if isinstance(rd, str) and rd.strip().startswith('{') else (rd if isinstance(rd, dict) else {})
+                    except Exception:
+                        data = {}
+                    val = data.get('result') or data.get('actual_value') or data.get(tn)
+                    if val is not None:
+                        hema_aggregated[tn] = str(val).strip()
+                    if not hema_sample_id:
+                        hema_sample_id = data.get('sample_id') or data.get('sid') or order_info.get('sample_id')
+            
+            if hema_aggregated:
+                merged_hema = {
+                    'source': 'BC-20S', 'sid': hema_sample_id,
+                    'type': 'hematology_cbc', **hema_aggregated
+                }
+                create_hematology_cbc_table_in_doc(doc, merged_hema, order_info)
+                results_without_template = [x for x in results_without_template if (x.get('test_name') or '').strip() not in hema_aggregated]
+                # Aggregatsiyadan keyin ham qondan mazok tekshirish
+                for _mr in results_without_template:
+                    _mn = (_mr.get('test_name') or '').strip().lower()
+                    if 'qondan' in _mn and 'mazok' in _mn:
+                        _md = (_mr.get('result_data') or '').strip()
+                        if _md and _md not in ('{}', 'None'):
+                            create_qondan_mazok_table_in_doc(doc, _md, order_info)
+                            results_without_template = [x for x in results_without_template
+                                                        if not ('qondan' in (x.get('test_name') or '').lower()
+                                                                and 'mazok' in (x.get('test_name') or '').lower())]
+                        break
+
+        # Siydikning umumiy tahlili (URIT-50) — group_order loopida URINE guruhi sifatida ko'rsatiladi
+
+        # Maxsus jadval dialoglari uchun Word generatsiyasi
+        _SPECIAL_KEYS = [
+            'ginekolog', 'surtma', 'mazok', 'urologik', 'mujskoy', 'erkaklar',
+            'brutsellez', 'brusellez', 'heddelson', 'xeddelson', 'rayta',
+            'najas', 'pepsinogen', 'nechiporenko', 'nicheporenko',
+            'zimnitskiy', 'spermogramma', 'torch', 'qondan',
+        ]
+        _peps_shown_results = False
+        for r in results_without_template:
+            test_name = (r.get('test_name') or '').strip()
+            result_data = r.get('result_data') or '{}'
+            test_name_lower = test_name.lower()
+
+            if not any(k in test_name_lower for k in _SPECIAL_KEYS):
+                continue
+
+            has_data = result_data and result_data.strip() not in ('{}', '', 'None')
+
+            if any(k in test_name_lower for k in ['urologik', 'mujskoy', 'erkaklar']):
+                if has_data:
+                    create_urologik_table_in_doc(doc, result_data, order_info)
+            elif 'qondan' in test_name_lower and 'mazok' in test_name_lower:
+                if has_data:
+                    create_qondan_mazok_table_in_doc(doc, result_data, order_info)
+            elif any(k in test_name_lower for k in ['ginekolog', 'surtma', 'mazok']):
+                if has_data:
+                    create_ginekologik_table_in_doc(doc, result_data, order_info)
+            elif any(k in test_name_lower for k in ['brutsellez', 'brusellez', 'heddelson', 'xeddelson', 'rayta']):
+                if has_data:
+                    create_brusellez_table_in_doc(doc, result_data, order_info)
+            elif 'najas' in test_name_lower:
+                if has_data:
+                    create_najas_table_in_doc(doc, result_data, order_info)
+            elif 'pepsinogen' in test_name_lower:
+                if has_data and not _peps_shown_results:
+                    create_pepsinogen_table_in_doc(doc, result_data, order_info)
+                    _peps_shown_results = True
+            elif any(k in test_name_lower for k in ['nechiporenko', 'nicheporenko']):
+                if has_data:
+                    create_nechiporenko_table_in_doc(doc, result_data, order_info)
+            elif 'zimnitskiy' in test_name_lower:
+                if has_data:
+                    create_zimnitskiy_table_in_doc(doc, result_data, order_info)
+            elif 'spermogramma' in test_name_lower:
+                if has_data:
+                    create_spermogramma_table_in_doc(doc, result_data, order_info)
+            elif 'torch' in test_name_lower:
+                if has_data:
+                    create_torch_table_in_doc(doc, result_data, order_info)
+            elif _is_gtt_test(test_name_lower):
+                if has_data:
+                    create_gtt_table_in_doc(doc, result_data, order_info)
+        
+        # Qolgan results dan EXPRESS va boshqa guruhlarni ko'rsatish
+        pos_neg = [r for r in results_without_template if r.get('test_type') == 'positive_negative' or r.get('test_type_from_norma') in ('positive_negative', 'express') or 'ekspress' in (r.get('test_name') or '').lower()]
+        if pos_neg:
+            heading = doc.add_paragraph()
+            heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _set_para_spacing(heading, 0, 0, line_spacing=1.0)
+            _add_run_tnr(heading, "EKSPRESS TESTLAR NATIJALARI", 14, bold=True,
+                         color_rgb=RGBColor(0x27, 0xae, 0x60))
+            table = doc.add_table(rows=1, cols=4)
+            table.style = 'Table Grid'
+            table.alignment = WD_TABLE_ALIGNMENT.CENTER
+            _apply_table_widths(table, [1.5, 9.0, 4.5, 4.0])
+            HEADER_COLOR = "9DC3E6"
+            for cell, hdr in zip(table.rows[0].cells, ["№", "Tahlil nomi", "Natija", "Norma"]):
+                _set_cell_shading(cell, HEADER_COLOR)
+                ph = cell.paragraphs[0]
+                ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                _set_para_spacing(ph, 0, 0, line_spacing=1)
+                _add_run_tnr(ph, hdr, 11, bold=True)
+            jins = order_info.get('jins', '') or ''
+            yosh_raw = order_info.get('yosh') or order_info.get('age')
+            try:
+                yosh_int = int(yosh_raw) if yosh_raw else None
+            except Exception:
+                yosh_int = None
+            emizikli_flag = order_info.get('emizikli', 0) if order_info else 0
+            cycle_note_g = (order_info.get('cycle_note', '') or '').strip()
+            menopauza_flag = order_info.get('menopauza', 0) if order_info else 0
+            homiladorlik_hafta_val = order_info.get('homiladorlik_hafta', None) if order_info else None
+            for i, r in enumerate(pos_neg, 1):
+                row = table.add_row()
+                _keep_row_together(row)
+                natija_val = _format_result_value(r.get('result_data', '{}'))
+                tn = (r.get('test_name') or 'N/A').strip()
+                tid = name_to_tahlil_id.get(tn)
+                norma_info = get_test_norma(tn, jins, "EXPRESS", yosh_int, tahlil_id=tid,
+                                           emizikli=emizikli_flag, cycle_note=cycle_note_g,
+                                           menopauza=menopauza_flag, homiladorlik_hafta=homiladorlik_hafta_val)
+                norma_text = norma_info.get('norma', '-')
+                bold_hints_e = norma_info.get('bold_hints', [])
+                cells_r = row.cells
+                p_num = cells_r[0].paragraphs[0]
+                p_num.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                _set_para_spacing(p_num, 0, 0, line_spacing=1)
+                _add_run_tnr(p_num, str(i), 11)
+                p_name = cells_r[1].paragraphs[0]
+                p_name.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                _set_para_spacing(p_name, 0, 0, line_spacing=1)
+                _add_run_tnr(p_name, tn or 'N/A', 11, bold=True)
+                p_res = cells_r[2].paragraphs[0]
+                p_res.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                _set_para_spacing(p_res, 0, 0, line_spacing=1)
+                _add_run_tnr(p_res, natija_val or '-', 11, bold=True)
+                p_norma = cells_r[3].paragraphs[0]
+                p_norma.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                _set_para_spacing(p_norma, 0, 0, line_spacing=1)
+                _add_multiline_norma(p_norma, norma_text or '-', 11, bold_hints=bold_hints_e, patient_jins=jins)
+            doc.add_paragraph()
+        blood = [r for r in results_without_template if r.get('test_type') == 'blood_group' or r.get('test_type_from_norma') == 'blood_group'
+                 or any(k in (r.get('test_name') or '').lower() for k in ['qon guruhi', 'rezus'])]
+        if blood:
+            _create_blood_group_table(doc, blood[0].get('result_data', '{}'))
+            doc.add_paragraph()
+
+        # Qolgan testlar: GEM, BIO, URINE (siydik, umumiy qon, bioximik) — 4 ustunli jadval
+        handled = set()
+        for r in (pos_neg or []) + (blood or []):
+            handled.add((r.get('test_name') or '').strip())
+        _ALL_SPECIAL_KEYS = [
+            'ginekolog', 'surtma', 'mazok', 'urologik', 'mujskoy', 'erkaklar',
+            'brutsellez', 'brusellez', 'heddelson', 'xeddelson', 'rayta',
+            'najas', 'pepsinogen', 'nechiporenko', 'nicheporenko',
+            'zimnitskiy', 'spermogramma', 'torch',
+        ]
+        for r in results_without_template:
+            tn = (r.get('test_name') or '').strip()
+            if any(k in tn.lower() for k in _ALL_SPECIAL_KEYS):
+                handled.add(tn)
+            if _is_hematology_cbc_test(tn):
+                handled.add(tn)
+        remaining = [r for r in results_without_template if (r.get('test_name') or '').strip() not in handled]
+        if remaining:
+            # Guruh bo'yicha: GEMOTOLOGIK, BIOXIMIK, KOAGULOGRAMMA, IFA, BOSHQA, SIYDIK
+            group_order = [
+                ("GEM",   ""),
+                ("BIO",   "QONNING BIOKIMYOVIY TAHLILI"),
+                ("OTHER", "BOSHQA TESTLAR"),
+                ("IFA",   "IMMUNOFERMENT ANALIZLAR"),
+                ("COAG",  "KOAGULOGRAMMA"),
+                ("URINE", "UMUMIY SIYDIK TAHLILI"),
+            ]
+            jins = order_info.get('jins', '') or ''
+            yosh_raw = order_info.get('yosh') or order_info.get('age')
+            try:
+                yosh_int = int(yosh_raw) if yosh_raw else None
+            except Exception:
+                yosh_int = None
+
+            def _r_matches_group(r, guruh_code):
+                tn = (r.get('test_name') or '').strip()
+                r_guruh = (r.get('guruh') or '').strip().upper()
+                tn_upper = tn.upper()
+                if r_guruh == guruh_code:
+                    return True
+                if guruh_code == "GEM" and any(kw in tn_upper for kw in ['QON', 'GEMOTOLOG', 'GEMATOLOG', 'ERITROTSIT', 'LEYKOTSIT', 'GEMOGLOBIN', 'ESR']):
+                    return 'qon guruhi' not in tn.lower() and 'rezus' not in tn.lower()
+                if guruh_code == "BIO" and any(kw in tn_upper for kw in ['GLYUKOZA', 'KREATININ', 'MOCHEVINA', 'ALT', 'AST', 'BILIRUBIN', 'KALSIY', 'MAGNIY', 'BIOKIMYOVIY']):
+                    return True
+                if guruh_code == "URINE" and any(kw in tn_upper for kw in ['SIYDIK', 'URINE']):
+                    return 'siydik kislota' not in tn.lower()
+                if guruh_code == "IFA" and any(kw in tn_upper for kw in ['IFA', 'ИФА', 'GARMON', 'TTG', 'T4', 'T3', 'PROLAKTIN', 'FSH', 'FSG', 'LH', 'LG', 'GEPATIT', 'HBSAG', 'HCV', 'HDV', 'VITAMIN', 'FERITIN', 'ESTRADIOL', 'PROGESTERON', 'TESTOSTERON', 'INSULIN', 'HCG']):
+                    return True
+                if guruh_code == "COAG" and any(kw in tn_upper for kw in ['KOAGUL', 'ПРОТРОМБИН', 'PROTROMBIN', 'FIBRINOGEN', 'ACHTV', 'ТРОМБИН', 'TROMBINO', 'MNO', 'PTI', 'PT/']):
+                    return True
+                if guruh_code == "OTHER":
+                    return True
+                return False
+
+            def _add_result_row(table, test_name, result_data, guruh_code):
+                """test_name va result_data asosida jadvalga qator qo'shish."""
+                tn_lower = test_name.lower()
+
+                # KOAGULOGRAMMA to'liq — JSON bo'lsa kengaytirish, aks holda header
+                if 'koagulogramma' in tn_lower and ("to'liq" in tn_lower or 'toliq' in tn_lower):
+                    koag2_expanded = False
+                    if isinstance(result_data, str) and result_data.strip().startswith('{'):
+                        try:
+                            kd2 = json.loads(result_data)
+                            if isinstance(kd2, dict) and any(k in kd2 for k in ['pt_sek', 'tt', 'achtv', 'fibrinogen']):
+                                hrow2 = table.add_row()
+                                _keep_row_together(hrow2)
+                                hm2 = hrow2.cells[0].merge(hrow2.cells[3])
+                                _set_cell_shading(hm2, "9DC3E6")
+                                hp2 = hm2.paragraphs[0]
+                                hp2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                _set_para_spacing(hp2, 0, 0, line_spacing=1)
+                                _add_run_tnr(hp2, test_name, 11, bold=True)
+                                # Koagulogramma sub-norma bazadan olish
+                                _koag_norma = {
+                                    "pt_sek":      ("13 \u2013 15",      "sek"),
+                                    "pt_kviku":    ("70.0 \u2013 100.0", "%"),
+                                    "pt_mno":      ("0.90 \u2013 1.15",  "INR"),
+                                    "tt":          ("11 \u2013 18",      "sek"),
+                                    "achtv":       ("25 \u2013 40",      "sek"),
+                                    "fibrinogen":  ("2.0 \u2013 4.0",    "g/l"),
+                                }
+                                try:
+                                    _kn_conn = db_conn()
+                                    if _kn_conn:
+                                        _kn_cur = _kn_conn.cursor(dictionary=True)
+                                        _kn_cur.execute(
+                                            "SELECT result_template FROM tahlillar_norma WHERE tahlil_nomi = %s LIMIT 1",
+                                            (test_name,)
+                                        )
+                                        _kn_row = _kn_cur.fetchone()
+                                        _kn_cur.close(); _kn_conn.close()
+                                        if _kn_row and _kn_row.get('result_template'):
+                                            _kn_tmpl = json.loads(_kn_row['result_template'])
+                                            for _kc in _kn_tmpl.get('components', []):
+                                                _kck = _kc.get('key', '')
+                                                _kcn = (_kc.get('norma') or '').strip()
+                                                _kcu = (_kc.get('unit') or '').strip()
+                                                if _kck in _koag_norma and _kcn:
+                                                    _koag_norma[_kck] = (_kcn, _kcu or _koag_norma[_kck][1])
+                                except Exception:
+                                    pass
+                                _koag2_rows = [
+                                    ("PT sekundalarda",          kd2.get('pt_sek'),     _koag_norma['pt_sek'][0],     _koag_norma['pt_sek'][1]),
+                                    ("PT bo'yicha Kviku (%)",    kd2.get('pt_kviku'),   _koag_norma['pt_kviku'][0],   _koag_norma['pt_kviku'][1]),
+                                    ("MNO / INR",               kd2.get('pt_mno'),     _koag_norma['pt_mno'][0],     _koag_norma['pt_mno'][1]),
+                                    ("TT (Tromboplastin vaqti)", kd2.get('tt'),         _koag_norma['tt'][0],         _koag_norma['tt'][1]),
+                                    ("ACHTV",                    kd2.get('achtv'),      _koag_norma['achtv'][0],      _koag_norma['achtv'][1]),
+                                    ("Fibrinogen",               kd2.get('fibrinogen'), _koag_norma['fibrinogen'][0], _koag_norma['fibrinogen'][1]),
+                                ]
+                                for sn, sv, snr, su in _koag2_rows:
+                                    if sv is None:
+                                        continue
+                                    kr2 = table.add_row()
+                                    _keep_row_together(kr2)
+                                    kc2 = kr2.cells
+                                    for ci, (al, txt) in enumerate([(WD_ALIGN_PARAGRAPH.LEFT, sn if ci == 0 else ""),
+                                                                     (WD_ALIGN_PARAGRAPH.CENTER, str(sv) if ci == 1 else ""),
+                                                                     (WD_ALIGN_PARAGRAPH.CENTER, ""),
+                                                                     (WD_ALIGN_PARAGRAPH.CENTER, su if ci == 3 else "")]):
+                                        _set_para_spacing(kc2[ci].paragraphs[0], 0, 0, line_spacing=1)
+                                    p2k0 = kc2[0].paragraphs[0]; p2k0.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                                    _add_run_tnr(p2k0, sn, 11, bold=True)
+                                    p2k1 = kc2[1].paragraphs[0]; p2k1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                    _add_run_tnr(p2k1, str(sv), 11, bold=True)
+                                    p2k2 = kc2[2].paragraphs[0]; p2k2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                    _add_multiline_norma(p2k2, snr, 11)
+                                    p2k3 = kc2[3].paragraphs[0]; p2k3.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                    _add_run_tnr(p2k3, su, 11)
+                                koag2_expanded = True
+                        except Exception:
+                            pass
+                    if not koag2_expanded:
+                        row = table.add_row()
+                        _keep_row_together(row)
+                        merged = row.cells[0].merge(row.cells[3])
+                        _set_cell_shading(merged, "9DC3E6")
+                        ph = merged.paragraphs[0]
+                        ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        _set_para_spacing(ph, 0, 0, line_spacing=1)
+                        _add_run_tnr(ph, test_name, 11, bold=True)
+                    return
+
+                # REVMOPROBA to'liq — JSON yoki matn formatidan 3 qatorga kengaytirish (RF, CRP, ASLO)
+                if 'revmoproba' in tn_lower and ("to'liq" in tn_lower or 'toliq' in tn_lower):
+                    revmo_expanded = False
+                    kd_rm = None
+                    if isinstance(result_data, str):
+                        _rd_s = result_data.strip()
+                        if _rd_s.startswith('{'):
+                            try:
+                                kd_rm = json.loads(_rd_s)
+                            except Exception:
+                                kd_rm = None
+                        if not kd_rm:
+                            # "rf: 2.86, crp: 10.24, aslo: 362.90" matn formatini parse qilish
+                            _parsed = {}
+                            for _part in re.split(r',\s*', _rd_s):
+                                _m = re.match(r'(\w+)\s*:\s*(.+)', _part.strip())
+                                if _m:
+                                    _parsed[_m.group(1).lower()] = _m.group(2).strip()
+                            if any(k in _parsed for k in ['rf', 'crp', 'aslo']):
+                                kd_rm = _parsed
+                    if isinstance(kd_rm, dict) and any(k in kd_rm for k in ['rf', 'crp', 'aslo']):
+                        try:
+                            # Sub-norma bazadan olish (hardcoded fallback)
+                            _rm_norma = {
+                                "rf":   ("<14",  "ME/ml"),
+                                "crp":  ("<5",   "mg/l"),
+                                "aslo": ("<200", "ME/ml"),
+                            }
+                            try:
+                                _rm_conn = db_conn()
+                                if _rm_conn:
+                                    _rm_cur = _rm_conn.cursor(dictionary=True)
+                                    _rm_cur.execute(
+                                        "SELECT result_template FROM tahlillar_norma WHERE tahlil_nomi = %s LIMIT 1",
+                                        (test_name,)
+                                    )
+                                    _rm_row = _rm_cur.fetchone()
+                                    _rm_cur.close(); _rm_conn.close()
+                                    if _rm_row and _rm_row.get('result_template'):
+                                        _rm_tmpl = json.loads(_rm_row['result_template'])
+                                        for _rc in _rm_tmpl.get('components', []):
+                                            _rck = _rc.get('key', '')
+                                            _rcn = (_rc.get('norma') or '').strip()
+                                            _rcu = (_rc.get('unit') or '').strip()
+                                            if _rck in _rm_norma and _rcn:
+                                                _rm_norma[_rck] = (_rcn, _rcu or _rm_norma[_rck][1])
+                            except Exception:
+                                pass
+                            hrow_rm = table.add_row()
+                            _keep_row_together(hrow_rm)
+                            hm_rm = hrow_rm.cells[0].merge(hrow_rm.cells[3])
+                            _set_cell_shading(hm_rm, "9DC3E6")
+                            hp_rm = hm_rm.paragraphs[0]
+                            hp_rm.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            _set_para_spacing(hp_rm, 0, 0, line_spacing=1)
+                            _add_run_tnr(hp_rm, test_name, 11, bold=True)
+                            _revmo_rows = [
+                                ("RF (Revmatoid faktor)",     kd_rm.get('rf'),   _rm_norma['rf'][0],   _rm_norma['rf'][1]),
+                                ("CRP (S-reaktiv oqsil)",     kd_rm.get('crp'),  _rm_norma['crp'][0],  _rm_norma['crp'][1]),
+                                ("ASLO (Antistreptolizin-O)", kd_rm.get('aslo'), _rm_norma['aslo'][0], _rm_norma['aslo'][1]),
+                            ]
+                            for sn_rm, sv_rm, snr_rm, su_rm in _revmo_rows:
+                                if sv_rm is None:
+                                    continue
+                                kr_rm = table.add_row()
+                                _keep_row_together(kr_rm)
+                                kc_rm = kr_rm.cells
+                                p_rm0 = kc_rm[0].paragraphs[0]; p_rm0.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                                _set_para_spacing(p_rm0, 0, 0, line_spacing=1)
+                                _add_run_tnr(p_rm0, sn_rm, 11, bold=True)
+                                p_rm1 = kc_rm[1].paragraphs[0]; p_rm1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                _set_para_spacing(p_rm1, 0, 0, line_spacing=1)
+                                _add_run_tnr(p_rm1, str(sv_rm), 11, bold=True)
+                                p_rm2 = kc_rm[2].paragraphs[0]; p_rm2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                _set_para_spacing(p_rm2, 0, 0, line_spacing=1)
+                                _add_multiline_norma(p_rm2, snr_rm, 11)
+                                p_rm3 = kc_rm[3].paragraphs[0]; p_rm3.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                _set_para_spacing(p_rm3, 0, 0, line_spacing=1)
+                                _add_run_tnr(p_rm3, su_rm, 11)
+                            revmo_expanded = True
+                        except Exception:
+                            pass
+                    if revmo_expanded:
+                        return
+
+                # Protrombin Time — ko'p komponentli natija (PT sek bor bo'lsa kengaytirish)
+                if any(k in tn_lower for k in ['protrombin', 'prothrombin', 'pt/mno', 'pti']):
+                    if isinstance(result_data, str) and result_data.strip().startswith('{'):
+                        try:
+                            rd = json.loads(result_data)
+                            if isinstance(rd, dict):
+                                pt_sek  = rd.get('pt_sek') or rd.get('pt_seconds') or rd.get('pt')
+                                kviku   = rd.get('pt_kviku') or rd.get('kviku') or rd.get('po_kviku') or rd.get('kvick')
+                                mno_val = rd.get('pt_mno') or rd.get('mno') or rd.get('inr')
+                                # pt_sek bor bo'lsa ham kengaytirish (faqat PT topshirgan bemorlar uchun)
+                                if pt_sek is not None or kviku is not None or mno_val is not None:
+                                    # Norma bazadan olish (hardcoded fallback)
+                                    _pt_norma = {
+                                        "pt_sek":   ("13 \u2013 15",      "sek"),
+                                        "pt_kviku": ("70.0 \u2013 100.0", "%"),
+                                        "pt_mno":   ("0.90 \u2013 1.15",  "INR"),
+                                    }
+                                    try:
+                                        _pt_conn = db_conn()
+                                        if _pt_conn:
+                                            _pt_cur = _pt_conn.cursor(dictionary=True)
+                                            _pt_cur.execute(
+                                                "SELECT result_template FROM tahlillar_norma WHERE tahlil_nomi = %s LIMIT 1",
+                                                (test_name,)
+                                            )
+                                            _pt_row = _pt_cur.fetchone()
+                                            _pt_cur.close(); _pt_conn.close()
+                                            if _pt_row and _pt_row.get('result_template'):
+                                                _pt_tmpl = json.loads(_pt_row['result_template'])
+                                                for _pc in _pt_tmpl.get('components', []):
+                                                    _pck = _pc.get('key', '')
+                                                    _pcn = (_pc.get('norma') or '').strip()
+                                                    _pcu = (_pc.get('unit') or '').strip()
+                                                    if _pck in _pt_norma and _pcn:
+                                                        _pt_norma[_pck] = (_pcn, _pcu or _pt_norma[_pck][1])
+                                    except Exception:
+                                        pass
+                                    for sub_name, sub_val, sub_norma, sub_unit in [
+                                        (test_name,                  pt_sek,  _pt_norma['pt_sek'][0],   _pt_norma['pt_sek'][1]),
+                                        ("PT bo\u2018yicha Kviku", kviku,   _pt_norma['pt_kviku'][0], _pt_norma['pt_kviku'][1]),
+                                        ("MNO / INR",               mno_val, _pt_norma['pt_mno'][0],   _pt_norma['pt_mno'][1]),
+                                    ]:
+                                        if sub_val is None:
+                                            continue
+                                        row = table.add_row()
+                                        _keep_row_together(row)
+                                        cells_r = row.cells
+                                        p0 = cells_r[0].paragraphs[0]
+                                        p0.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                                        _set_para_spacing(p0, 0, 0, line_spacing=1)
+                                        _add_run_tnr(p0, sub_name, 11, bold=True)
+                                        p1 = cells_r[1].paragraphs[0]
+                                        p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                        _set_para_spacing(p1, 0, 0, line_spacing=1)
+                                        _add_run_tnr(p1, str(sub_val), 11, bold=True)
+                                        p2 = cells_r[2].paragraphs[0]
+                                        p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                        _set_para_spacing(p2, 0, 0, line_spacing=1)
+                                        _add_multiline_norma(p2, sub_norma, 11)
+                                        p3 = cells_r[3].paragraphs[0]
+                                        p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                        _set_para_spacing(p3, 0, 0, line_spacing=1)
+                                        _add_run_tnr(p3, sub_unit, 11)
+                                    return
+                        except Exception:
+                            pass
+
+                # Oddiy qator
+                natija_val = _format_result_value(result_data)
+                norma_from_win, unit_from_win, analyzer_ref3 = None, None, None
+                if isinstance(result_data, str) and result_data.strip().startswith('{'):
+                    try:
+                        rd = json.loads(result_data)
+                        if isinstance(rd, dict):
+                            src = rd.get('source', '')
+                            if src == 'BK-280':
+                                analyzer_ref3 = rd.get('analyzer_ref') or rd.get('norma') or rd.get('ref') or ''
+                            else:
+                                norma_from_win = rd.get('norma') or rd.get('norma_text')
+                            unit_from_win = rd.get('birlik') or rd.get('unit') or rd.get('o_lchov_birligi')
+                    except Exception:
+                        pass
+                _g = "TEST" if guruh_code == "OTHER" else guruh_code
+                tid = name_to_tahlil_id.get(test_name)
+                emizikli_flag = order_info.get('emizikli', 0) if order_info else 0
+                cycle_note_g2 = (order_info.get('cycle_note', '') or '').strip()
+                menopauza_flag = order_info.get('menopauza', 0) if order_info else 0
+                homiladorlik_hafta_val = order_info.get('homiladorlik_hafta', None) if order_info else None
+                norma_info = get_test_norma(test_name, jins, _g, yosh_int,
+                                           norma_from_window=norma_from_win, unit_from_window=unit_from_win,
+                                           tahlil_id=tid, emizikli=emizikli_flag, cycle_note=cycle_note_g2,
+                                           menopauza=menopauza_flag, homiladorlik_hafta=homiladorlik_hafta_val)
+                if analyzer_ref3 and norma_info.get('min') is None and norma_info.get('max') is None:
+                    try:
+                        import re as _re4
+                        _ns4 = _re4.findall(r'[\d.]+', str(analyzer_ref3).split('\n')[0])
+                        if len(_ns4) >= 2:
+                            norma_info['min'] = float(_ns4[0])
+                            norma_info['max'] = float(_ns4[1])
+                    except Exception:
+                        pass
+                norma_text = norma_info.get('norma', '-')
+                unit_text  = norma_info.get('unit', '')
+                bold_hints_g = norma_info.get('bold_hints', [])
+                row = table.add_row()
+                _keep_row_together(row)
+                cells_r = row.cells
+                p0 = cells_r[0].paragraphs[0]
+                p0.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                _set_para_spacing(p0, 0, 0, line_spacing=1)
+                _add_run_tnr(p0, test_name, 11, bold=True)
+                p1 = cells_r[1].paragraphs[0]
+                p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                _set_para_spacing(p1, 0, 0, line_spacing=1)
+                if natija_val and norma_text and norma_text.strip() != '-':
+                    natija_val = _round_result_to_norma(natija_val, norma_text)
+                elif natija_val and analyzer_ref3:
+                    natija_val = _round_result_to_norma(natija_val, analyzer_ref3)
+                res_color, res_arrow = _get_result_color_and_arrow(natija_val, norma_info, jins)
+                display_val = (natija_val or '-') + (res_arrow or '')
+                _add_run_tnr(p1, display_val, 11, bold=True, color_rgb=res_color)
+                p2 = cells_r[2].paragraphs[0]
+                p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                _set_para_spacing(p2, 0, 0, line_spacing=1)
+                _add_multiline_norma(p2, norma_text, 11, bold_hints=bold_hints_g, patient_jins=jins)
+                p3 = cells_r[3].paragraphs[0]
+                p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                _set_para_spacing(p3, 0, 0, line_spacing=1)
+                _add_run_tnr(p3, unit_text, 11)
+
+            def _make_4col_table(doc, guruh_code):
+                table = doc.add_table(rows=1, cols=4)
+                table.style = 'Table Grid'
+                table.alignment = WD_TABLE_ALIGNMENT.CENTER
+                widths = [7.0, 3.0, 6.0, 3.0] if guruh_code == "IFA" else [7.0, 4.0, 4.0, 4.0]
+                _apply_table_widths(table, widths)
+                HEADER_COLOR = "9DC3E6"
+                for cell, hdr in zip(table.rows[0].cells, ["Tahlil nomi", "Natija", "Norma", "O'lchov birligi"]):
+                    _set_cell_shading(cell, HEADER_COLOR)
+                    ph = cell.paragraphs[0]
+                    ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    _set_para_spacing(ph, 0, 0, line_spacing=1)
+                    _add_run_tnr(ph, hdr, 11, bold=True)
+                return table
+
+            for guruh_code, guruh_nomi in group_order:
+                group_results = []
+                for r in remaining:
+                    tn = (r.get('test_name') or '').strip()
+                    if tn in handled:
+                        continue
+                    if _r_matches_group(r, guruh_code):
+                        group_results.append(r)
+                if not group_results:
+                    continue
+
+                if guruh_code == "BIO":
+                    bili_results   = [r for r in group_results if _is_bilirubin_test(r.get('test_name', ''))]
+                    revmo_auto_r   = [r for r in group_results if _is_revmoproba_full_auto_test(r.get('test_name', ''))]
+                    bio_only_r     = [r for r in group_results
+                                      if not _is_bilirubin_test(r.get('test_name', ''))
+                                      and not _is_revmoproba_full_auto_test(r.get('test_name', ''))]
+
+                    if bio_only_r:
+                        if guruh_nomi:
+                            heading = doc.add_paragraph()
+                            heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            _set_para_spacing(heading, 0, 0, line_spacing=1.0)
+                            _add_run_tnr(heading, guruh_nomi, 14, bold=True,
+                                         color_rgb=RGBColor(0x27, 0xae, 0x60))
+                        table = _make_4col_table(doc, guruh_code)
+                        for r in bio_only_r:
+                            tn = (r.get('test_name') or 'N/A').strip()
+                            _add_result_row(table, tn, r.get('result_data') or '{}', guruh_code)
+                            handled.add(tn)
+                        doc.add_paragraph()
+
+                    # Bilirubin — alohida sektsiya
+                    if bili_results:
+                        bili_rd = {}
+                        for r in bili_results:
+                            rd_raw = r.get('result_data') or '{}'
+                            if isinstance(rd_raw, str) and rd_raw.strip().startswith('{'):
+                                try:
+                                    parsed = json.loads(rd_raw)
+                                    if isinstance(parsed, dict) and any(k in parsed for k in ['umumiy', 'bog_langan', 'erkin']):
+                                        bili_rd = parsed
+                                        break
+                                    elif isinstance(parsed, dict) and 'result' in parsed:
+                                        bili_rd = {'umumiy': parsed['result']}
+                                except Exception:
+                                    pass
+                            elif rd_raw:
+                                try:
+                                    bili_rd = {'umumiy': float(str(rd_raw).replace(',', '.'))}
+                                except Exception:
+                                    bili_rd = {'umumiy': rd_raw}
+
+                        heading_b = doc.add_paragraph()
+                        heading_b.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        _set_para_spacing(heading_b, 0, 0, line_spacing=1.0)
+                        _add_run_tnr(heading_b, "BILIRUBIN  (umumiy, bog\u2018langan, erkin)", 14, bold=True,
+                                     color_rgb=RGBColor(0x27, 0xae, 0x60))
+
+                        # Bemorning aniq yoshini (kunlarda) hisoblash — chaqaloqlar uchun
+                        _age_days_bili = None
+                        _tugilgan = order_info.get('tugilgan_sana')
+                        _order_sana = order_info.get('sana_vaqt')
+                        if _tugilgan:
+                            try:
+                                from datetime import date as _date, datetime as _dt
+                                _ts = _tugilgan if hasattr(_tugilgan, 'year') else _dt.strptime(str(_tugilgan)[:10], '%Y-%m-%d').date()
+                                _ref = _order_sana.date() if hasattr(_order_sana, 'date') else _date.today()
+                                _age_days_bili = (_ref - _ts).days
+                            except Exception:
+                                pass
+
+                        # DB dan bilirubin sub-norma olish (result_template)
+                        _bili_norma = {
+                            "umumiy":     ("3.4 \u2013 20.5", "mkmol/l"),
+                            "bog_langan": ("0.86 \u2013 5.3",  "mkmol/l"),
+                            "erkin":      ("",                  "mkmol/l"),
+                        }
+                        try:
+                            _bn_conn = db_conn()
+                            if _bn_conn:
+                                _bn_cur = _bn_conn.cursor(dictionary=True)
+                                _bn_cur.execute(
+                                    "SELECT result_template, birlik FROM tahlillar_norma WHERE tahlil_nomi LIKE %s LIMIT 1",
+                                    ('%bilirubin%',)
+                                )
+                                _bn_row = _bn_cur.fetchone()
+                                _bn_cur.close()
+                                _bn_conn.close()
+                                if _bn_row and _bn_row.get('result_template'):
+                                    _tmpl = json.loads(_bn_row['result_template'])
+                                    for _comp in _tmpl.get('components', []):
+                                        _ck  = _comp.get('key', '')
+                                        _cn  = (_comp.get('norma') or '').strip()
+                                        _cu  = (_comp.get('unit') or _bn_row.get('birlik') or 'mkmol/l').strip()
+                                        if _ck in _bili_norma and _cn:
+                                            _bili_norma[_ck] = (_cn, _cu)
+                        except Exception:
+                            pass
+
+                        # Umumiy uchun yoshga qarab norma tanlash
+                        _um_norma_raw, _um_unit = _bili_norma["umumiy"]
+                        _um_norma = select_norma_by_patient(
+                            _um_norma_raw, jins, yosh_int, age_days=_age_days_bili
+                        ) or _um_norma_raw
+
+                        # Erkin = Umumiy - Bog'langan (avtomatik hisoblash)
+                        _um_val  = bili_rd.get('umumiy',     '')
+                        _bog_val = bili_rd.get('bog_langan', '')
+                        _erk_val = bili_rd.get('erkin',      '')
+                        if not _erk_val and _um_val != '' and _bog_val != '':
+                            try:
+                                _erk_calc = round(float(str(_um_val).replace(',', '.')) -
+                                                  float(str(_bog_val).replace(',', '.')), 3)
+                                _erk_val = str(_erk_calc)
+                                bili_rd['erkin'] = _erk_calc
+                            except Exception:
+                                pass
+
+                        _bog_norma_raw, _bog_unit = _bili_norma["bog_langan"]
+                        _bog_norma = select_norma_by_patient(
+                            _bog_norma_raw, jins, yosh_int, age_days=_age_days_bili
+                        ) or _bog_norma_raw
+
+                        tbl_b = _make_4col_table(doc, "BIO")
+                        for _brow_name, _bkey, _bnorma, _bunit in [
+                            ("Umumiy Bilirubin",          "umumiy",     _um_norma,    _um_unit),
+                            ("Bog\u2018langan Bilirubin", "bog_langan", _bog_norma,   _bog_unit),
+                            ("Erkin Bilirubin",           "erkin",      "= Umumiy \u2212 Bog\u2018langan", _bili_norma["erkin"][1]),
+                        ]:
+                            row = tbl_b.add_row()
+                            _keep_row_together(row)
+                            _bval = str(bili_rd.get(_bkey, '')) if bili_rd.get(_bkey, '') != '' else (
+                                _erk_val if _bkey == 'erkin' else '')
+                            cr = row.cells
+                            p0 = cr[0].paragraphs[0]; p0.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                            _set_para_spacing(p0, 0, 0, line_spacing=1); _add_run_tnr(p0, _brow_name, 11, bold=True)
+                            p1 = cr[1].paragraphs[0]; p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            _set_para_spacing(p1, 0, 0, line_spacing=1); _add_run_tnr(p1, _bval, 11, bold=True)
+                            p2 = cr[2].paragraphs[0]; p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            _set_para_spacing(p2, 0, 0, line_spacing=1); _add_multiline_norma(p2, _bnorma, 11)
+                            p3 = cr[3].paragraphs[0]; p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            _set_para_spacing(p3, 0, 0, line_spacing=1); _add_run_tnr(p3, _bunit, 11)
+                        doc.add_paragraph()
+                        for r in bili_results:
+                            handled.add((r.get('test_name') or '').strip())
+
+                    # Revmoproba avtomat — alohida sektsiya
+                    if revmo_auto_r:
+                        # Container "REVMOPROBA to'liq (avtomat)" qatorini olib tashlab sub-testlarni ko'rsatish
+                        sub_r = [r for r in revmo_auto_r
+                                 if not ('revmoproba' in (r.get('test_name') or '').lower()
+                                         and not any(k in (r.get('test_name') or '').lower()
+                                                     for k in ['rf ', 'crp', 'aslo', 'antistreptolizin', 'revmatoid', 's-reaktiv']))]
+                        if not sub_r:
+                            sub_r = revmo_auto_r
+                        heading_rm = doc.add_paragraph()
+                        heading_rm.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        _set_para_spacing(heading_rm, 0, 0, line_spacing=1.0)
+                        _add_run_tnr(heading_rm, "REVMOPROBA to\u2018liq (avtomat)", 14, bold=True,
+                                     color_rgb=RGBColor(0x27, 0xae, 0x60))
+                        tbl_rm = _make_4col_table(doc, "BIO")
+                        for r in sub_r:
+                            tn = (r.get('test_name') or 'N/A').strip()
+                            _add_result_row(tbl_rm, tn, r.get('result_data') or '{}', "BIO")
+                        doc.add_paragraph()
+                        for r in revmo_auto_r:
+                            handled.add((r.get('test_name') or '').strip())
+
+                elif guruh_code == "OTHER":
+                    # OTHER guruhidan faqat to'liq revmoproba avtomat testlarni ajratish
+                    revmo_auto_o = [r for r in group_results if _is_revmoproba_full_auto_test(r.get('test_name', ''))]
+                    other_only   = [r for r in group_results if not _is_revmoproba_full_auto_test(r.get('test_name', ''))]
+
+                    if other_only:
+                        if guruh_nomi:
+                            heading = doc.add_paragraph()
+                            heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            _set_para_spacing(heading, 0, 0, line_spacing=1.0)
+                            _add_run_tnr(heading, guruh_nomi, 14, bold=True,
+                                         color_rgb=RGBColor(0x27, 0xae, 0x60))
+                        table = _make_4col_table(doc, guruh_code)
+                        for r in other_only:
+                            tn = (r.get('test_name') or 'N/A').strip()
+                            _add_result_row(table, tn, r.get('result_data') or '{}', guruh_code)
+                            handled.add(tn)
+                        doc.add_paragraph()
+
+                    if revmo_auto_o:
+                        sub_o = [r for r in revmo_auto_o
+                                 if not ('revmoproba' in (r.get('test_name') or '').lower()
+                                         and not any(k in (r.get('test_name') or '').lower()
+                                                     for k in ['rf ', 'crp', 'aslo', 'antistreptolizin', 'revmatoid', 's-reaktiv']))]
+                        if not sub_o:
+                            sub_o = revmo_auto_o
+                        heading_rmo = doc.add_paragraph()
+                        heading_rmo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        _set_para_spacing(heading_rmo, 0, 0, line_spacing=1.0)
+                        _add_run_tnr(heading_rmo, "REVMOPROBA to\u2018liq (avtomat)", 14, bold=True,
+                                     color_rgb=RGBColor(0x27, 0xae, 0x60))
+                        tbl_rmo = _make_4col_table(doc, "BIO")
+                        for r in sub_o:
+                            tn = (r.get('test_name') or 'N/A').strip()
+                            _add_result_row(tbl_rmo, tn, r.get('result_data') or '{}', "BIO")
+                        doc.add_paragraph()
+                        for r in revmo_auto_o:
+                            handled.add((r.get('test_name') or '').strip())
+
+                else:
+                    if guruh_code == "URINE":
+                        # URIT-50 JSON ma'lumoti bor-yo'qligini tekshirish
+                        urine_full_rd = None
+                        for _ur in group_results:
+                            _rd_raw = _ur.get('result_data') or '{}'
+                            try:
+                                _rd = json.loads(_rd_raw) if isinstance(_rd_raw, str) and _rd_raw.strip().startswith('{') else {}
+                                if _rd.get('all_analytes') or _rd.get('mikroskopiya') or _rd.get('fizik'):
+                                    urine_full_rd = _rd_raw
+                                    break
+                            except Exception:
+                                pass
+                        if guruh_nomi:
+                            heading = doc.add_paragraph()
+                            heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            _set_para_spacing(heading, 0, 0, line_spacing=1.0)
+                            _add_run_tnr(heading, guruh_nomi, 14, bold=True,
+                                         color_rgb=RGBColor(0x27, 0xae, 0x60))
+                        if urine_full_rd:
+                            create_urine_full_table_in_doc(doc, urine_full_rd, order_info)
+                        else:
+                            table = _make_4col_table(doc, guruh_code)
+                            for r in group_results:
+                                tn = (r.get('test_name') or 'N/A').strip()
+                                _add_result_row(table, tn, r.get('result_data') or '{}', guruh_code)
+                            doc.add_paragraph()
+                        for r in group_results:
+                            handled.add((r.get('test_name') or '').strip())
+                    else:
+                        if guruh_nomi:
+                            heading = doc.add_paragraph()
+                            heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            _set_para_spacing(heading, 0, 0, line_spacing=1.0)
+                            _add_run_tnr(heading, guruh_nomi, 14, bold=True,
+                                         color_rgb=RGBColor(0x27, 0xae, 0x60))
+                        table = _make_4col_table(doc, guruh_code)
+                        for r in group_results:
+                            tn = (r.get('test_name') or 'N/A').strip()
+                            _add_result_row(table, tn, r.get('result_data') or '{}', guruh_code)
+                            handled.add(tn)
+                        doc.add_paragraph()
+
+        try:
+            add_page_footer_to_doc(doc, order_info)
+        except:
+            pass
+        try:
+            add_footer(doc, order_info)
+        except:
+            pass
+        save_dir = get_save_dir()
+        sample_id = order_info.get('sample_id', '') or str(order_id)
+        # None xatosini oldini olish
+        fish_raw = order_info.get('fish')
+        fish = ''
+        if fish_raw:
+            try:
+                fish = str(fish_raw).strip()
+            except:
+                fish = ''
+        tugilgan_sana2 = order_info.get('tugilgan_sana', '')
+        telefon2 = (order_info.get('telefon') or '').strip()
+        yil2 = ''
+        if tugilgan_sana2:
+            try:
+                if isinstance(tugilgan_sana2, str) and '-' in tugilgan_sana2:
+                    yil2 = tugilgan_sana2.split('-')[0]
+                else:
+                    yil2 = str(tugilgan_sana2)[:4]
+            except:
+                pass
+        def clean_filename(text):
+            if not text:
+                return ''
+            try:
+                text_str = str(text) if text is not None else ''
+                forbidden = r'[\/\\:*?"<>|]'
+                return re.sub(forbidden, '_', text_str).strip()
+            except:
+                return ''
+        # Fayl nomi: sample_id + FISH + tug'ilgan yil + telefon
+        name_parts2 = [sample_id]
+        if fish:
+            name_parts2.append(clean_filename(fish))
+        if yil2:
+            name_parts2.append(yil2)
+        if telefon2:
+            name_parts2.append(clean_filename(telefon2))
+        output_filename = f"{' '.join(name_parts2)}.docx"
+        output_path = os.path.join(save_dir, output_filename)
+        doc.save(output_path)
+        return output_path
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return None
+
+# ============================================================================
+# TAHLIL KIRITISH FUNKSIYALARI (tahlil_kiritish.py dan)
+# ============================================================================
+
+class TahlilKiritishOynasi:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Tahlil Qo'shish")
+        self.root.geometry("600x700")
+        self.root.resizable(True, True)
+        
+        # O'zgaruvchilar
+        self.current_tahlil_id = None
+        self.guruh_var = tk.StringVar()
+        self.tahlil_nomi_var = tk.StringVar()
+        self.norma_var = tk.StringVar()
+        self.birlik_var = tk.StringVar()
+        self.yosh_var = tk.StringVar()
+        self.jins_var = tk.StringVar()
+        self.fazasikli_var = tk.StringVar()
+        self.trimestr1_var = tk.StringVar()
+        self.trimestr2_var = tk.StringVar()
+        self.trimestr3_var = tk.StringVar()
+        self.is_calculated_var = tk.BooleanVar()
+        self.formula_var = tk.StringVar()
+        self.response_options_var = tk.StringVar()
+
+        # Sub-norma vars (Bilirubin, Revmoproba, Koagulogramma uchun)
+        self.sub_norma_vars = {}
+        self.sub_norma_widgets = []
+
+        # Database jadvalini yaratish (agar yo'q bo'lsa)
+        self.create_table_if_not_exists()
+        
+        # Birliklar ro'yxati (bazadan)
+        self.birliklar_list = self.get_birliklar_from_db()
+        
+        # Tahlillar ro'yxati (bazadan - tahlillar jadvalidan)
+        self.tahlillar_list = self.get_tahlillar_from_db()
+        
+        # UI yaratish
+        self.create_ui()
+        
+        # Tahlil nomi bo'yicha autocomplete
+        self.setup_autocomplete()
+        
+        # Dastur ishga tushganda ro'yxatni yangilash
+        self.root.after(100, self.refresh_tahlillar_list)
+    
+    def create_table_if_not_exists(self):
+        """Tahlillar jadvalini yaratish (agar yo'q bo'lsa)"""
+        conn = db_conn()
+        if not conn:
+            return
+        
+        try:
+            cursor = conn.cursor()
+            query = """
+            CREATE TABLE IF NOT EXISTS tahlillar_norma (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                guruh VARCHAR(50) NOT NULL,
+                tahlil_nomi VARCHAR(255) NOT NULL,
+                norma TEXT,
+                birlik VARCHAR(50),
+                yosh VARCHAR(100),
+                jins VARCHAR(50),
+                fazasikli VARCHAR(100),
+                trimestr1 VARCHAR(100),
+                trimestr2 VARCHAR(100),
+                trimestr3 VARCHAR(100),
+                type VARCHAR(50) DEFAULT 'numeric',
+                min_val DECIMAL(10,2),
+                max_val DECIMAL(10,2),
+                min_val_m DECIMAL(10,2),
+                max_val_m DECIMAL(10,2),
+                min_val_f DECIMAL(10,2),
+                max_val_f DECIMAL(10,2),
+                result_template TEXT,
+                standard_blank_path VARCHAR(500),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY unique_tahlil (guruh, tahlil_nomi)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+            cursor.execute(query)
+            conn.commit()
+            
+            # result_template maydonini qo'shish (agar yo'q bo'lsa)
+            try:
+                cursor.execute("ALTER TABLE tahlillar_norma ADD COLUMN result_template TEXT AFTER max_val_f")
+                conn.commit()
+            except:
+                pass
+            
+            # standard_blank_path maydonini qo'shish (agar yo'q bo'lsa)
+            try:
+                cursor.execute("ALTER TABLE tahlillar_norma ADD COLUMN standard_blank_path VARCHAR(500) AFTER result_template")
+                conn.commit()
+            except:
+                pass
+            
+            # is_calculated va formula maydonlarini qo'shish (agar yo'q bo'lsa)
+            try:
+                cursor.execute("ALTER TABLE tahlillar_norma ADD COLUMN is_calculated BOOLEAN DEFAULT FALSE AFTER standard_blank_path")
+                conn.commit()
+            except:
+                pass
+            
+            try:
+                cursor.execute("ALTER TABLE tahlillar_norma ADD COLUMN formula TEXT AFTER is_calculated")
+                conn.commit()
+            except:
+                pass
+            
+            # response_options maydonini qo'shish (variantlar uchun)
+            try:
+                cursor.execute("ALTER TABLE tahlillar_norma ADD COLUMN response_options VARCHAR(500) AFTER formula")
+                conn.commit()
+            except:
+                pass
+            
+            # Birliklar jadvali
+            query_birlik = """
+            CREATE TABLE IF NOT EXISTS birliklar (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                birlik_nomi VARCHAR(100) NOT NULL UNIQUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+            cursor.execute(query_birlik)
+            conn.commit()
+            
+            # Standart birliklarni qo'shish (LOTIN ALIFBOSIDA)
+            standart_birliklar = [
+                "Ed/l", "mmol/l", "mkmol/l", "g/l", "ng/ml", "pg/ml", 
+                "mME/l", "mME/ml", "ME/l", "ME/ml", "μU/ml", "IU/ml",
+                "mkm³", "pg", "%", "mg/dl", "ml", "CELL/µL", "mmol/L",
+                "umol/L", "g/L", "mg/L", "ko'ruv maydonida", "preparatda",
+                "sek", "INR", "U/ml", "IU/ml", "mkmol/l", "nmol/l", "pmol/l"
+            ]
+            
+            for birlik in standart_birliklar:
+                try:
+                    cursor.execute(
+                        "INSERT IGNORE INTO birliklar (birlik_nomi) VALUES (%s)",
+                        (birlik,)
+                    )
+                except:
+                    pass
+            
+            conn.commit()
+            cursor.close()
+            
+        except Exception as e:
+            print(f"[XATO] Jadval yaratishda xato: {e}")
+            if 'conn' in locals():
+                try:
+                    conn.close()
+                except:
+                    pass
+    
+    def get_birliklar_from_db(self):
+        """Birliklarni bazadan olish"""
+        conn = db_conn()
+        if not conn:
+            return []
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT birlik_nomi FROM birliklar ORDER BY birlik_nomi")
+            birliklar = [row[0] for row in cursor.fetchall()]
+            cursor.close()
+            conn.close()
+            return birliklar if birliklar else []
+        except Exception as e:
+            print(f"[OGOHLANTIRISH] Birliklarni olishda xato: {e}")
+            if 'conn' in locals():
+                try:
+                    conn.close()
+                except:
+                    pass
+            return []
+    
+    def get_tahlillar_from_db(self):
+        """Tahlillarni bazadan olish (tahlillar jadvalidan)"""
+        conn = db_conn()
+        if not conn:
+            return []
+        
+        try:
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SELECT id, nomi, sample as guruh FROM tahlillar ORDER BY nomi")
+            tahlillar = cursor.fetchall()
+            cursor.close()
+            conn.close()
+            return tahlillar if tahlillar else []
+        except Exception as e:
+            if 'conn' in locals():
+                try:
+                    conn.close()
+                except:
+                    pass
+            return []
+    
+    def setup_autocomplete(self):
+        """Tahlil nomi bo'yicha autocomplete"""
+        if hasattr(self, 'tahlil_combo'):
+            self.refresh_tahlillar_list()
+    
+    def refresh_tahlillar_list(self):
+        """Tahlillar ro'yxatini yangilash va Combobox'ga yozish"""
+        try:
+            self.tahlillar_list = self.get_tahlillar_from_db()
+            tahlil_nomlari = [t.get('nomi', '') for t in self.tahlillar_list if t.get('nomi')]
+            if hasattr(self, 'tahlil_combo'):
+                self.tahlil_combo['values'] = tahlil_nomlari
+        except Exception as e:
+            pass
+    
+    def create_ui(self):
+        """UI yaratish"""
+        title_label = tk.Label(
+            self.root, 
+            text="Tahlil Qo'shish",
+            font=("Arial", 16, "bold"),
+            pady=10
+        )
+        title_label.pack()
+        
+        main_frame = ttk.Frame(self.root, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Guruh (MAJBURIY)
+        guruh_label = ttk.Label(main_frame, text="Guruh (Majburiy):", font=("Arial", 10, "bold"))
+        guruh_label.grid(row=0, column=0, sticky=tk.W, pady=5)
+        guruh_combo = ttk.Combobox(
+            main_frame, 
+            textvariable=self.guruh_var,
+            values=["", "GEM", "BIO", "URINE", "IFA", "TEST", "COAG"],
+            state="readonly",
+            width=40
+        )
+        guruh_combo.grid(row=0, column=1, sticky=tk.EW, pady=5)
+        self.guruh_var.set("")
+        
+        # Tahlil nomi (bazadan tahlillar ro'yxati bilan)
+        ttk.Label(main_frame, text="Tahlil nomi:", font=("Arial", 10)).grid(row=1, column=0, sticky=tk.W, pady=5)
+        tahlil_nomlari = [t.get('nomi', '') for t in self.tahlillar_list if t.get('nomi')]
+        if not tahlil_nomlari:
+            self.refresh_tahlillar_list()
+            tahlil_nomlari = [t.get('nomi', '') for t in self.tahlillar_list if t.get('nomi')]
+        
+        self.tahlil_combo = ttk.Combobox(
+            main_frame,
+            textvariable=self.tahlil_nomi_var,
+            values=tahlil_nomlari,
+            width=40,
+            state="normal"
+        )
+        self.tahlil_combo.grid(row=1, column=1, sticky=tk.EW, pady=5)
+        self.tahlil_entry = self.tahlil_combo
+        
+        self.tahlil_combo.bind("<<ComboboxSelected>>", self.on_tahlil_selected)
+        self.tahlil_combo.bind("<Return>", lambda e: self.load_tahlil_from_db())
+        self.tahlil_combo.bind("<KeyRelease>", self.on_tahlil_keyrelease)
+        self.tahlil_combo.bind("<FocusIn>", lambda e: self.refresh_tahlillar_list())
+        
+        # Norma
+        ttk.Label(main_frame, text="Norma:", font=("Arial", 10)).grid(row=2, column=0, sticky=tk.W, pady=5)
+        self.norma_entry = ttk.Entry(main_frame, textvariable=self.norma_var, width=40)
+        self.norma_entry.grid(row=2, column=1, sticky=tk.EW, pady=5)
+        ttk.Label(main_frame, text="Masalan: 3.2-6.1 yoki E: 44-115, A: 44-97",
+                 font=("Arial", 8), foreground="gray").grid(row=3, column=1, sticky=tk.W)
+
+        # Sub-norma frame (Bilirubin / Revmoproba / Koagulogramma fraksiyalari uchun)
+        self.sub_norma_frame = ttk.LabelFrame(main_frame, text="Fraksiyalar Normasi", padding="8")
+        self.sub_norma_frame.grid(row=4, column=0, columnspan=2, sticky=tk.EW, padx=5, pady=3)
+        self.sub_norma_frame.grid_remove()
+
+        # Birlik
+        ttk.Label(main_frame, text="Birlik:", font=("Arial", 10)).grid(row=5, column=0, sticky=tk.W, pady=5)
+        birlik_frame = ttk.Frame(main_frame)
+        birlik_frame.grid(row=5, column=1, sticky=tk.EW, pady=5)
+        
+        birlik_combo = ttk.Combobox(
+            birlik_frame,
+            textvariable=self.birlik_var,
+            values=self.birliklar_list,
+            width=35
+        )
+        birlik_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        birlik_btn = ttk.Button(birlik_frame, text="+", width=3, command=self.open_birliklar_oynasi)
+        birlik_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Yosh
+        ttk.Label(main_frame, text="Yosh:", font=("Arial", 10)).grid(row=6, column=0, sticky=tk.W, pady=5)
+        yosh_entry = ttk.Entry(main_frame, textvariable=self.yosh_var, width=40)
+        yosh_entry.grid(row=6, column=1, sticky=tk.EW, pady=5)
+        ttk.Label(main_frame, text="Masalan: <3 yosh 46-70, >3 yosh 66-85",
+                 font=("Arial", 8), foreground="gray").grid(row=7, column=1, sticky=tk.W)
+
+        # Jins
+        ttk.Label(main_frame, text="Jins:", font=("Arial", 10)).grid(row=8, column=0, sticky=tk.W, pady=5)
+        jins_combo = ttk.Combobox(
+            main_frame,
+            textvariable=self.jins_var,
+            values=["", "Erkak", "Ayol", "E: 44-115, A: 44-97"],
+            width=40
+        )
+        jins_combo.grid(row=8, column=1, sticky=tk.EW, pady=5)
+        
+        # Fazasikli
+        ttk.Label(main_frame, text="Fazasikli:", font=("Arial", 10)).grid(row=9, column=0, sticky=tk.W, pady=5)
+        fazasikli_combo = ttk.Combobox(
+            main_frame,
+            textvariable=self.fazasikli_var,
+            values=["", "Follikulyar", "Ovulyatsiya", "Lyutein", "Menopauza"],
+            width=40
+        )
+        fazasikli_combo.grid(row=9, column=1, sticky=tk.EW, pady=5)
+
+        # 1-trimestr
+        ttk.Label(main_frame, text="1-trimestr:", font=("Arial", 10)).grid(row=10, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(main_frame, textvariable=self.trimestr1_var, width=40).grid(row=10, column=1, sticky=tk.EW, pady=5)
+
+        # 2-trimestr
+        ttk.Label(main_frame, text="2-trimestr:", font=("Arial", 10)).grid(row=11, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(main_frame, textvariable=self.trimestr2_var, width=40).grid(row=11, column=1, sticky=tk.EW, pady=5)
+
+        # 3-trimestr
+        ttk.Label(main_frame, text="3-trimestr:", font=("Arial", 10)).grid(row=12, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(main_frame, textvariable=self.trimestr3_var, width=40).grid(row=12, column=1, sticky=tk.EW, pady=5)
+
+        # Hisob-kitobli tahlil (checkbox)
+        is_calc_frame = ttk.Frame(main_frame)
+        is_calc_frame.grid(row=13, column=0, columnspan=2, sticky=tk.W, pady=5)
+        ttk.Checkbutton(
+            is_calc_frame,
+            text="Hisob-kitobli tahlil (Formula orqali)",
+            variable=self.is_calculated_var,
+            command=self.on_calculated_changed
+        ).pack(side=tk.LEFT, padx=5)
+
+        # Formula maydoni (hisob-kitobli bo'lsa ko'rinadi)
+        self.formula_frame = ttk.LabelFrame(main_frame, text="Formula", padding="5")
+        self.formula_frame.grid(row=14, column=0, columnspan=2, sticky=tk.EW, pady=5)
+        self.formula_frame.grid_remove()
+        
+        formula_label = ttk.Label(
+            self.formula_frame,
+            text="Masalan: HOMA_INDEX = (Glukoza * Insulin) / 22.5",
+            font=("Arial", 8),
+            foreground="gray"
+        )
+        formula_label.pack(anchor=tk.W, padx=5)
+        
+        formula_entry = ttk.Entry(
+            self.formula_frame,
+            textvariable=self.formula_var,
+            width=60,
+            font=("Courier New", 10)
+        )
+        formula_entry.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Standart blanka tanlash
+        ttk.Label(main_frame, text="Standart blanka:", font=("Arial", 10)).grid(row=15, column=0, sticky=tk.W, pady=5)
+        standard_blank_frame = ttk.Frame(main_frame)
+        standard_blank_frame.grid(row=15, column=1, sticky=tk.EW, pady=5)
+
+        self.standard_blank_var = tk.StringVar()
+        standard_blank_entry = ttk.Entry(standard_blank_frame, textvariable=self.standard_blank_var, width=35, state="readonly")
+        standard_blank_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        def select_standard_blank():
+            import tkinter.filedialog as filedialog
+            file_path = filedialog.askopenfilename(
+                title="Standart blanka faylini tanlang",
+                filetypes=[("Word Documents", "*.docx"), ("All Files", "*.*")],
+                initialdir=r"G:\DASTUR\Standart shablaonlar" if os.path.exists(r"G:\DASTUR\Standart shablaonlar") else os.path.dirname(__file__)
+            )
+            if file_path:
+                self.standard_blank_var.set(file_path)
+
+        ttk.Button(standard_blank_frame, text="Faylni belgilash", command=select_standard_blank).pack(side=tk.LEFT, padx=5)
+
+        # Javob variantlari (response_options)
+        ttk.Label(main_frame, text="Javob variantlari:", font=("Arial", 10)).grid(row=16, column=0, sticky=tk.W, pady=5)
+        response_options_entry = ttk.Entry(main_frame, textvariable=self.response_options_var, width=40)
+        response_options_entry.grid(row=16, column=1, sticky=tk.EW, pady=5)
+        ttk.Label(main_frame, text="Masalan: Manfiy, Kuchsiz musbat, Musbat (vergul bilan ajratilgan)",
+                 font=("Arial", 8), foreground="gray").grid(row=17, column=1, sticky=tk.W)
+
+        # Multi-Ref.Range tugmasi
+        multi_ref_frame = ttk.Frame(main_frame)
+        multi_ref_frame.grid(row=18, column=0, columnspan=2, pady=10)
+        
+        ttk.Button(
+            multi_ref_frame,
+            text="Multi-Ref.Range",
+            command=self.open_multi_ref_range
+        ).pack(side=tk.LEFT, padx=5)
+        
+        main_frame.columnconfigure(1, weight=1)
+        
+        # CRUD Tugmalar
+        button_frame = ttk.Frame(self.root, padding="10")
+        button_frame.pack(fill=tk.X)
+        
+        ttk.Button(button_frame, text="[SAQLASH] Saqlash (CREATE/UPDATE)", command=self.save_or_update, width=25).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="🗑️ O'chirish (DELETE)", command=self.delete_tahlil, width=20).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="[YANGILANMOQDA] Yangilash (REFRESH)", command=self.refresh_tahlillar_list, width=20).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="[XATO] Tozalash", command=self.tozalash, width=15).pack(side=tk.LEFT, padx=5)
+    
+    def open_birliklar_oynasi(self):
+        """Birliklar oynasini ochish"""
+        BirliklarOynasi(self.root)
+    
+    def open_multi_ref_range(self):
+        """Multi-Ref.Range oynasini ochish"""
+        multi_window = MultiRefRangeOynasi(self.root, self)
+        self.multi_ref_window = multi_window
+    
+    def on_calculated_changed(self):
+        """Hisob-kitobli tahlil checkbox o'zgarganda"""
+        is_calc = self.is_calculated_var.get()
+        if is_calc:
+            self.formula_frame.grid()
+            if hasattr(self, 'norma_entry'):
+                self.norma_entry.config(state='disabled')
+        else:
+            self.formula_frame.grid_remove()
+            if hasattr(self, 'norma_entry'):
+                self.norma_entry.config(state='normal')
+    
+    def save_or_update(self):
+        """UNIVERSAL CRUD: CREATE yoki UPDATE"""
+        if not self.guruh_var.get() or self.guruh_var.get().strip() == "":
+            messagebox.showwarning("Diqqat", "Avval Kategoriya (Guruh) ni tanlang!")
+            return
+        
+        if not self.tahlil_nomi_var.get().strip():
+            messagebox.showwarning("Diqqat", "Tahlil nomini kiriting!")
+            return
+        
+        if self.is_calculated_var.get():
+            if not self.formula_var.get().strip():
+                messagebox.showwarning("Diqqat", "Hisob-kitobli tahlil uchun formula kiriting!")
+                return
+        
+        conn = db_conn()
+        if not conn:
+            messagebox.showerror("Xato", "Database'ga ulanib bo'lmadi!")
+            return
+        
+        try:
+            cursor = conn.cursor()
+            norma_text = self.norma_var.get().strip() if not self.is_calculated_var.get() else ""
+            type_val = "numeric"
+            min_val = None
+            max_val = None
+            min_val_m = None
+            max_val_m = None
+            min_val_f = None
+            max_val_f = None
+            
+            if norma_text and not self.is_calculated_var.get():
+                if "-" in norma_text and "," in norma_text:
+                    parts = norma_text.split("-")
+                    try:
+                        min_val = float(parts[0].replace(",", "."))
+                        max_val = float(parts[1].replace(",", "."))
+                    except:
+                        pass
+                elif ("E:" in norma_text or "Erkak:" in norma_text) and ("A:" in norma_text or "Ayol:" in norma_text):
+                    type_val = "numeric_gender"
+                    if "A:" in norma_text:
+                        parts = norma_text.split("A:")
+                    elif "Ayol:" in norma_text:
+                        parts = norma_text.split("Ayol:")
+                    else:
+                        parts = norma_text.split("А:")
+                    
+                    if len(parts) > 1:
+                        erkak_part = parts[0].replace("E:", "").replace("Erkak:", "").strip()
+                        ayol_part = parts[1].strip()
+                        
+                        if "-" in erkak_part:
+                            erkak_vals = erkak_part.split("-")
+                            try:
+                                min_val_m = float(erkak_vals[0].replace(",", "."))
+                                max_val_m = float(erkak_vals[1].replace(",", "."))
+                            except:
+                                pass
+                        
+                        if "-" in ayol_part:
+                            ayol_vals = ayol_part.split("-")
+                            try:
+                                min_val_f = float(ayol_vals[0].replace(",", "."))
+                                max_val_f = float(ayol_vals[1].replace(",", "."))
+                            except:
+                                pass
+                elif self.guruh_var.get() == "IFA":
+                    type_val = "hormone"
+            
+            norma_final = norma_text
+            if hasattr(self, 'multi_ref_window') and hasattr(self.multi_ref_window, 'ref_ranges'):
+                ranges_list = []
+                for eng_name, range_data in self.multi_ref_window.ref_ranges.items():
+                    uz_name = self.multi_ref_window.category_vars[eng_name]['uz_name']
+                    lower = range_data.get('lower')
+                    upper = range_data.get('upper')
+                    if lower is not None and upper is not None:
+                        ranges_list.append(f"{uz_name}: {lower}-{upper}")
+                    elif lower is not None:
+                        ranges_list.append(f"{uz_name}: >{lower}")
+                    elif upper is not None:
+                        ranges_list.append(f"{uz_name}: <{upper}")
+                if ranges_list:
+                    norma_final = ", ".join(ranges_list)
+            
+            tahlil_nomi = self.tahlil_nomi_var.get().strip()
+            guruh = self.guruh_var.get().strip()
+            is_calculated = 1 if self.is_calculated_var.get() else 0
+            formula = self.formula_var.get().strip() if self.is_calculated_var.get() else None
+            standard_blank_path = self.standard_blank_var.get().strip() if hasattr(self, 'standard_blank_var') else ""
+            response_options = self.response_options_var.get().strip() if hasattr(self, 'response_options_var') else ""
+            # Sub-norma template
+            result_template_json = self.get_sub_norma_result_template(tahlil_nomi.lower()) or ""
+            
+            if self.current_tahlil_id:
+                query = """
+                UPDATE tahlillar_norma SET
+                    guruh = %s,
+                    tahlil_nomi = %s,
+                    norma = %s,
+                    birlik = %s,
+                    yosh = %s,
+                    jins = %s,
+                    fazasikli = %s,
+                    trimestr1 = %s,
+                    trimestr2 = %s,
+                    trimestr3 = %s,
+                    type = %s,
+                    min_val = %s,
+                    max_val = %s,
+                    min_val_m = %s,
+                    max_val_m = %s,
+                    min_val_f = %s,
+                    max_val_f = %s,
+                    is_calculated = %s,
+                    formula = %s,
+                    response_options = %s,
+                    standard_blank_path = %s,
+                    result_template = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                """
+                values = (
+                    guruh, tahlil_nomi, norma_final, self.birlik_var.get().strip(),
+                    self.yosh_var.get().strip(), self.jins_var.get().strip(),
+                    self.fazasikli_var.get().strip(), self.trimestr1_var.get().strip(),
+                    self.trimestr2_var.get().strip(), self.trimestr3_var.get().strip(),
+                    type_val, min_val, max_val, min_val_m, max_val_m, min_val_f, max_val_f,
+                    is_calculated, formula, response_options, standard_blank_path,
+                    result_template_json or None, self.current_tahlil_id
+                )
+                action = "yangilandi"
+            else:
+                cursor.execute(
+                    "SELECT id FROM tahlillar_norma WHERE tahlil_nomi = %s",
+                    (tahlil_nomi,)
+                )
+                existing = cursor.fetchone()
+                if existing:
+                    messagebox.showerror(
+                        "Xato",
+                        f"Bu tahlil nomi allaqachon mavjud!\n\n"
+                        f"Tahlil nomi: {tahlil_nomi}\n"
+                        f"ID: {existing[0]}\n\n"
+                        f"Boshqa nom tanlang yoki mavjud tahlilni tahrirlang."
+                    )
+                    cursor.close()
+                    conn.close()
+                    return
+                
+                query = """
+                INSERT INTO tahlillar_norma
+                (guruh, tahlil_nomi, norma, birlik, yosh, jins, fazasikli,
+                 trimestr1, trimestr2, trimestr3, type, min_val, max_val,
+                 min_val_m, max_val_m, min_val_f, max_val_f, is_calculated, formula,
+                 response_options, standard_blank_path, result_template)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """
+                values = (
+                    guruh, tahlil_nomi, norma_final, self.birlik_var.get().strip(),
+                    self.yosh_var.get().strip(), self.jins_var.get().strip(),
+                    self.fazasikli_var.get().strip(), self.trimestr1_var.get().strip(),
+                    self.trimestr2_var.get().strip(), self.trimestr3_var.get().strip(),
+                    type_val, min_val, max_val, min_val_m, max_val_m, min_val_f, max_val_f,
+                    is_calculated, formula, response_options, standard_blank_path,
+                    result_template_json or None
+                )
+                action = "qo'shildi"
+            
+            cursor.execute(query, values)
+            conn.commit()
+            
+            tahlil_id_in_tahlillar = None
+            for t in self.tahlillar_list:
+                if (t.get('nomi') or '').strip() == tahlil_nomi:
+                    tahlil_id_in_tahlillar = t.get('id')
+                    break
+            
+            if tahlil_id_in_tahlillar:
+                try:
+                    cursor.execute(
+                        "UPDATE tahlillar SET sample = %s WHERE id = %s",
+                        (guruh, tahlil_id_in_tahlillar)
+                    )
+                    conn.commit()
+                except:
+                    pass
+            
+            cursor.close()
+            conn.close()
+            
+            messagebox.showinfo("Muvaffaqiyat", f"[OK] Tahlil {action}!")
+            self.tozalash()
+            self.refresh_tahlillar_list()
+            
+        except mysql.connector.errors.IntegrityError as e:
+            messagebox.showerror("Xato", f"Takroriy nom!\n\nBu tahlil nomi allaqachon mavjud.")
+            if 'conn' in locals():
+                try:
+                    conn.close()
+                except:
+                    pass
+        except Exception as e:
+            messagebox.showerror("Xato", f"Saqlashda xato: {e}")
+            import traceback
+            traceback.print_exc()
+            if 'conn' in locals():
+                try:
+                    conn.close()
+                except:
+                    pass
+    
+    def delete_tahlil(self):
+        """DELETE: Tahlilni o'chirish"""
+        if not self.current_tahlil_id:
+            messagebox.showwarning("Diqqat", "Avval tahlilni tanlang!")
+            return
+        
+        tahlil_nomi = self.tahlil_nomi_var.get().strip()
+        if not tahlil_nomi:
+            messagebox.showwarning("Diqqat", "Tahlil nomini kiriting!")
+            return
+        
+        if not messagebox.askyesno(
+            "Tasdiqlash",
+            f"Bu tahlilni o'chirishni xohlaysizmi?\n\n"
+            f"Tahlil: {tahlil_nomi}\n"
+            f"ID: {self.current_tahlil_id}\n\n"
+            f"[OGOHLANTIRISH] Bu amalni qaytarib bo'lmaydi!"
+        ):
+            return
+        
+        conn = db_conn()
+        if not conn:
+            messagebox.showerror("Xato", "Database'ga ulanib bo'lmadi!")
+            return
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM tahlillar_norma WHERE id = %s",
+                (self.current_tahlil_id,)
+            )
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            messagebox.showinfo("Muvaffaqiyat", f"[OK] Tahlil o'chirildi: {tahlil_nomi}")
+            self.tozalash()
+            self.refresh_tahlillar_list()
+            
+        except Exception as e:
+            messagebox.showerror("Xato", f"O'chirishda xato: {e}")
+            import traceback
+            traceback.print_exc()
+            if 'conn' in locals():
+                try:
+                    conn.close()
+                except:
+                    pass
+    
+    def bekor_qilish(self):
+        """Bekor qilish"""
+        self.tozalash()
+    
+    def on_tahlil_selected(self, event=None):
+        """Tahlil tanlanganda"""
+        self.load_tahlil_from_db()
+        self.update_sub_norma_panel()
+    
+    def on_tahlil_keyrelease(self, event=None):
+        """Tahlil nomi kiritilganda autocomplete"""
+        current_value = self.tahlil_nomi_var.get().strip()
+        if not current_value:
+            self.refresh_tahlillar_list()
+        else:
+            filtered = [t.get('nomi', '') for t in self.tahlillar_list 
+                       if t.get('nomi') and current_value.lower() in t.get('nomi', '').lower()]
+            if hasattr(self, 'tahlil_combo'):
+                self.tahlil_combo['values'] = filtered
+    
+    def load_tahlil_from_db(self):
+        """READ: Tahlil tanlanganda forma to'ldirish"""
+        tahlil_nomi = self.tahlil_nomi_var.get().strip()
+        if not tahlil_nomi:
+            self.tozalash()
+            return
+        
+        tahlil_info = None
+        for t in self.tahlillar_list:
+            if (t.get('nomi') or '').strip() == tahlil_nomi:
+                tahlil_info = t
+                break
+        
+        if tahlil_info:
+            guruh = (tahlil_info.get('guruh') or '').strip().upper()
+            if guruh:
+                if guruh == 'GEM':
+                    self.guruh_var.set("GEM")
+                elif guruh == 'BIO':
+                    self.guruh_var.set("BIO")
+                elif guruh == 'URINE':
+                    self.guruh_var.set("URINE")
+                elif guruh == 'IFA':
+                    self.guruh_var.set("IFA")
+                elif guruh == 'COAG':
+                    self.guruh_var.set("COAG")
+                else:
+                    self.guruh_var.set("TEST")
+        
+        conn = db_conn()
+        if not conn:
+            return
+        
+        try:
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute(
+                "SELECT * FROM tahlillar_norma WHERE tahlil_nomi = %s LIMIT 1",
+                (tahlil_nomi,)
+            )
+            result = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            
+            if result:
+                self.current_tahlil_id = result.get('id')
+                self.guruh_var.set(result.get('guruh', 'GEM'))
+                self.norma_var.set(result.get('norma', '') or "")
+                self.birlik_var.set(result.get('birlik', '') or "")
+                self.yosh_var.set(result.get('yosh', '') or "")
+                self.jins_var.set(result.get('jins', '') or "")
+                self.fazasikli_var.set(result.get('fazasikli', '') or "")
+                self.trimestr1_var.set(result.get('trimestr1', '') or "")
+                self.trimestr2_var.set(result.get('trimestr2', '') or "")
+                self.trimestr3_var.set(result.get('trimestr3', '') or "")
+                is_calc = result.get('is_calculated', False)
+                self.is_calculated_var.set(bool(is_calc))
+                self.formula_var.set(result.get('formula', '') or "")
+                if is_calc:
+                    self.formula_frame.grid()
+                else:
+                    self.formula_frame.grid_remove()
+                if hasattr(self, 'response_options_var'):
+                    self.response_options_var.set(result.get('response_options', '') or "")
+                if hasattr(self, 'standard_blank_var'):
+                    self.standard_blank_var.set(result.get('standard_blank_path', '') or "")
+                # Sub-norma varlarini result_template'dan yuklash
+                rt_str = result.get('result_template', '') or ''
+                if rt_str:
+                    try:
+                        import json as _j
+                        rt_data = _j.loads(rt_str)
+                        # Avval panelni qurib olish, keyin to'ldirish
+                        self.root.after(20, self.update_sub_norma_panel)
+                        self.root.after(40, lambda d=rt_data: self._load_sub_norma_from_template(d))
+                    except Exception:
+                        pass
+            else:
+                self.current_tahlil_id = None
+
+        except Exception as e:
+            if 'conn' in locals():
+                try:
+                    conn.close()
+                except:
+                    pass
+
+    def tozalash(self):
+        """Formani tozalash"""
+        self.current_tahlil_id = None
+        self.guruh_var.set("")
+        self.tahlil_nomi_var.set("")
+        self.norma_var.set("")
+        self.birlik_var.set("")
+        self.yosh_var.set("")
+        self.jins_var.set("")
+        self.fazasikli_var.set("")
+        self.trimestr1_var.set("")
+        self.trimestr2_var.set("")
+        self.trimestr3_var.set("")
+        self.is_calculated_var.set(False)
+        self.formula_var.set("")
+        self.formula_frame.grid_remove()
+        self.response_options_var.set("")
+        if hasattr(self, 'standard_blank_var'):
+            self.standard_blank_var.set("")
+        # Sub-norma tozalash
+        for w in self.sub_norma_widgets:
+            try:
+                w.destroy()
+            except Exception:
+                pass
+        self.sub_norma_widgets = []
+        self.sub_norma_vars = {}
+        if hasattr(self, 'sub_norma_frame'):
+            self.sub_norma_frame.grid_remove()
+
+    # ── Sub-norma panel metodlari ──────────────────────────────────────────
+    def update_sub_norma_panel(self):
+        """Test turiga qarab fraksiyalar norma panelini ko'rsatish/yangilash"""
+        # Eski widgetlarni tozalash
+        for w in self.sub_norma_widgets:
+            try:
+                w.destroy()
+            except Exception:
+                pass
+        self.sub_norma_widgets = []
+        self.sub_norma_vars = {}
+
+        tn = self.tahlil_nomi_var.get().strip().lower()
+
+        if 'bilirubin' in tn or 'билирубин' in tn:
+            self.sub_norma_frame.config(text="Bilirubin Fraksiyalari Normasi (mkmol/l)")
+            self._build_bilirubin_norma_fields()
+            self.sub_norma_frame.grid()
+
+        elif ('revmoproba' in tn or 'revmo' in tn) and ('avtomat' in tn or 'auto' in tn):
+            self.sub_norma_frame.config(text="REVMOPROBA avtomat — Sub-testlar Normasi")
+            self._build_sub_norma_fields([
+                ("rf",   "RF (Revmatoidniy faktor) avtomat",    "ME/ml"),
+                ("crp",  "CRP (S-reaktivniy belok) avtomat",    "mg/l"),
+                ("aslo", "ASLO (Antistreptolizin-O) avtomat",   "ME/ml"),
+            ])
+            self.sub_norma_frame.grid()
+
+        elif 'revmoproba' in tn or 'revmo' in tn:
+            self.sub_norma_frame.config(text="REVMOPROBA qo'lda — Sub-testlar Normasi")
+            self._build_sub_norma_fields([
+                ("rf",   "RF (Revmatoidniy faktor)",  "ME/ml"),
+                ("crp",  "CRP (S-reaktivniy belok)",  "mg/l"),
+                ("aslo", "ASLO (Antistreptolizin-O)", "ME/ml"),
+            ])
+            self.sub_norma_frame.grid()
+
+        elif 'koagulogramma' in tn or 'koagul' in tn:
+            self.sub_norma_frame.config(text="KOAGULOGRAMMA — Sub-testlar Normasi")
+            self._build_sub_norma_fields([
+                ("pt_sek",     "PT sekundalarda",           "sek"),
+                ("pt_kviku",   "PT bo'yicha Kviku",         "%"),
+                ("pt_mno",     "MNO/INR",                   "INR"),
+                ("tt",         "TT (Tromboplastin vaqti)",  "sek"),
+                ("achtv",      "ACHTV",                     "sek"),
+                ("fibrinogen", "Fibrinogen",                 "g/l"),
+            ])
+            self.sub_norma_frame.grid()
+
+        elif _is_lipid_spektri_test(tn):
+            self.sub_norma_frame.config(text="LIPID SPEKTRI — Sub-testlar Normasi")
+            self._build_sub_norma_fields([
+                ("tc",      "Umumiy xolesterin (TC)",                     "mmol/l"),
+                ("hdl",     "HDL — Yuqori zichlikli lipoprotein",         "mmol/l"),
+                ("ldl",     "LDL — Past zichlikli lipoprotein",           "mmol/l"),
+                ("tg",      "Trigliseridlar (TG)",                        "mmol/l"),
+                ("vldl",    "VLDL-xolesterin (avtomatik)",                "mmol/l"),
+                ("ka",      "Aterogenlik koeffisienti KA (avtomatik)",    ""),
+            ])
+            self.sub_norma_frame.grid()
+
+        elif _is_buyrak_paneli_test(tn):
+            self.sub_norma_frame.config(text="BUYRAK PANELI — Sub-testlar Normasi")
+            self._build_sub_norma_fields([
+                ("mochevina",       "Mochevina",                          "mmol/l"),
+                ("kreatinin",       "Kreatinin",                          "mkmol/l"),
+                ("siydik_kislota",  "Siydik kislotasi",                   "mkmol/l"),
+                ("albumin",         "Albumin",                            "g/l"),
+                ("bun",             "Mochevina (avtomatik)",               "mmol/l"),
+                ("gfr",             "GFR — Filtrlash tezligi (avtomatik)","ml/min"),
+            ])
+            self.sub_norma_frame.grid()
+
+        else:
+            self.sub_norma_frame.grid_remove()
+
+    def _build_bilirubin_norma_fields(self):
+        """Bilirubin uchun maxsus sub-norma maydoni — yoshga qarab norma va Erkin=auto"""
+        self.sub_norma_frame.columnconfigure(1, weight=1)
+
+        # --- Umumiy bilirubin (yoshga qarab) ---
+        var_um = tk.StringVar()
+        self.sub_norma_vars["umumiy"] = var_um
+        lbl_um = ttk.Label(self.sub_norma_frame, text="Umumiy bilirubin:", font=("Arial", 9))
+        lbl_um.grid(row=0, column=0, sticky=tk.W, padx=5, pady=2)
+        self.sub_norma_widgets.append(lbl_um)
+        entry_um = ttk.Entry(self.sub_norma_frame, textvariable=var_um, width=42, font=("Arial", 9))
+        entry_um.grid(row=0, column=1, columnspan=2, sticky=tk.EW, padx=5, pady=2)
+        self.sub_norma_widgets.append(entry_um)
+        hint_um = ttk.Label(
+            self.sub_norma_frame,
+            text="Yoshga qarab: Yangi tug'ilgan: 0-200; 1 oy-2 yosh: 0-17; Kattalar: 3.4-20.5",
+            font=("Arial", 7), foreground="gray"
+        )
+        hint_um.grid(row=1, column=0, columnspan=3, sticky=tk.W, padx=5)
+        self.sub_norma_widgets.append(hint_um)
+
+        # --- Bog'langan bilirubin ---
+        var_bog = tk.StringVar()
+        self.sub_norma_vars["bog_langan"] = var_bog
+        lbl_bog = ttk.Label(self.sub_norma_frame, text="Bog'langan bilirubin:", font=("Arial", 9))
+        lbl_bog.grid(row=2, column=0, sticky=tk.W, padx=5, pady=2)
+        self.sub_norma_widgets.append(lbl_bog)
+        entry_bog = ttk.Entry(self.sub_norma_frame, textvariable=var_bog, width=18, font=("Arial", 10))
+        entry_bog.grid(row=2, column=1, sticky=tk.EW, padx=5, pady=2)
+        self.sub_norma_widgets.append(entry_bog)
+        ulbl_bog = ttk.Label(self.sub_norma_frame, text="mkmol/l", font=("Arial", 9), foreground="gray")
+        ulbl_bog.grid(row=2, column=2, sticky=tk.W, padx=5, pady=2)
+        self.sub_norma_widgets.append(ulbl_bog)
+
+        # --- Erkin bilirubin (avtomatik) ---
+        var_erk = tk.StringVar(value="")
+        self.sub_norma_vars["erkin"] = var_erk
+        lbl_erk = ttk.Label(self.sub_norma_frame, text="Erkin bilirubin:", font=("Arial", 9))
+        lbl_erk.grid(row=3, column=0, sticky=tk.W, padx=5, pady=2)
+        self.sub_norma_widgets.append(lbl_erk)
+        auto_lbl = ttk.Label(
+            self.sub_norma_frame,
+            text="= Umumiy − Bog'langan  (avtomatik hisoblanadi)",
+            font=("Arial", 9, "italic"), foreground="#2E75B6"
+        )
+        auto_lbl.grid(row=3, column=1, columnspan=2, sticky=tk.W, padx=5, pady=2)
+        self.sub_norma_widgets.append(auto_lbl)
+
+    def _build_sub_norma_fields(self, components):
+        """Sub-norma maydonlarini yaratish: [(key, name, unit), ...]"""
+        self.sub_norma_frame.columnconfigure(1, weight=1)
+        for i, (key, name, unit) in enumerate(components):
+            var = tk.StringVar()
+            self.sub_norma_vars[key] = var
+
+            lbl = ttk.Label(self.sub_norma_frame, text=f"{name}:", font=("Arial", 9))
+            lbl.grid(row=i, column=0, sticky=tk.W, padx=5, pady=2)
+            self.sub_norma_widgets.append(lbl)
+
+            entry = ttk.Entry(self.sub_norma_frame, textvariable=var, width=18, font=("Arial", 10))
+            entry.grid(row=i, column=1, sticky=tk.EW, padx=5, pady=2)
+            self.sub_norma_widgets.append(entry)
+
+            ulbl = ttk.Label(self.sub_norma_frame, text=unit, font=("Arial", 9), foreground="gray")
+            ulbl.grid(row=i, column=2, sticky=tk.W, padx=5, pady=2)
+            self.sub_norma_widgets.append(ulbl)
+
+    def get_sub_norma_result_template(self, test_name_lower):
+        """Sub-norma varlaridan result_template JSON qaytarish"""
+        import json as _j
+        if not self.sub_norma_vars:
+            return None
+
+        def _v(key):
+            var = self.sub_norma_vars.get(key)
+            return var.get().strip() if var else ""
+
+        if 'bilirubin' in test_name_lower or 'билирубин' in test_name_lower:
+            comps = [
+                # umumiy norma: yoshga qarab multi-ref range (nuqtali vergul bilan ajratilgan)
+                {"name": "Umumiy bilirubin",     "key": "umumiy",     "unit": "mkmol/l",
+                 "norma": _v("umumiy"),     "readonly": False},
+                {"name": "Bog'langan bilirubin", "key": "bog_langan", "unit": "mkmol/l",
+                 "norma": _v("bog_langan"), "readonly": False},
+                # erkin — doim avtomatik hisoblanadi: Total - Direct
+                {"name": "Erkin bilirubin",      "key": "erkin",      "unit": "mkmol/l",
+                 "norma": "",               "readonly": True,  "formula": "umumiy - bog_langan"},
+            ]
+            return _j.dumps({"type": "multi_component", "components": comps}, ensure_ascii=False)
+
+        elif 'revmoproba' in test_name_lower or 'revmo' in test_name_lower:
+            is_auto = 'avtomat' in test_name_lower or 'auto' in test_name_lower
+            sfx = " avtomat" if is_auto else ""
+            comps = [
+                {"name": f"RF (Revmatoidniy faktor){sfx}",   "key": "rf",   "unit": "ME/ml",
+                 "norma": _v("rf"),   "readonly": False},
+                {"name": f"CRP (S-reaktivniy belok){sfx}",   "key": "crp",  "unit": "mg/l",
+                 "norma": _v("crp"),  "readonly": False},
+                {"name": f"ASLO (Antistreptolizin-O){sfx}",  "key": "aslo", "unit": "ME/ml",
+                 "norma": _v("aslo"), "readonly": False},
+            ]
+            return _j.dumps({"type": "multi_component", "components": comps}, ensure_ascii=False)
+
+        elif 'koagulogramma' in test_name_lower or 'koagul' in test_name_lower:
+            comps = [
+                {"name": "PT sekundalarda",          "key": "pt_sek",     "unit": "sek",
+                 "norma": _v("pt_sek"),     "readonly": False, "group": "PT"},
+                {"name": "PT bo'yicha Kviku",        "key": "pt_kviku",   "unit": "%",
+                 "norma": _v("pt_kviku"),   "readonly": False, "group": "PT"},
+                {"name": "MNO/INR",                  "key": "pt_mno",     "unit": "INR",
+                 "norma": _v("pt_mno"),     "readonly": False, "group": "PT"},
+                {"name": "TT (Tromboplastin vaqti)", "key": "tt",         "unit": "sek",
+                 "norma": _v("tt"),         "readonly": False},
+                {"name": "ACHTV",                    "key": "achtv",      "unit": "sek",
+                 "norma": _v("achtv"),      "readonly": False},
+                {"name": "Fibrinogen",               "key": "fibrinogen", "unit": "g/l",
+                 "norma": _v("fibrinogen"), "readonly": False},
+            ]
+            return _j.dumps({"type": "multi_component", "components": comps}, ensure_ascii=False)
+
+        elif _is_lipid_spektri_test(test_name_lower):
+            comps = [
+                {"name": "Umumiy xolesterin (TC)", "key": "tc",   "unit": "mmol/l",
+                 "norma": _v("tc") or "3.5-5.2",   "readonly": False},
+                {"name": "HDL — Yuqori zichlikli lipoprotein xolesterin",
+                 "key": "hdl",  "unit": "mmol/l",
+                 "norma": _v("hdl") or "E:≥1.0 / A:≥1.2", "readonly": False},
+                {"name": "LDL — Past zichlikli lipoprotein xolesterin",
+                 "key": "ldl",  "unit": "mmol/l",
+                 "norma": _v("ldl") or "<3.4",      "readonly": False},
+                {"name": "Trigliseridlar (TG)",    "key": "tg",   "unit": "mmol/l",
+                 "norma": _v("tg") or "0.7-1.7",    "readonly": False},
+                {"name": "VLDL-xolesterin (hisoblangan)", "key": "vldl", "unit": "mmol/l",
+                 "norma": "0.26-1.04",               "readonly": True, "formula": "tg / 2.2"},
+                {"name": "Non-HDL xolesterin (TC − HDL)", "key": "non_hdl", "unit": "mmol/l",
+                 "norma": "<3.4",                    "readonly": True, "formula": "tc - hdl"},
+                {"name": "Aterogenlik koeffisienti (KA) = (TC−HDL)÷HDL",
+                 "key": "ka", "unit": "",
+                 "norma": "<3.0 yaxshi\n3-4 xavf\n>4 yuqori xavf",
+                 "readonly": True, "formula": "(tc - hdl) / hdl"},
+                {"name": "TC/HDL nisbati",         "key": "tc_hdl", "unit": "",
+                 "norma": "<5.0",                   "readonly": True, "formula": "tc / hdl"},
+                {"name": "LDL/HDL nisbati",        "key": "ldl_hdl", "unit": "",
+                 "norma": "<3.5",                   "readonly": True, "formula": "ldl / hdl"},
+                {"name": "TG/HDL nisbati",         "key": "tg_hdl", "unit": "",
+                 "norma": "<1.5",                   "readonly": True, "formula": "tg / hdl"},
+            ]
+            return _j.dumps({"type": "multi_component", "components": comps}, ensure_ascii=False)
+
+        elif _is_buyrak_paneli_test(test_name_lower):
+            comps = [
+                {"name": "Mochevina (qon karbamid azoti)", "key": "mochevina", "unit": "mmol/l",
+                 "norma": _v("mochevina") or "2.5-8.3",  "readonly": False},
+                {"name": "Kreatinin (mushak metabolizmi qoldiq mahsuloti)",
+                 "key": "kreatinin", "unit": "mkmol/l",
+                 "norma": _v("kreatinin") or "E:62-115 / A:53-97", "readonly": False},
+                {"name": "Siydik kislotasi (purin almashinuvi mahsuloti)",
+                 "key": "siydik_kislota", "unit": "mkmol/l",
+                 "norma": _v("siydik_kislota") or "E:210-420 / A:150-350", "readonly": False},
+                {"name": "Albumin (buyrak filtri ko'rsatkichi)", "key": "albumin", "unit": "g/l",
+                 "norma": _v("albumin") or "35-52",       "readonly": False},
+                {"name": "Mochevina azoti (BUN, hisoblangan)", "key": "bun", "unit": "mmol/l",
+                 "norma": "1.1-3.9",                       "readonly": True, "formula": "mochevina * 28.02 / 60.06"},
+                {"name": "Kreatinin/Mochevina nisbati (hisoblangan)", "key": "bun_cr", "unit": "µmol/mmol",
+                 "norma": "10-20",                         "readonly": True, "formula": "kreatinin / mochevina"},
+                {"name": "Umumiy azot miqdori (hisoblangan)", "key": "umumiy_azot", "unit": "mmol/l",
+                 "norma": "1.2-4.1",                       "readonly": True, "formula": "umumiy_azot_calc"},
+                {"name": "GFR — Klubochkaviy filtrlash tezligi (CKD-EPI)",
+                 "key": "gfr", "unit": "ml/min/1.73m²",
+                 "norma": "≥90 Normal | 60-89 Yengil | 45-59 O'rtacha | 30-44 Og'irroq | <30 Og'ir",
+                 "readonly": True, "formula": "gfr_cockcroft"},
+            ]
+            return _j.dumps({"type": "multi_component", "components": comps}, ensure_ascii=False)
+
+        return None
+
+    def _load_sub_norma_from_template(self, template_data):
+        """result_template JSON'dan sub-norma varlarini to'ldirish"""
+        for comp in template_data.get("components", []):
+            key = comp.get("key")
+            norma = comp.get("norma", "")
+            if key and key in self.sub_norma_vars:
+                self.sub_norma_vars[key].set(norma)
+    # ── Sub-norma panel metodlari tugadi ──────────────────────────────────
+
+
+class MultiRefRangeOynasi:
+    """Multi-Ref.Range oynasi"""
+    def __init__(self, parent, main_app):
+        self.parent = parent
+        self.main_app = main_app
+        self.window = tk.Toplevel(parent)
+        self.window.title("Multi-Ref.Range Setup")
+        self.window.geometry("700x700")
+        self.window.transient(parent)
+        
+        self.ref_ranges = {}
+        self.category_vars = {}
+        self.custom_categories = []
+        
+        ttk.Label(self.window, text="Multi-Ref.Range Setup", font=("Arial", 14, "bold")).pack(pady=10)
+        
+        main_container = ttk.Frame(self.window, padding="10")
+        main_container.pack(fill=tk.BOTH, expand=True)
+        
+        canvas_frame = ttk.Frame(main_container)
+        canvas_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        
+        canvas = tk.Canvas(canvas_frame)
+        scrollbar = ttk.Scrollbar(canvas_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        self.standard_categories = [
+            ("Man", "Erkak"),
+            ("Woman", "Ayol"),
+            ("Neonate", "Yangi tug'ilgan"),
+            ("1 Month - 2 Years", "1 oy - 2 yosh"),
+            ("2 Years - Adult", "2 yosh - Kattalar"),
+            ("<3 yosh", "<3 yosh"),
+            (">3 yosh", ">3 yosh"),
+            ("1-trimestr", "1-trimestr"),
+            ("2-trimestr", "2-trimestr"),
+            ("3-trimestr", "3-trimestr"),
+            ("Follikulyar", "Follikulyar"),
+            ("Ovulyatsiya", "Ovulyatsiya"),
+            ("Lyutein", "Lyutein"),
+            ("Menopauza", "Menopauza"),
+        ]
+        
+        header_frame = ttk.Frame(scrollable_frame)
+        header_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        ttk.Label(header_frame, text="Category", font=("Arial", 10, "bold"), width=25).pack(side=tk.LEFT, padx=5)
+        ttk.Label(header_frame, text="Lower Limit", font=("Arial", 10, "bold"), width=15).pack(side=tk.LEFT, padx=5)
+        ttk.Label(header_frame, text="Upper Limit", font=("Arial", 10, "bold"), width=15).pack(side=tk.LEFT, padx=5)
+        
+        self.table_frame = ttk.Frame(scrollable_frame)
+        self.table_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        self.current_row = 0
+        for eng_name, uz_name in self.standard_categories:
+            self.add_category_row(eng_name, uz_name)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        add_frame = ttk.LabelFrame(main_container, text="Yangi Kategoriya Qo'shish", padding="10")
+        add_frame.pack(fill=tk.X, pady=10)
+
+        yosh_frame = ttk.Frame(add_frame)
+        yosh_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(yosh_frame, text="Yosh:", width=10).pack(side=tk.LEFT, padx=5)
+        self.new_yosh_var = tk.StringVar()
+        yosh_entry = ttk.Entry(yosh_frame, textvariable=self.new_yosh_var, width=15)
+        yosh_entry.pack(side=tk.LEFT, padx=5)
+        ttk.Label(yosh_frame, text="(masalan: 50, >60, <18, 40-60)", font=("Arial", 8), foreground="gray").pack(side=tk.LEFT, padx=5)
+
+        jins_frame = ttk.Frame(add_frame)
+        jins_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(jins_frame, text="Jins:", width=10).pack(side=tk.LEFT, padx=5)
+        self.new_jins_var = tk.StringVar()
+        jins_combo = ttk.Combobox(jins_frame, textvariable=self.new_jins_var, width=15,
+                                 values=["", "Erkak", "Ayol", "Erkak 50+", "Ayol 50+"])
+        jins_combo.pack(side=tk.LEFT, padx=5)
+
+        boshqa_frame = ttk.Frame(add_frame)
+        boshqa_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(boshqa_frame, text="Boshqa:", width=10).pack(side=tk.LEFT, padx=5)
+        self.new_boshqa_var = tk.StringVar()
+        boshqa_combo = ttk.Combobox(boshqa_frame, textvariable=self.new_boshqa_var, width=20,
+                                    values=["", "Laktatsiya", "Homiladorlik", "XGCH", "Hafta",
+                                            "Bolalar", "O'smirlar", "Kattalar", "Keksalar"])
+        boshqa_combo.pack(side=tk.LEFT, padx=5)
+        ttk.Label(boshqa_frame, text="(masalan: Laktatsiya, XGCH, Hafta...)", font=("Arial", 8), foreground="gray").pack(side=tk.LEFT, padx=5)
+
+        btn_frame = ttk.Frame(add_frame)
+        btn_frame.pack(fill=tk.X, pady=5)
+        ttk.Button(btn_frame, text="+ Qo'shish", command=self.add_custom_category).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="O'chirish", command=self.remove_selected_category).pack(side=tk.LEFT, padx=5)
+        
+        self.load_from_main_app()
+        
+        button_frame = ttk.Frame(main_container)
+        button_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        ttk.Button(button_frame, text="[OK] OK", command=self.save_and_close, width=15).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="[XATO] Cancel", command=self.window.destroy, width=15).pack(side=tk.LEFT, padx=5)
+    
+    def add_category_row(self, eng_name, uz_name, row=None):
+        """Kategoriya qatorini qo'shish"""
+        if row is None:
+            row = self.current_row
+            self.current_row += 1
+        
+        row_frame = ttk.Frame(self.table_frame)
+        row_frame.pack(fill=tk.X, padx=5, pady=2)
+        
+        category_label = ttk.Label(row_frame, text=uz_name, font=("Arial", 10), width=25, anchor=tk.W)
+        category_label.pack(side=tk.LEFT, padx=5)
+        
+        lower_var = tk.StringVar()
+        lower_entry = ttk.Entry(row_frame, textvariable=lower_var, width=15)
+        lower_entry.pack(side=tk.LEFT, padx=5)
+        
+        upper_var = tk.StringVar()
+        upper_entry = ttk.Entry(row_frame, textvariable=upper_var, width=15)
+        upper_entry.pack(side=tk.LEFT, padx=5)
+        
+        delete_btn = None
+        if eng_name not in [cat[0] for cat in self.standard_categories]:
+            delete_btn = ttk.Button(row_frame, text="🗑️", width=3, 
+                                   command=lambda name=eng_name: self.remove_category(name))
+            delete_btn.pack(side=tk.LEFT, padx=2)
+        
+        self.category_vars[eng_name] = {
+            'lower': lower_var,
+            'upper': upper_var,
+            'uz_name': uz_name,
+            'row_frame': row_frame,
+            'delete_btn': delete_btn
+        }
+        
+        return row_frame
+    
+    def add_custom_category(self):
+        """Yangi kategoriya qo'shish"""
+        yosh = self.new_yosh_var.get().strip()
+        jins = self.new_jins_var.get().strip()
+        boshqa = self.new_boshqa_var.get().strip()
+
+        if not yosh and not jins and not boshqa:
+            messagebox.showwarning("Diqqat", "Yosh, Jins yoki Boshqa kategoriya kiriting!")
+            return
+
+        category_parts = []
+        if yosh:
+            # Faqat raqam yoki >/< belgili son bo'lsa "yosh" so'zini qo'shamiz
+            if re.match(r'^[<>]?\d', yosh) or re.match(r'^\d+-\d+', yosh):
+                category_parts.append(yosh + " yosh")
+            else:
+                # Matn bo'lsa (masalan "laktatsiya") to'g'ridan-to'g'ri ishlatamiz
+                category_parts.append(yosh)
+
+        if jins:
+            category_parts.append(jins)
+
+        if boshqa:
+            category_parts.append(boshqa)
+
+        uz_name = " ".join(category_parts)
+        eng_name = f"custom_{len(self.custom_categories)}_{uz_name.replace(' ', '_')}"
+
+        self.add_category_row(eng_name, uz_name)
+        self.custom_categories.append((eng_name, uz_name))
+
+        self.new_yosh_var.set("")
+        self.new_jins_var.set("")
+        self.new_boshqa_var.set("")
+    
+    def remove_category(self, eng_name):
+        """Kategoriyani o'chirish"""
+        if eng_name in self.category_vars:
+            row_frame = self.category_vars[eng_name]['row_frame']
+            row_frame.destroy()
+            del self.category_vars[eng_name]
+            self.custom_categories = [c for c in self.custom_categories if c[0] != eng_name]
+    
+    def remove_selected_category(self):
+        """Tanlangan kategoriyani o'chirish"""
+        if self.custom_categories:
+            last_eng_name = self.custom_categories[-1][0]
+            self.remove_category(last_eng_name)
+        else:
+            messagebox.showinfo("Diqqat", "O'chirish uchun kategoriya yo'q")
+    
+    def load_from_main_app(self):
+        """Asosiy oynadagi ma'lumotlardan yuklash"""
+        norma_text = self.main_app.norma_var.get().strip()
+        if not norma_text:
+            return
+        
+        if "," in norma_text or ":" in norma_text:
+            parts = [p.strip() for p in norma_text.split(",")]
+            for part in parts:
+                part = part.strip()
+                if ":" not in part:
+                    continue
+                
+                category_part, range_part = part.split(":", 1)
+                category_part = category_part.strip()
+                range_part = range_part.strip()
+                
+                matched = False
+                for eng_name, vars_dict in self.category_vars.items():
+                    uz_name = vars_dict['uz_name']
+                    
+                    if uz_name == category_part or category_part in uz_name or uz_name in category_part:
+                        if "-" in range_part:
+                            range_match = re.search(r'(\d+(?:[.,]\d+)?)\s*-\s*(\d+(?:[.,]\d+)?)', range_part)
+                            if range_match:
+                                lower = range_match.group(1).replace(',', '.')
+                                upper = range_match.group(2).replace(',', '.')
+                                vars_dict['lower'].set(lower)
+                                vars_dict['upper'].set(upper)
+                                matched = True
+                        elif range_part.startswith(">"):
+                            lower = range_part[1:].strip().replace(',', '.')
+                            vars_dict['lower'].set(lower)
+                            matched = True
+                        elif range_part.startswith("<"):
+                            upper = range_part[1:].strip().replace(',', '.')
+                            vars_dict['upper'].set(upper)
+                            matched = True
+                        
+                        if matched:
+                            break
+                
+                if not matched and category_part:
+                    eng_name = f"custom_loaded_{len(self.custom_categories)}_{category_part.replace(' ', '_')}"
+                    self.add_category_row(eng_name, category_part)
+                    self.custom_categories.append((eng_name, category_part))
+                    
+                    if eng_name in self.category_vars:
+                        vars_dict = self.category_vars[eng_name]
+                        if "-" in range_part:
+                            range_match = re.search(r'(\d+(?:[.,]\d+)?)\s*-\s*(\d+(?:[.,]\d+)?)', range_part)
+                            if range_match:
+                                lower = range_match.group(1).replace(',', '.')
+                                upper = range_match.group(2).replace(',', '.')
+                                vars_dict['lower'].set(lower)
+                                vars_dict['upper'].set(upper)
+                        elif range_part.startswith(">"):
+                            lower = range_part[1:].strip().replace(',', '.')
+                            vars_dict['lower'].set(lower)
+                        elif range_part.startswith("<"):
+                            upper = range_part[1:].strip().replace(',', '.')
+                            vars_dict['upper'].set(upper)
+    
+    def save_and_close(self):
+        """Saqlash va yopish"""
+        ranges_list = []
+        for eng_name, vars_dict in self.category_vars.items():
+            lower = vars_dict['lower'].get().strip()
+            upper = vars_dict['upper'].get().strip()
+            if lower or upper:
+                uz_name = vars_dict['uz_name']
+                if lower and upper:
+                    ranges_list.append(f"{uz_name}: {lower}-{upper}")
+                elif lower:
+                    ranges_list.append(f"{uz_name}: >{lower}")
+                elif upper:
+                    ranges_list.append(f"{uz_name}: <{upper}")
+        
+        if ranges_list:
+            self.main_app.norma_var.set(", ".join(ranges_list))
+        
+        self.ref_ranges = {}
+        for eng_name, vars_dict in self.category_vars.items():
+            lower = vars_dict['lower'].get().strip()
+            upper = vars_dict['upper'].get().strip()
+            if lower or upper:
+                try:
+                    self.ref_ranges[eng_name] = {
+                        'lower': float(lower.replace(',', '.')) if lower else None,
+                        'upper': float(upper.replace(',', '.')) if upper else None,
+                        'uz_name': vars_dict['uz_name']
+                    }
+                except:
+                    pass
+        
+        self.window.destroy()
+
+class BirliklarOynasi:
+    def __init__(self, parent):
+        self.parent = parent
+        self.window = tk.Toplevel(parent)
+        self.window.title("Birliklar")
+        self.window.geometry("400x500")
+        
+        ttk.Label(self.window, text="Birliklar Ro'yxati", font=("Arial", 14, "bold")).pack(pady=10)
+        
+        list_frame = ttk.Frame(self.window)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        scrollbar = ttk.Scrollbar(list_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        self.listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set)
+        self.listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=self.listbox.yview)
+        
+        add_frame = ttk.Frame(self.window)
+        add_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        self.new_birlik_var = tk.StringVar()
+        ttk.Entry(add_frame, textvariable=self.new_birlik_var, width=30).pack(side=tk.LEFT, padx=5)
+        ttk.Button(add_frame, text="Qo'shish", command=self.qoshish).pack(side=tk.LEFT, padx=5)
+        
+        ttk.Button(self.window, text="O'chirish", command=self.ochirish).pack(pady=5)
+        ttk.Button(self.window, text="Yopish", command=self.window.destroy).pack(pady=5)
+        
+        self.yuklash()
+    
+    def yuklash(self):
+        """Birliklarni yuklash"""
+        self.listbox.delete(0, tk.END)
+        birliklar = self.get_birliklar()
+        for birlik in birliklar:
+            self.listbox.insert(tk.END, birlik)
+    
+    def get_birliklar(self):
+        """Birliklarni bazadan olish"""
+        conn = db_conn()
+        if not conn:
+            return []
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT birlik_nomi FROM birliklar ORDER BY birlik_nomi")
+            birliklar = [row[0] for row in cursor.fetchall()]
+            cursor.close()
+            conn.close()
+            return birliklar
+        except Exception as e:
+            print(f"[OGOHLANTIRISH] Birliklarni olishda xato: {e}")
+            if 'conn' in locals():
+                try:
+                    conn.close()
+                except:
+                    pass
+            return []
+    
+    def qoshish(self):
+        """Yangi birlik qo'shish"""
+        birlik = self.new_birlik_var.get().strip()
+        if not birlik:
+            messagebox.showwarning("Diqqat", "Birlik nomini kiriting!")
+            return
+        
+        conn = db_conn()
+        if not conn:
+            messagebox.showerror("Xato", "Database'ga ulanib bo'lmadi!")
+            return
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT IGNORE INTO birliklar (birlik_nomi) VALUES (%s)",
+                (birlik,)
+            )
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            self.new_birlik_var.set("")
+            self.yuklash()
+            messagebox.showinfo("Muvaffaqiyat", "Birlik qo'shildi!")
+            
+        except Exception as e:
+            messagebox.showerror("Xato", f"Qo'shishda xato: {e}")
+            if 'conn' in locals():
+                try:
+                    conn.close()
+                except:
+                    pass
+    
+    def ochirish(self):
+        """Birlikni o'chirish"""
+        selection = self.listbox.curselection()
+        if not selection:
+            messagebox.showwarning("Diqqat", "Birlikni tanlang!")
+            return
+        
+        birlik = self.listbox.get(selection[0])
+        
+        if not messagebox.askyesno("Tasdiqlash", f"'{birlik}' ni o'chirishni xohlaysizmi?"):
+            return
+        
+        conn = db_conn()
+        if not conn:
+            messagebox.showerror("Xato", "Database'ga ulanib bo'lmadi!")
+            return
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM birliklar WHERE birlik_nomi = %s", (birlik,))
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            self.yuklash()
+            messagebox.showinfo("Muvaffaqiyat", "Birlik o'chirildi!")
+            
+        except Exception as e:
+            messagebox.showerror("Xato", f"O'chirishda xato: {e}")
+            if 'conn' in locals():
+                try:
+                    conn.close()
+                except:
+                    pass
+
+# Global o'zgaruvchilar
+current_order_id = None
+current_bemor_data = None
+current_tests = []
+barcode_queue = queue.Queue()
+
+class MonoblokApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("AzizMedLine LIMS - Monoblok Dastur")
+        self.root.geometry("1520x790")
+
+        # Oynani ko'rinadigan qilish (darhol)
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
+        self.root.update()  # Oynani darhol ko'rsatish
+        
+        # O'zgaruvchilar
+        self.current_order_id = None
+        self.current_bemor_data = None
+        self.current_tests = []
+        self.test_results = {}  # {test_id: result_value}
+        self.urit_process = None  # URIT-50 dastur jarayoni
+        self.is_saved = False  # Ma'lumotlar saqlanganmi
+        self.is_printed = False  # Chop etilganmi
+        self._last_save_error = None  # Oxirgi saqlash xatosi (retry uchun)
+        self.previous_order_id = None  # Oldingi buyurtma ID (saqlanmagan ma'lumotlar uchun)
+        self._db_warning_shown = False  # Database xatosi xabari ko'rsatilganmi
+        
+        # Status bar (avval yaratish kerak)
+        self.status_var = tk.StringVar(value="[OGOHLANTIRISH] Yuklash uchun bemor tanlang")
+        
+        # UI yaratish
+        self.create_ui()
+        
+        # Sozlamalar oynasini yaratish (lekin ko'rsatmaslik)
+        self.settings_window = None
+        
+        # Barcode scanner thread
+        self.scanner_thread = threading.Thread(target=self.barcode_scanner_thread, daemon=True)
+        self.scanner_thread.start()
+        
+        # BC-20S HL7 Listener ni ishga tushirish (avtomatik ishga tushirish funksiyasida)
+        self.bc20s_listener = None
+        self.bk280_listener_thread = None  # BK-280 listener thread
+        self.bk280_lis_thread = None  # BK-280 LIS query server thread
+        
+        # Blanka generation uses blanka_generator.py directly (no pre-initialization needed)
+        
+        # BARCHA dasturlarni avtomatik ishga tushirish (XAMPP, URIT-50, BK-280, va boshqalar)
+        self.root.after(3000, self._auto_start_services)
+        
+        # Status bar ko'rsatish
+        status_bar = ttk.Label(self.root, textvariable=self.status_var, relief=tk.SUNKEN)
+        status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        # Database ulanishini tekshirish (dastur ishga tushganda)
+        self.root.after(1000, self.check_db_on_startup)
+        
+        # Database test tugmasi (Ctrl+Shift+D) - dastur oynasida
+        self.root.bind("<Control-Shift-D>", lambda e: self.test_database_read())
+        self.root.bind("<Control-Shift-d>", lambda e: self.test_database_read())  # Kichik harf ham
+        
+        # Fokus oynaga qaytish (Ctrl+Shift+D ishlashi uchun)
+        self.root.focus_set()
+        
+        # Dastur yopilganda
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+    
+    def check_db_on_startup(self):
+        """Dastur ishga tushganda MySQL server ulanishini tekshirish (faqat bir marta)"""
+        conn = db_conn()
+        if conn:
+            self.status_var.set("[OK] MySQL serverga ulanildi")
+        else:
+            self.status_var.set("[OGOHLANTIRISH] MySQL serverga ulanib bo'lmadi")
+    
+    def _auto_start_services(self):
+        """
+        BARCHA integratsiya qilingan dasturlarni avtomatik ishga tushirish
+        - MySQL Server ulanishini tekshirish (ASUS kompyuteridagi MySQL serverga)
+        - URIT-50 (Siydik analizatori) [OK] INTEGRATSIYA QILINGAN
+        - BK-280 (Biokimyo analizatori) [OK] INTEGRATSIYA QILINGAN
+        
+        Barcha analizatorlar bitta dasturda integratsiya qilingan!
+        """
+        try:
+            services_status = {}
+            
+            print(f"\n{'='*70}")
+            print(f"🚀 MONOBLOK DASTUR - BARCHA ANALIZATORLARNI ISHGA TUSHIRISH")
+            print(f"{'='*70}\n")
+            
+            # 1. MySQL Server ulanishini tekshirish (ASUS kompyuteridagi MySQL serverga)
+            self.root.after(0, lambda: self.status_var.set("MySQL serverga ulanilmoqda..."))
+            print("📦 1. MySQL serverga ulanilmoqda...")
+            mysql_ok = self.check_database_connection()
+            services_status['MySQL'] = mysql_ok
+            if mysql_ok:
+                print("   [OK] MySQL serverga ulanildi")
+                self.root.after(0, lambda: self.status_var.set("[OK] MySQL serverga ulanildi"))
+            else:
+                print("   [XATO] MySQL serverga ulanib bo'lmadi")
+                self.root.after(0, lambda: self.status_var.set("[OGOHLANTIRISH] MySQL serverga ulanib bo'lmadi"))
+            
+            # 2. URIT-50 siydik analizatorini ishga tushirish [OK] INTEGRATSIYA QILINGAN
+            self.root.after(0, lambda: self.status_var.set("URIT-50 siydik analizatorini ishga tushiryapman..."))
+            print("\n💧 2. URIT-50 siydik analizatorini ishga tushiryapman...")
+            self.stop_existing_urit50_processes()
+            urit_ok = self.start_urit50_service()
+            services_status['URIT-50'] = urit_ok
+            if urit_ok:
+                print("   [OK] URIT-50 siydik analizatori ishga tushdi")
+                # URIT-50 to'g'ri ishlayaptimi tekshirish
+                urit_running = self.verify_urit50_running()
+                if urit_running:
+                    print("   [OK] URIT-50 to'g'ri ishlayapti (jarayon tekshirildi)")
+                else:
+                    print("   [OGOHLANTIRISH] URIT-50 ishga tushdi, lekin jarayon tekshirishda muammo bo'lishi mumkin")
+            else:
+                print("   [XATO] URIT-50 siydik analizatori ishga tushmadi")
+            time.sleep(2)  # URIT-50 ishga tushishi uchun kutish
+            
+            # 3. BK-280 biokimyo analizatorini ishga tushirish [OK] INTEGRATSIYA QILINGAN
+            self.root.after(0, lambda: self.status_var.set("BK-280 biokimyo analizatorini ishga tushiryapman..."))
+            print("\n🧪 3. BK-280 biokimyo analizatorini ishga tushiryapman...")
+            try:
+                bk280_ok = self.start_bk280_listener()
+                services_status['BK-280'] = bk280_ok if bk280_ok is not None else False
+                if services_status['BK-280']:
+                    print("   [OK] BK-280 biokimyo analizatori ishga tushdi")
+                else:
+                    print("   [XATO] BK-280 biokimyo analizatori ishga tushmadi")
+            except Exception as e:
+                print(f"   [XATO] BK-280 ishga tushirishda xato: {e}")
+                services_status['BK-280'] = False
+            time.sleep(1)  # BK-280 ishga tushishi uchun kutish
+
+            # 3.5. BK-280 LIS Server (barcode query handler)
+            print("\n🔍 3.5. BK-280 LIS Server (barcode so'rov) ni ishga tushiryapman...")
+            try:
+                bk280_lis_ok = self.start_bk280_lis_server()
+                services_status['BK-280 LIS'] = bk280_lis_ok if bk280_lis_ok is not None else False
+                if services_status['BK-280 LIS']:
+                    print("   [OK] BK-280 LIS Server ishga tushdi (port 8088)")
+                    print("   Barcode skanerlanganda bemor ma'lumotlari analizatorda paydo bo'ladi")
+                else:
+                    print("   [OGOHLANTIRISH] BK-280 LIS Server ishga tushmadi")
+            except Exception as e:
+                print(f"   [XATO] BK-280 LIS Server ishga tushirishda xato: {e}")
+                services_status['BK-280 LIS'] = False
+            time.sleep(1)
+
+            # 4. BC-20S gematologiya analizatori listener ni ishga tushirish
+            self.root.after(0, lambda: self.status_var.set("BC-20S gematologiya analizatorini ishga tushiryapman..."))
+            print("\n🩸 4. BC-20S gematologiya analizatorini ishga tushiryapman...")
+            try:
+                bc20s_ok = self.start_bc20s_listener()
+                services_status['BC-20S'] = bc20s_ok
+                if bc20s_ok:
+                    print("   [OK] BC-20S gematologiya analizatori ishga tushdi (port 5100)")
+                else:
+                    print("   [OGOHLANTIRISH] BC-20S ishga tushmadi (port band yoki modul yo'q)")
+            except Exception as e:
+                print(f"   [XATO] BC-20S ishga tushirishda xato: {e}")
+                services_status['BC-20S'] = False
+            time.sleep(1)
+
+            # Statusni yangilash
+            successful_services = [name for name, ok in services_status.items() if ok]
+            failed_services = [name for name, ok in services_status.items() if not ok]
+            
+            print(f"\n{'='*70}")
+            print(f"📊 ISHGA TUSHIRISH NATIJALARI:")
+            print(f"{'='*70}")
+            for name, ok in services_status.items():
+                status_icon = "[OK]" if ok else "[XATO]"
+                status_text = "Ishga tushdi" if ok else "Ishga tushmadi"
+                print(f"   {status_icon} {name}: {status_text}")
+            print(f"{'='*70}\n")
+            
+            # Status xabarlarini ko'rsatish
+            if len(successful_services) == len(services_status):
+                # Barcha dasturlar muvaffaqiyatli ishga tushdi
+                final_status = "[OK] URIT-50, BK-280, BC-20S ishga tushdi"
+                self.root.after(0, lambda: self.status_var.set(final_status))
+                print(f"🎉 {final_status}\n")
+            elif successful_services:
+                # Ba'zi dasturlar ishga tushdi
+                status_msg = f"[OK] {', '.join(successful_services)} ishga tushdi"
+                if failed_services:
+                    status_msg += f" | [OGOHLANTIRISH] {', '.join(failed_services)} ishga tushmadi"
+                self.root.after(0, lambda: self.status_var.set(status_msg))
+                print(f"[OGOHLANTIRISH] {status_msg}\n")
+            else:
+                # Hech qanday dastur ishga tushmadi
+                status_msg = f"[OGOHLANTIRISH] Dasturlar ishga tushmadi: {', '.join(failed_services)}"
+                self.root.after(0, lambda: self.status_var.set(status_msg))
+                print(f"[XATO] {status_msg}\n")
+            
+        except Exception as e:
+            error_msg = f"[OGOHLANTIRISH] Dasturlarni ishga tushirishda xato: {e}"
+            print(f"[XATO] {error_msg}")
+            self.root.after(0, lambda: self.status_var.set(error_msg))
+            import traceback
+            traceback.print_exc()
+    
+    def stop_existing_urit50_processes(self):
+        """Mavjud URIT-50 jarayonlarini to'xtatish"""
+        try:
+            # Python jarayonlarini topish
+            result = subprocess.run(
+                ['tasklist', '/FI', 'IMAGENAME eq python.exe'],
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            
+            script_name = "COM4_Urit50_to_Blank_fixed"
+            lines = result.stdout.split('\n')
+            
+            for line in lines:
+                if script_name in line or 'COM4_Urit50' in line:
+                    # PID ni ajratish
+                    parts = line.split()
+                    if len(parts) > 1:
+                        try:
+                            pid = int(parts[1])
+                            # Jarayonni to'xtatish
+                            subprocess.run(
+                                ['taskkill', '/PID', str(pid), '/F'],
+                                capture_output=True,
+                                creationflags=subprocess.CREATE_NO_WINDOW
+                            )
+                            print(f"[OK] Eski URIT-50 jarayoni to'xtatildi (PID: {pid})")
+                        except:
+                            pass
+        except Exception as e:
+            print(f"[OGOHLANTIRISH] Eski jarayonlarni to'xtatishda xato: {e}")
+    
+    def verify_urit50_running(self):
+        """URIT-50 to'g'ri ishlayaptimi tekshirish"""
+        try:
+            # Python jarayonlarini tekshirish
+            result = subprocess.run(
+                ['tasklist', '/FI', 'IMAGENAME eq python.exe'],
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            
+            script_name = "COM4_Urit50"
+            if script_name in result.stdout:
+                # Jarayon mavjud, lekin to'g'ri ishlayaptimi?
+                # COM port ochiqligini tekshirish yoki log faylni tekshirish mumkin
+                return True
+            return False
+        except:
+            return False
+    
+    def check_service_running(self, process_name):
+        """Servis ishlayaptimi tekshirish"""
+        try:
+            # tasklist orqali tekshirish
+            result = subprocess.run(
+                ['tasklist', '/FI', f'IMAGENAME eq {process_name}'],
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            return process_name.lower() in result.stdout.lower()
+        except:
+            return False
+    
+    def check_database_connection(self):
+        """Database ulanishini tekshirish - yaxshilangan"""
+        try:
+            conn = db_conn()
+            if conn:
+                # Test query — natijani o'qib olish kerak (Unread result xatosi oldini olish)
+                cursor = conn.cursor()
+                cursor.execute("SELECT 1")
+                cursor.fetchone()
+                cursor.close()
+                return True
+            return False
+        except Exception as e:
+            print(f"[XATO] Database tekshirish xatosi: {e}")
+            return False
+    
+    def test_database_read(self):
+        """Database'dan ma'lumot o'qishni test qilish - batafsil diagnostika"""
+        # Fokus oynaga qaytarish
+        self.root.focus_set()
+
+        print("\n" + "="*60)
+        print("DATABASE MA'LUMOT O'QISH TESTI")
+        print("="*60)
+        
+        conn = db_conn()
+        if not conn:
+            print("[XATO] Database ga ulanib bo'lmadi!")
+            return False
+        
+        try:
+            cursor = conn.cursor(dictionary=True)
+            
+            # 1. Database nomini tekshirish
+            print("\n1. Database nomini tekshirish...")
+            cursor.execute("SELECT DATABASE() as db_name")
+            db_result = cursor.fetchone()
+            if db_result:
+                print(f"   [OK] Database: {db_result.get('db_name', 'N/A')}")
+            else:
+                print("   [OGOHLANTIRISH] Database nomi topilmadi")
+            
+            # 2. Jadvallarni ro'yxatini olish
+            print("\n2. Mavjud jadvallarni tekshirish...")
+            cursor.execute("SHOW TABLES")
+            tables = cursor.fetchall()
+            if tables:
+                print(f"   [OK] Jadvallar soni: {len(tables)}")
+                table_names = [list(t.values())[0] for t in tables]
+                print(f"   📋 Jadval nomlari: {', '.join(table_names[:10])}")
+                if len(table_names) > 10:
+                    print(f"   ... va yana {len(table_names) - 10} ta jadval")
+            else:
+                print("   [XATO] Hech qanday jadval topilmadi!")
+                print("   [OGOHLANTIRISH] Database bo'sh yoki jadvallar yaratilmagan")
+            
+            # 3. Asosiy jadvallarni tekshirish
+            required_tables = ['bemorlar', 'orders', 'order_items', 'tahlillar', 'results', 'result_items']
+            print("\n3. Asosiy jadvallarni tekshirish...")
+            for table in required_tables:
+                cursor.execute(f"SHOW TABLES LIKE '{table}'")
+                exists = cursor.fetchone()
+                if exists:
+                    # Jadvaldagi qatorlar sonini olish
+                    cursor.execute(f"SELECT COUNT(*) as count FROM {table}")
+                    count_result = cursor.fetchone()
+                    count = count_result.get('count', 0) if count_result else 0
+                    print(f"   [OK] {table}: {count} ta qator")
+                else:
+                    print(f"   [XATO] {table}: TOPILMADI!")
+            
+            # 4. Bemorlar jadvalidan ma'lumot o'qish testi
+            print("\n4. Bemorlar jadvalidan ma'lumot o'qish testi...")
+            try:
+                cursor.execute("SELECT COUNT(*) as count FROM bemorlar")
+                count_result = cursor.fetchone()
+                bemor_count = count_result.get('count', 0) if count_result else 0
+                print(f"   [OK] Bemorlar soni: {bemor_count}")
+                
+                if bemor_count > 0:
+                    # Bir nechta bemor ma'lumotlarini olish
+                    cursor.execute("SELECT id, fish, yosh, jins FROM bemorlar LIMIT 3")
+                    bemorlar = cursor.fetchall()
+                    print(f"   📋 Birinchi {len(bemorlar)} ta bemor:")
+                    for bemor in bemorlar:
+                        print(f"      - ID: {bemor.get('id')}, FISH: {bemor.get('fish', 'N/A')}, Yosh: {bemor.get('yosh', 'N/A')}")
+                else:
+                    print("   [OGOHLANTIRISH] Bemorlar jadvalida ma'lumot yo'q")
+            except Exception as e:
+                print(f"   [XATO] Bemorlar jadvalidan o'qishda xato: {e}")
+            
+            # 5. Orders jadvalidan ma'lumot o'qish testi
+            print("\n5. Orders jadvalidan ma'lumot o'qish testi...")
+            try:
+                cursor.execute("SELECT COUNT(*) as count FROM orders")
+                count_result = cursor.fetchone()
+                order_count = count_result.get('count', 0) if count_result else 0
+                print(f"   [OK] Buyurtmalar soni: {order_count}")
+                
+                if order_count > 0:
+                    # Bir nechta buyurtma ma'lumotlarini olish
+                    cursor.execute("SELECT id, bemor_id, sample_id, sana_vaqt FROM orders ORDER BY id DESC LIMIT 3")
+                    orders = cursor.fetchall()
+                    print(f"   📋 Oxirgi {len(orders)} ta buyurtma:")
+                    for order in orders:
+                        print(f"      - ID: {order.get('id')}, Bemor ID: {order.get('bemor_id')}, Sample: {order.get('sample_id', 'N/A')}")
+                else:
+                    print("   [OGOHLANTIRISH] Orders jadvalida ma'lumot yo'q")
+            except Exception as e:
+                print(f"   [XATO] Orders jadvalidan o'qishda xato: {e}")
+            
+            # 6. Order_items jadvalidan ma'lumot o'qish testi
+            print("\n6. Order_items jadvalidan ma'lumot o'qish testi...")
+            try:
+                cursor.execute("SELECT COUNT(*) as count FROM order_items")
+                count_result = cursor.fetchone()
+                items_count = count_result.get('count', 0) if count_result else 0
+                print(f"   [OK] Tahlillar soni: {items_count}")
+            except Exception as e:
+                print(f"   [XATO] Order_items jadvalidan o'qishda xato: {e}")
+            
+            # 7. Sample ID bo'yicha qidirish testi
+            print("\n7. Sample ID bo'yicha qidirish testi...")
+            test_sample_id = "260115000034"  # Rasmda ko'rinadigan sample ID
+            try:
+                cursor.execute("""
+                    SELECT o.id as order_id, o.sample_id, b.fish, b.yosh
+                    FROM orders o
+                    INNER JOIN bemorlar b ON o.bemor_id = b.id
+                    WHERE o.sample_id = %s
+                    LIMIT 1
+                """, (test_sample_id,))
+                result = cursor.fetchone()
+                if result:
+                    print(f"   [OK] Sample ID '{test_sample_id}' topildi!")
+                    print(f"      - Order ID: {result.get('order_id')}")
+                    print(f"      - Bemor: {result.get('fish', 'N/A')}")
+                else:
+                    print(f"   [OGOHLANTIRISH] Sample ID '{test_sample_id}' topilmadi")
+            except Exception as e:
+                print(f"   [XATO] Sample ID qidirishda xato: {e}")
+            
+            # --- UI dialog: asosiy statistikani ko'rsatish ---
+            try:
+                cursor.execute("SELECT COUNT(*) as cnt FROM bemorlar")
+                bemor_count = (cursor.fetchone() or {}).get('cnt', 0)
+            except Exception:
+                bemor_count = '?'
+
+            try:
+                cursor.execute("SELECT id, fish FROM bemorlar ORDER BY id DESC LIMIT 1")
+                last_bemor = cursor.fetchone() or {}
+            except Exception:
+                last_bemor = {}
+
+            try:
+                cursor.execute("SELECT COUNT(*) as cnt FROM orders")
+                order_count = (cursor.fetchone() or {}).get('cnt', 0)
+            except Exception:
+                order_count = '?'
+
+            try:
+                cursor.execute(
+                    "SELECT o.id, o.sample_id, o.sana_vaqt, b.fish "
+                    "FROM orders o LEFT JOIN bemorlar b ON o.bemor_id = b.id "
+                    "ORDER BY o.id DESC LIMIT 1"
+                )
+                last_order = cursor.fetchone() or {}
+            except Exception:
+                last_order = {}
+
+            cursor.close()
+
+            last_b_id   = last_bemor.get('id', '-')
+            last_b_fish = last_bemor.get('fish', '-')
+            last_o_id   = last_order.get('id', '-')
+            last_o_sid  = last_order.get('sample_id', '-')
+            last_o_date = last_order.get('sana_vaqt', '-')
+            last_o_fish = last_order.get('fish', '-')
+
+            dialog_msg = (
+                f"Jami bemorlar: {bemor_count} ta\n"
+                f"Oxirgi bemor: ID={last_b_id}  |  {last_b_fish}\n\n"
+                f"Jami buyurtmalar: {order_count} ta\n"
+                f"Oxirgi buyurtma: ID={last_o_id}  |  Sample={last_o_sid}\n"
+                f"Sana: {last_o_date}\n"
+                f"Bemor: {last_o_fish}"
+            )
+            messagebox.showinfo("Database holati", dialog_msg)
+
+            print("\n" + "="*60)
+            print("[OK] TEST YAKUNLANDI")
+            print("="*60 + "\n")
+            return True
+
+        except Exception as e:
+            print(f"\n[XATO] Database test xatosi: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror("DB Test xatosi", f"Database xatosi:\n{type(e).__name__}: {e}")
+            return False
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
+    
+    def stop_existing_urit50_processes(self):
+        """Mavjud URIT-50 jarayonlarini to'xtatish"""
+        try:
+            # Python jarayonlarini topish
+            result = subprocess.run(
+                ['tasklist', '/FI', 'IMAGENAME eq python.exe'],
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            
+            script_name = "COM4_Urit50"
+            lines = result.stdout.split('\n')
+            stopped_count = 0
+            
+            for line in lines:
+                if script_name in line or 'COM4_Urit50' in line:
+                    # PID ni ajratish
+                    parts = line.split()
+                    if len(parts) > 1:
+                        try:
+                            pid = int(parts[1])
+                            # Jarayonni to'xtatish
+                            subprocess.run(
+                                ['taskkill', '/PID', str(pid), '/F'],
+                                capture_output=True,
+                                creationflags=subprocess.CREATE_NO_WINDOW
+                            )
+                            stopped_count += 1
+                            print(f"[OK] Eski URIT-50 jarayoni to'xtatildi (PID: {pid})")
+                            time.sleep(0.5)  # Kichik kutish
+                        except:
+                            pass
+            
+            if stopped_count > 0:
+                time.sleep(1)  # Jarayonlar to'xtash uchun kutish
+                
+        except Exception as e:
+            print(f"[OGOHLANTIRISH] Eski jarayonlarni to'xtatishda xato: {e}")
+    
+    def verify_urit50_running(self):
+        """URIT-50 to'g'ri ishlayaptimi tekshirish"""
+        try:
+            # Python jarayonlarini tekshirish
+            result = subprocess.run(
+                ['tasklist', '/FI', 'IMAGENAME eq python.exe'],
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            
+            script_name = "COM4_Urit50"
+            if script_name in result.stdout:
+                # Jarayon mavjud
+                return True
+            return False
+        except:
+            return False
+    
+    def start_urit50_service(self):
+        """URIT-50 siydik analizatori dasturini ishga tushirish"""
+        # Avval mavjud jarayonlarni to'xtatish
+        self.stop_existing_urit50_processes()
+        
+        # URIT-50 dasturining yo'li
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        # Bir nechta mumkin bo'lgan fayl nomlarini tekshirish
+        possible_names = [
+            "COM4_Urit50_to_Blank_fixed  cursor.py",  # Asosiy fayl (ikkita bo'sh joy)
+            "COM4_Urit50_to_Blank_fixed cursor.py",   # Bitta bo'sh joy
+            "COM4_Urit50_to_Blank_fixed_cursor.py",   # Bo'sh joy yo'q
+        ]
+        
+        urit_script = None
+        for name in possible_names:
+            full_path = os.path.join(script_dir, name)
+            if os.path.exists(full_path):
+                urit_script = full_path
+                break
+        
+        # Agar fayl topilmasa, papkadagi barcha fayllarni qidirish
+        if not urit_script:
+            for file in os.listdir(script_dir):
+                if "COM4_Urit50" in file and file.endswith(".py"):
+                    urit_script = os.path.join(script_dir, file)
+                    print(f"[OK] URIT-50 fayl topildi: {file}")
+                    break
+        
+        # Fayl mavjudligini tekshirish
+        if not urit_script or not os.path.exists(urit_script):
+            error_msg = f"[OGOHLANTIRISH] URIT-50 dasturi topilmadi. Papka: {script_dir}"
+            print(error_msg)
+            print(f"   Qidirilgan fayllar: {possible_names}")
+            self.root.after(0, lambda: self.status_var.set(error_msg))
+            return False
+        
+        try:
+            # Variant 1: Bat fayl orqali ishga tushirish (eng ishonchli)
+            bat_file = os.path.join(script_dir, "URIT50_ISHGA_TUSHIRISH.bat")
+            if os.path.exists(bat_file):
+                try:
+                    # Bat faylni yashirin rejimda ishga tushirish
+                    self.urit_process = subprocess.Popen(
+                        [bat_file],
+                        creationflags=subprocess.CREATE_NO_WINDOW,
+                        cwd=script_dir
+                    )
+                    time.sleep(2)  # Bat fayl ishga tushishi uchun kutish
+                    
+                    if self.urit_process.poll() is None:
+                        success_msg = f"[OK] URIT-50 dasturi ishga tushdi (bat fayl orqali, PID: {self.urit_process.pid})"
+                        print(success_msg)
+                        return True
+                except Exception as e:
+                    print(f"[OGOHLANTIRISH] Bat fayl orqali ishga tushirishda xato: {e}")
+            
+            # Variant 2: To'g'ridan-to'g'ri Python skriptini ishga tushirish
+            # Log fayl yaratish (xatolarni ko'rish uchun)
+            log_dir = os.path.join(script_dir, "logs")
+            os.makedirs(log_dir, exist_ok=True)
+            log_file = os.path.join(log_dir, f"urit50_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+            
+            # Python skriptini ishga tushirish
+            # Yashirin rejimda, lekin xatolarni log faylga yozish
+            with open(log_file, 'w', encoding='utf-8') as log:
+                self.urit_process = subprocess.Popen(
+                    [sys.executable, urit_script],
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    stdout=log,
+                    stderr=log,
+                    cwd=script_dir
+                )
+            
+            # Jarayon ishga tushganini tekshirish
+            time.sleep(2)  # Kichik kutish
+            if self.urit_process.poll() is not None:
+                # Jarayon allaqachon to'xtagan (xato bo'lgan)
+                error_msg = f"[OGOHLANTIRISH] URIT-50 dasturi ishga tushmadi. Log faylni tekshiring: {log_file}"
+                print(error_msg)
+                # Log faylni o'qib ko'rish
+                try:
+                    with open(log_file, 'r', encoding='utf-8') as f:
+                        log_content = f.read()
+                        if log_content:
+                            print(f"   Log mazmuni:\n{log_content[:500]}")  # Birinchi 500 belgi
+                except:
+                    pass
+                self.root.after(0, lambda: self.status_var.set(error_msg))
+                return False
+            
+            success_msg = f"[OK] URIT-50 dasturi ishga tushdi (PID: {self.urit_process.pid})"
+            print(success_msg)
+            return True
+            
+        except Exception as e:
+            error_msg = f"[OGOHLANTIRISH] URIT-50 ishga tushirishda xato: {e}"
+            print(error_msg)
+            import traceback
+            traceback.print_exc()
+            self.root.after(0, lambda: self.status_var.set(error_msg))
+            return False
+    
+    def manual_start_urit50(self):
+        """URIT-50 ni qo'lda ishga tushirish (tugma orqali)"""
+        try:
+            self.status_var.set("URIT-50 dasturini ishga tushiryapman...")
+            self.root.update()
+            
+            # URIT-50 ni ishga tushirish
+            urit_ok = self.start_urit50_service()
+            
+            if urit_ok:
+                # URIT-50 to'g'ri ishlayaptimi tekshirish
+                time.sleep(2)
+                urit_running = self.verify_urit50_running()
+                if urit_running:
+                    messagebox.showinfo("Muvaffaqiyat", "[OK] URIT-50 siydik analizatori muvaffaqiyatli ishga tushdi!")
+                    self.status_var.set("[OK] URIT-50 ishlamoqda. Siydik tahlilini qilishingiz mumkin.")
+                else:
+                    messagebox.showwarning("Diqqat", "[OGOHLANTIRISH] URIT-50 ishga tushdi, lekin to'g'ri ishlamayapti.\n\nLog faylni tekshiring.")
+                    self.status_var.set("[OGOHLANTIRISH] URIT-50 ishga tushdi, lekin to'g'ri ishlamayapti")
+            else:
+                messagebox.showerror("Xatolik", "[XATO] URIT-50 ishga tushmadi.\n\nFayl topilmadi yoki xato yuz berdi.\n\nLog faylni tekshiring.")
+                self.status_var.set("[XATO] URIT-50 ishga tushmadi")
+        except Exception as e:
+            error_msg = f"URIT-50 ishga tushirishda xato: {e}"
+            messagebox.showerror("Xatolik", error_msg)
+            self.status_var.set(f"[XATO] {error_msg}")
+            import traceback
+            traceback.print_exc()
+    
+    def start_bk280_listener(self):
+        """BK-280 HL7 Listener ni ishga tushirish"""
+        if not BK280_AVAILABLE:
+            print("[OGOHLANTIRISH] BK-280 listener mavjud emas")
+            return False
+        
+        try:
+            # Callback funksiyasini o'rnatish (natijalar kelganda yangilash uchun)
+            def on_bk280_result(order_id):
+                """BK-280 natijalari kelganda chaqiriladi"""
+                try:
+                    # Agar hozirgi order_id bo'lsa, yangilash
+                    if self.current_order_id == order_id:
+                        self.root.after(0, lambda: self.status_var.set(f"[OK] BK-280 natijalari qabul qilindi (Order ID: {order_id})"))
+                        # Tahlillarni yangilash
+                        self.root.after(500, self.load_tests)
+                        # Ma'lumotlarni yangilash
+                        self.root.after(1000, self.refresh_data)
+                    else:
+                        self.root.after(0, lambda: self.status_var.set(f"ℹ️ BK-280 natijalari qabul qilindi (Order ID: {order_id})"))
+                except Exception as e:
+                    print(f"[OGOHLANTIRISH] BK-280 callback da xato: {e}")
+            
+            self.bk280_listener_thread = start_bk280_listener(host="0.0.0.0", port=8087, order_update_callback=on_bk280_result)
+            if self.bk280_listener_thread:
+                self.status_var.set("[OK] BK-280 listener ishga tushdi (Port: 8087)")
+                print("[OK] BK-280 HL7 Listener ishga tushdi: 0.0.0.0:8087")
+                print("   Analizator IP: 0.0.0.0, Port: 8087, Protocol: HL7")
+                return True
+            else:
+                print("[OGOHLANTIRISH] BK-280 listener ishga tushmadi")
+                return False
+        except Exception as e:
+            print(f"[XATO] BK-280 listener ishga tushirishda xato: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def start_bk280_lis_server(self):
+        """BK-280 LIS Query Server ni ishga tushirish (barcode scan → bemor ma'lumotlari)"""
+        if not BK280_LIS_AVAILABLE:
+            print("[OGOHLANTIRISH] BK-280 LIS server mavjud emas")
+            return False
+
+        try:
+            self.bk280_lis_thread = start_bk280_lis(host="0.0.0.0", port=8088)
+            if self.bk280_lis_thread:
+                print("[OK] BK-280 LIS Server ishga tushdi: 0.0.0.0:8088")
+                print("   Barcode scan → bemor ma'lumotlari tayyor")
+                return True
+            else:
+                print("[OGOHLANTIRISH] BK-280 LIS server ishga tushmadi")
+                return False
+        except Exception as e:
+            print(f"[XATO] BK-280 LIS server ishga tushirishda xato: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def start_bc20s_listener(self) -> bool:
+        """BC-20S Gematologiya analizatoriga TCP CLIENT sifatida ulanish"""
+        if not BC20S_AVAILABLE:
+            print("[OGOHLANTIRISH] BC-20S listener moduli mavjud emas (bc20s_listener.py)")
+            return False
+
+        try:
+            def on_bc20s_result(sample_id, patient_info):
+                """BC-20S yangi natija kelganda chaqiriladi"""
+                try:
+                    name = patient_info.get("name", sample_id) or sample_id
+                    msg  = f"[OK] BC-20S: {name} natijalari qabul qilindi"
+                    self.root.after(0, lambda: self.status_var.set(msg))
+                except Exception as ex:
+                    print(f"[OGOHLANTIRISH] BC-20S callback xatosi: {ex}")
+
+            self.bc20s_listener = start_bc20s_listener(
+                analyzer_ip="192.168.0.2", port=5100,
+                result_callback=on_bc20s_result
+            )
+            if self.bc20s_listener:
+                print("[OK] BC-20S client ishga tushdi: -> 192.168.0.2:5100")
+                return True
+            else:
+                print("[OGOHLANTIRISH] BC-20S client ishga tushmadi")
+                return False
+        except Exception as e:
+            print(f"[XATO] BC-20S client ishga tushirishda xato: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def on_closing(self):
+        """Dastur yopilganda"""
+        # BC-20S listener ni to'xtatish
+        if BC20S_AVAILABLE:
+            try:
+                stop_bc20s_listener()
+                print("[OK] BC-20S listener to'xtatildi")
+            except Exception as e:
+                print(f"[OGOHLANTIRISH] BC-20S listener to'xtatishda xato: {e}")
+        # BK-280 listener ni to'xtatish
+        if BK280_AVAILABLE and self.bk280_listener_thread:
+            try:
+                stop_bk280_listener()
+                print("[OK] BK-280 listener to'xtatildi")
+            except Exception as e:
+                print(f"[OGOHLANTIRISH] BK-280 listener to'xtatishda xato: {e}")
+        # BK-280 LIS server ni to'xtatish
+        if BK280_LIS_AVAILABLE and self.bk280_lis_thread:
+            try:
+                stop_bk280_lis()
+                print("[OK] BK-280 LIS server to'xtatildi")
+            except Exception as e:
+                print(f"[OGOHLANTIRISH] BK-280 LIS server to'xtatishda xato: {e}")
+        
+        # URIT-50 jarayonini to'xtatish
+        if self.urit_process:
+            try:
+                self.urit_process.terminate()
+                self.urit_process.wait(timeout=5)
+            except:
+                try:
+                    self.urit_process.kill()
+                except:
+                    pass
+        
+        # Barcha URIT-50 jarayonlarini to'xtatish
+        self.stop_existing_urit50_processes()
+        
+        # Dasturni yopish
+        self.root.destroy()
+    
+    def create_ui(self):
+        """UI yaratish"""
+        try:
+            print("   [UI] Asosiy container yaratilmoqda...")
+            
+            # ===== YUQORI BAR: Barkod + Analizator tugmalari =====
+            top_bar = tk.Frame(self.root, bg="#F0F0F0", pady=5, padx=10, relief=tk.GROOVE, bd=1)
+            top_bar.pack(fill=tk.X, side=tk.TOP)
+            
+            # Barkod Skaner yorlig'i
+            tk.Label(top_bar, text="Barkod Skaner", font=("Arial", 9, "bold"), bg="#F0F0F0").pack(side=tk.LEFT, padx=(0,5))
+            
+            # Barkod entry
+            tk.Label(top_bar, text="Barkod / Sample ID:", bg="#F0F0F0", font=("Arial", 9)).pack(side=tk.LEFT)
+            self.barcode_entry = ttk.Entry(top_bar, width=22, font=("Arial", 11))
+            self.barcode_entry.pack(side=tk.LEFT, padx=5)
+            self.barcode_entry.bind("<Return>", self.on_barcode_entered)
+            
+            ttk.Button(top_bar, text="Qidirish", command=self.on_search_clicked, width=9).pack(side=tk.LEFT, padx=2)
+            ttk.Button(top_bar, text="Tozalash", command=self.clear_patient_data, width=9).pack(side=tk.LEFT, padx=2)
+            ttk.Button(top_bar, text="Qidirish oynasi", command=self.open_patient_search, width=13).pack(side=tk.LEFT, padx=2)
+            
+            # Ajratuvchi
+            ttk.Separator(top_bar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
+            
+            # O'ng tomonda: Analizator RAW ma'lumotlari knopkalari
+            # 1. Bioximiya (BK-280)
+            biochemistry_btn = tk.Button(
+                top_bar, text="● Bioximiya",
+                command=self.open_biochemistry_raw,
+                bg="#388E3C", fg="white", font=("Arial", 10, "bold"),
+                padx=12, pady=3, relief=tk.RAISED, bd=2, cursor="hand2"
+            )
+            biochemistry_btn.pack(side=tk.RIGHT, padx=3)
+            
+            # 2. Gemotologiya (BC-20S) - alohida ajralib tursin
+            hematology_btn = tk.Button(
+                top_bar, text="● Gemotologiya",
+                command=self.open_hematology_raw,
+                bg="#1565C0", fg="white", font=("Arial", 10, "bold"),
+                padx=12, pady=3, relief=tk.RAISED, bd=2, cursor="hand2"
+            )
+            hematology_btn.pack(side=tk.RIGHT, padx=3)
+            
+            # 3. Siydik (URIT-50)
+            urine_btn = tk.Button(
+                top_bar, text="● Siydik",
+                command=self.open_urine_raw,
+                bg="#C62828", fg="white", font=("Arial", 10, "bold"),
+                padx=12, pady=3, relief=tk.RAISED, bd=2, cursor="hand2"
+            )
+            urine_btn.pack(side=tk.RIGHT, padx=3)
+            
+            tk.Label(top_bar, text="Analizatorlar:", bg="#F0F0F0", font=("Arial", 9)).pack(side=tk.RIGHT, padx=5)
+            
+            # ===== ASOSIY QISM =====
+            main_frame = ttk.Frame(self.root, padding="5")
+            main_frame.pack(fill=tk.BOTH, expand=True)
+            
+            print("   [UI] Chap panel yaratilmoqda...")
+            # Chap panel - Bemor ma'lumotlari
+            left_frame = ttk.LabelFrame(main_frame, text="Bemor Ma'lumotlari", padding="10")
+            left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=5)
+            left_frame.config(width=300)
+            
+            print("   [UI] Bemor paneli yaratilmoqda...")
+            self.create_patient_panel(left_frame)
+            
+            print("   [UI] O'ng panel yaratilmoqda...")
+            # O'ng panel - Tahlillar va Natijalar
+            right_frame = ttk.Frame(main_frame)
+            right_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
+            
+            print("   [UI] Tahlillar paneli yaratilmoqda...")
+            # Tahlillar ro'yxati
+            tests_frame = ttk.LabelFrame(right_frame, text="Tahlillar Ro'yxati", padding="10")
+            tests_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+            
+            self.create_tests_panel(tests_frame)
+            
+            print("   [UI] Natijalar paneli yaratilmoqda...")
+            # Natijalar va Tugmalar
+            results_frame = ttk.LabelFrame(right_frame, text="Natijalar va Amallar", padding="5")
+            results_frame.pack(fill=tk.X, pady=5)
+            
+            self.create_results_panel(results_frame)
+            print("   [UI] [OK] UI muvaffaqiyatli yaratildi")
+        except Exception as e:
+            print(f"   [UI] [XATO] UI yaratishda xato: {e}")
+            import traceback
+            traceback.print_exc()
+            # Oddiy xato xabari ko'rsatish
+            error_label = tk.Label(self.root, text=f"UI yaratishda xato:\n{str(e)}", 
+                                 font=("Arial", 12), fg="red")
+            error_label.pack(padx=20, pady=20)
+            raise
+    
+    def create_patient_panel(self, parent):
+        """Bemor ma'lumotlari paneli"""
+        # Bemor ma'lumotlari text area
+        info_frame = ttk.Frame(parent)
+        info_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        
+        self.patient_info = scrolledtext.ScrolledText(
+            info_frame, 
+            width=28, 
+            height=22, 
+            font=("Arial", 10),
+            state=tk.DISABLED
+        )
+        self.patient_info.pack(fill=tk.BOTH, expand=True)
+        
+        # Tahrirlash tugmasi (pastda)
+        edit_frame = ttk.Frame(parent)
+        edit_frame.pack(fill=tk.X, pady=5)
+        
+        self.tahrirlash_btn = tk.Button(
+            edit_frame,
+            text="✏ Tahrirlash",
+            command=self.edit_patient,
+            bg="#5C6BC0", fg="white",
+            font=("Arial", 9, "bold"),
+            padx=10, pady=4,
+            relief=tk.RAISED, bd=2,
+            cursor="hand2",
+            state=tk.DISABLED  # Bemor yuklanmaguncha o'chirilgan
+        )
+        self.tahrirlash_btn.pack(fill=tk.X)
+    
+    def create_tests_panel(self, parent):
+        """Tahlillar ro'yxati paneli"""
+        # Treeview yaratish - yangi struktura: №, Tahlil nomi, Status, Natija, Norma
+        columns = ("№", "Tahlil nomi", "Status", "Natija", "Norma")
+        self.tests_tree = ttk.Treeview(parent, columns=columns, show="headings", height=15)
+        
+        # Ustunlar sozlash
+        self.tests_tree.heading("№", text="№")
+        self.tests_tree.column("№", width=50, anchor=tk.CENTER)
+        
+        self.tests_tree.heading("Tahlil nomi", text="Tahlil nomi")
+        self.tests_tree.column("Tahlil nomi", width=300, anchor=tk.W)
+        
+        self.tests_tree.heading("Status", text="Status")
+        self.tests_tree.column("Status", width=120, anchor=tk.CENTER)
+        
+        self.tests_tree.heading("Natija", text="Natija")
+        self.tests_tree.column("Natija", width=200, anchor=tk.W)
+        
+        self.tests_tree.heading("Norma", text="Norma")
+        self.tests_tree.column("Norma", width=250, anchor=tk.W)
+        
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=self.tests_tree.yview)
+        self.tests_tree.configure(yscrollcommand=scrollbar.set)
+        
+        self.tests_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Treeview qator balandligini oshirish (yaxshi ko'rinish uchun)
+        style = ttk.Style()
+        style.configure("Treeview", rowheight=24, font=('Arial', 9))
+        style.configure("Treeview.Heading", font=('Arial', 9, 'bold'))
+        style.map("Treeview", background=[('selected', '#3377CC')],
+                  foreground=[('selected', 'white')])
+
+        # Alternating row foni - AVVAL e'lon qilinadi (past prioritet)
+        self.tests_tree.tag_configure('row_even', background='#F5F7FA')
+        self.tests_tree.tag_configure('row_odd',  background='#FFFFFF')
+
+        # Status taglari (faqat matn rangi va shrift, fon yo'q)
+        # Keyinroq e'lon qilingan tag ustunlik qiladi → status foreground ko'rinadi
+        self.tests_tree.tag_configure('kutilmoqda',
+            foreground='#CC6600', font=('Arial', 9))
+        self.tests_tree.tag_configure('tayyor',
+            foreground='#005500', font=('Arial', 9, 'bold'))
+        self.tests_tree.tag_configure('saqlandi',
+            foreground='#1A3CC8', font=('Arial', 9, 'bold'))
+        self.tests_tree.tag_configure('chop_etildi',
+            foreground='#000080', font=('Arial', 9, 'bold'))
+        self.tests_tree.tag_configure('patologiya',
+            foreground='#CC0000', font=('Arial', 9, 'bold'))
+        
+        # Natija kiritish uchun eventlar
+        self.tests_tree.bind("<Double-1>", self.on_test_double_click)
+        self.tests_tree.bind("<Button-1>", self.on_test_cell_click)
+        # Klaviatura: Enter / o'ng / chap → edit ochish
+        self.tests_tree.bind("<Return>", self.on_tree_open_edit)
+        self.tests_tree.bind("<Right>",  self.on_tree_open_edit)
+        self.tests_tree.bind("<Left>",   self.on_tree_open_edit)
+        # Klaviatura: yuqori / pastga — qatorlar orasida harakatlanish
+        self.tests_tree.bind("<Up>",   self.on_tree_nav_up)
+        self.tests_tree.bind("<Down>", self.on_tree_nav_down)
+
+        # Context menu (o'ng tugma)
+        self.tests_tree.bind("<Button-3>", self.show_context_menu)
+        
+        # Natija kiritish uchun Entry widget (yashirin)
+        self.result_entry = None
+        self.editing_item = None
+    
+    def create_results_panel(self, parent):
+        """Natijalar va tugmalar paneli"""
+        # Tugmalar
+        buttons_frame = ttk.Frame(parent)
+        buttons_frame.pack(fill=tk.X, pady=5)
+        
+        # Chap tomondagi tugmalar
+        left_buttons = ttk.Frame(buttons_frame)
+        left_buttons.pack(side=tk.LEFT, padx=2)
+        
+        ttk.Button(
+            left_buttons, 
+            text="Sozlamalar", 
+            command=self.open_blanka_settings,
+            width=11
+        ).pack(side=tk.LEFT, padx=2)
+        
+        ttk.Button(
+            left_buttons, 
+            text="DB Test (Ctrl+Shift+D)", 
+            command=self.test_database_read,
+            width=20
+        ).pack(side=tk.LEFT, padx=2)
+        
+        ttk.Button(
+            left_buttons,
+            text="➕ Tahlil Kiritish", 
+            command=self.open_tahlil_kiritish,
+            width=14
+        ).pack(side=tk.LEFT, padx=2)
+        
+        ttk.Button(
+            left_buttons, 
+            text="Blanka Yaratish", 
+            command=self.create_blanks,
+            width=13
+        ).pack(side=tk.LEFT, padx=2)
+        
+        # O'rta tugmalar
+        center_buttons = ttk.Frame(buttons_frame)
+        center_buttons.pack(side=tk.LEFT, expand=True, padx=5)
+        
+        ttk.Button(
+            center_buttons, 
+            text="Faqat Chop Etish", 
+            command=self.print_results,
+            width=15
+        ).pack(side=tk.LEFT, padx=3)
+        
+        ttk.Button(
+            center_buttons, 
+            text="Faqat Bazaga Saqlash", 
+            command=self.save_to_db,
+            width=18
+        ).pack(side=tk.LEFT, padx=3)
+        
+        # Asosiy tugma - Chop Etish va Saqlash (F2)
+        save_print_btn = tk.Button(
+            center_buttons, 
+            text="Chop Etish va Saqlash (F2)", 
+            command=self.save_and_print,
+            bg="#2E7D32", fg="white",
+            font=("Arial", 11, "bold"),
+            padx=18, pady=6,
+            relief=tk.RAISED, bd=3, cursor="hand2"
+        )
+        save_print_btn.pack(side=tk.LEFT, padx=8)
+        
+        def on_enter(e): save_print_btn.config(bg="#1B5E20")
+        def on_leave(e): save_print_btn.config(bg="#2E7D32")
+        save_print_btn.bind("<Enter>", on_enter)
+        save_print_btn.bind("<Leave>", on_leave)
+        
+        # O'ng tomondagi tugmalar
+        right_buttons = ttk.Frame(buttons_frame)
+        right_buttons.pack(side=tk.RIGHT, padx=3)
+        
+        ttk.Button(
+            right_buttons, 
+            text="Yangilash", 
+            command=self.refresh_data,
+            width=9
+        ).pack(side=tk.LEFT, padx=2)
+        
+        # F2 va boshqa tezkor tugmalar
+        self.root.bind("<F2>", lambda e: self.save_and_print())
+        self.root.bind("<Control-s>", lambda e: self.save_to_db())
+        self.root.bind("<Control-p>", lambda e: self.print_results())
+    
+    def barcode_scanner_thread(self):
+        """Barcode scanner thread"""
+        print("📷 Barcode scanner tayyor...")
+        while True:
+            try:
+                barcode = input().strip()
+                if barcode:
+                    barcode_queue.put(barcode)
+                    self.root.after(0, lambda: self.process_barcode(barcode))
+            except EOFError:
+                break
+            except Exception as e:
+                print(f"[XATO] Scanner xatosi: {e}")
+    
+    def on_barcode_entered(self, event=None):
+        """Barcode kiritilganda"""
+        barcode = self.barcode_entry.get().strip()
+        if barcode:
+            self.process_barcode(barcode)
+    
+    def on_search_clicked(self):
+        """Qidirish tugmasi"""
+        self.on_barcode_entered()
+    
+    def open_patient_search(self):
+        """Bemorlarni qidirish oynasini ochish"""
+        search_win = tk.Toplevel(self.root)
+        search_win.title("Bemorlarni Qidirish")
+        search_win.geometry("800x600")
+        search_win.transient(self.root)
+        
+        # Qidirish maydonlari
+        search_frame = ttk.LabelFrame(search_win, text="Qidirish Ma'lumotlari", padding="10")
+        search_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        # Ism
+        ttk.Label(search_frame, text="Ism:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+        self.search_ism_entry = ttk.Entry(search_frame, width=30)
+        self.search_ism_entry.grid(row=0, column=1, padx=5, pady=5, sticky=tk.W)
+        
+        # Familiya
+        ttk.Label(search_frame, text="Familiya:").grid(row=0, column=2, sticky=tk.W, padx=5, pady=5)
+        self.search_fam_entry = ttk.Entry(search_frame, width=30)
+        self.search_fam_entry.grid(row=0, column=3, padx=5, pady=5, sticky=tk.W)
+        
+        # Telefon
+        ttk.Label(search_frame, text="Telefon:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
+        self.search_tel_entry = ttk.Entry(search_frame, width=30)
+        self.search_tel_entry.grid(row=1, column=1, padx=5, pady=5, sticky=tk.W)
+        
+        # Tug'ilgan sana
+        ttk.Label(search_frame, text="Tug'ilgan sana (YYYY-MM-DD):").grid(row=1, column=2, sticky=tk.W, padx=5, pady=5)
+        self.search_dob_entry = ttk.Entry(search_frame, width=30)
+        self.search_dob_entry.grid(row=1, column=3, padx=5, pady=5, sticky=tk.W)
+        
+        # Jins
+        ttk.Label(search_frame, text="Jins:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
+        self.search_jins_var = tk.StringVar(value="")
+        jins_combo = ttk.Combobox(search_frame, textvariable=self.search_jins_var, width=27, values=["", "Erkak", "Ayol"])
+        jins_combo.grid(row=2, column=1, padx=5, pady=5, sticky=tk.W)
+        
+        # Qidirish tugmasi
+        search_btn_frame = ttk.Frame(search_frame)
+        search_btn_frame.grid(row=2, column=2, columnspan=2, pady=10, sticky=tk.E)
+        ttk.Button(search_btn_frame, text="🔍 Qidirish", command=self.search_patients).pack(side=tk.LEFT, padx=5)
+        ttk.Button(search_btn_frame, text="[XATO] Tozalash", command=self.clear_search_fields).pack(side=tk.LEFT, padx=5)
+
+        # Sifat nazorati tugmasi
+        qc_btn = tk.Button(search_frame, text="Sifat nazorati", command=self.open_qc_window,
+                           bg="#D32F2F", fg="white", font=("Arial", 11, "bold"),
+                           padx=15, pady=5, relief=tk.RAISED, bd=2, cursor="hand2")
+        qc_btn.grid(row=3, column=0, columnspan=2, pady=10, sticky=tk.W, padx=5)
+
+        # Natijalar jadvali
+        results_frame = ttk.LabelFrame(search_win, text="Qidiruv Natijalari", padding="10")
+        results_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        columns = ("ID", "F.I.SH", "Yosh", "Jins", "Telefon", "Tug'ilgan sana", "Buyurtma ID", "Sample ID")
+        self.search_results_tree = ttk.Treeview(results_frame, columns=columns, show="headings", height=15)
+        
+        for col in columns:
+            self.search_results_tree.heading(col, text=col)
+            self.search_results_tree.column(col, width=100)
+        
+        scrollbar = ttk.Scrollbar(results_frame, orient=tk.VERTICAL, command=self.search_results_tree.yview)
+        self.search_results_tree.configure(yscrollcommand=scrollbar.set)
+        
+        self.search_results_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Double-click event - buyurtmani yuklash
+        self.search_results_tree.bind("<Double-1>", self.on_search_result_double_click)
+        
+        # Enter key binding
+        self.search_ism_entry.bind("<Return>", lambda e: self.search_patients())
+        self.search_fam_entry.bind("<Return>", lambda e: self.search_patients())
+        self.search_tel_entry.bind("<Return>", lambda e: self.search_patients())
+        self.search_dob_entry.bind("<Return>", lambda e: self.search_patients())
+        
+        # Focus
+        self.search_ism_entry.focus()
+    
+    def open_qc_window(self):
+        """Sifat nazorati oynasini ochish"""
+        if QC_AVAILABLE and _open_qc_window:
+            _open_qc_window(self.root)
+        else:
+            messagebox.showerror("Xato", "Sifat nazorati moduli yuklanmagan!\nqc_module.py faylini tekshiring.")
+
+    def clear_search_fields(self):
+        """Qidirish maydonlarini tozalash"""
+        self.search_ism_entry.delete(0, tk.END)
+        self.search_fam_entry.delete(0, tk.END)
+        self.search_tel_entry.delete(0, tk.END)
+        self.search_dob_entry.delete(0, tk.END)
+        self.search_jins_var.set("")
+        
+        # Jadvalni tozalash
+        for item in self.search_results_tree.get_children():
+            self.search_results_tree.delete(item)
+    
+    def search_patients(self):
+        """[OK] Bemorlarni qidirish - MySQL 8 bilan moslashtirilgan"""
+        ism = self.search_ism_entry.get().strip()
+        fam = self.search_fam_entry.get().strip()
+        tel = self.search_tel_entry.get().strip()
+        dob = self.search_dob_entry.get().strip()
+        jins = self.search_jins_var.get().strip()
+        
+        # Hech bo'lmaganda bitta maydon to'ldirilgan bo'lishi kerak
+        if not any([ism, fam, tel, dob, jins]):
+            messagebox.showwarning("Diqqat", "Qidirish uchun kamida bitta maydon to'ldiring!")
+            return
+        
+        conn = db_conn()
+        if not conn:
+            error_msg = (
+                "MySQL serverga ulana olmadi!\n\n"
+                "Tekshirishlar:\n"
+                "1. MySQL server ishlayotganini tekshiring (ASUS kompyuteridagi MySQL server)\n"
+                "2. Firewall MySQL port (3306) ni ochishga ruxsat bering\n"
+                "3. IP manzil to'g'riligini tekshiring\n"
+                "4. MySQL foydalanuvchi va parol to'g'riligini tekshiring\n\n"
+                "Console da batafsil xato ma'lumotlari ko'rsatilgan."
+            )
+            messagebox.showerror("Database Ulanish Xatosi", error_msg)
+            return
+        
+        try:
+            cursor = conn.cursor(dictionary=True)
+            
+            # [OK] MySQL 8 uchun to'g'ri SQL query
+            # Har bir bemor uchun eng oxirgi buyurtma (subquery orqali)
+            # DISTINCT ishlatilmaydi, chunki har bir bemor bir marta chiqadi
+            # Agar bir xil sana_vaqt bo'lsa, eng katta ID ni olamiz
+            query = """
+                SELECT 
+                    b.id,
+                    b.fish,
+                    b.yosh,
+                    b.jins,
+                    b.telefon,
+                    b.tugilgan_sana,
+                    o_latest.id as order_id,
+                    o_latest.sample_id
+                FROM bemorlar b
+                LEFT JOIN (
+                    SELECT o1.id, o1.bemor_id, o1.sample_id, o1.sana_vaqt
+                    FROM orders o1
+                    INNER JOIN (
+                        SELECT bemor_id, MAX(sana_vaqt) as max_sana_vaqt
+                        FROM orders
+                        GROUP BY bemor_id
+                    ) o2 ON o1.bemor_id = o2.bemor_id AND o1.sana_vaqt = o2.max_sana_vaqt
+                    WHERE o1.id = (
+                        SELECT MAX(id)
+                        FROM orders o3
+                        WHERE o3.bemor_id = o1.bemor_id 
+                        AND o3.sana_vaqt = o1.sana_vaqt
+                    )
+                ) o_latest ON b.id = o_latest.bemor_id
+                WHERE 1=1
+            """
+            params = []
+            
+            # Ism va Familiya bo'yicha qidirish (fish maydonida)
+            if ism or fam:
+                if ism and fam:
+                    # Ikkalasi ham bo'lsa, ikki so'zni qidiramiz
+                    query += " AND (b.fish LIKE %s AND b.fish LIKE %s)"
+                    params.append(f"%{ism}%")
+                    params.append(f"%{fam}%")
+                elif ism:
+                    query += " AND b.fish LIKE %s"
+                    params.append(f"%{ism}%")
+                elif fam:
+                    query += " AND b.fish LIKE %s"
+                    params.append(f"%{fam}%")
+            
+            # Telefon bo'yicha qidirish
+            if tel:
+                query += " AND b.telefon LIKE %s"
+                params.append(f"%{tel}%")
+            
+            # Tug'ilgan sana bo'yicha qidirish
+            if dob:
+                query += " AND DATE(b.tugilgan_sana) = %s"
+                params.append(dob)
+            
+            # Jins bo'yicha qidirish
+            if jins:
+                query += " AND b.jins = %s"
+                params.append(jins)
+            
+            # [OK] ORDER BY - eng oxirgi buyurtma bo'yicha tartiblash
+            query += " ORDER BY o_latest.sana_vaqt DESC, b.id DESC LIMIT 100"
+            
+            cursor.execute(query, tuple(params))
+            results = cursor.fetchall()
+            
+            # Jadvalni tozalash
+            for item in self.search_results_tree.get_children():
+                self.search_results_tree.delete(item)
+            
+            # Natijalarni ko'rsatish
+            if not results:
+                messagebox.showinfo("Natija", "Hech qanday natija topilmadi")
+                return
+            
+            for row in results:
+                self.search_results_tree.insert("", tk.END, values=(
+                    row.get('id', ''),
+                    row.get('fish', ''),
+                    row.get('yosh', ''),
+                    row.get('jins', ''),
+                    row.get('telefon', ''),
+                    str(row.get('tugilgan_sana', '')) if row.get('tugilgan_sana') else '',
+                    row.get('order_id', ''),
+                    row.get('sample_id', '')
+                ))
+            
+            self.status_var.set(f"[OK] {len(results)} ta natija topildi")
+            
+        except Exception as e:
+            messagebox.showerror("Xatolik", f"Qidirishda xato: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            cursor.close()
+    
+    def on_search_result_double_click(self, event):
+        """Qidirish natijasida double-click qilganda buyurtmani yuklash"""
+        selection = self.search_results_tree.selection()
+        if not selection:
+            return
+        
+        item = self.search_results_tree.item(selection[0])
+        values = item['values']
+        
+        if not values:
+            return
+        
+        # Sample ID yoki order_id bo'yicha qidirish
+        sample_id = values[7] if len(values) > 7 else None
+        order_id = values[6] if len(values) > 6 else None
+        
+        # Avval oyna yopiladi
+        search_win = self.search_results_tree.winfo_toplevel()
+        if search_win != self.root:
+            search_win.destroy()
+        
+        # Buyurtmani yuklash
+        if sample_id:
+            self.barcode_entry.delete(0, tk.END)
+            self.barcode_entry.insert(0, str(sample_id))
+            self.process_barcode(str(sample_id))
+        elif order_id:
+            self.barcode_entry.delete(0, tk.END)
+            self.barcode_entry.insert(0, str(order_id))
+            self.process_barcode(str(order_id))
+    
+    def process_barcode(self, barcode):
+        """Barcode ni qayta ishlash - yaxshilangan xato boshqaruvi"""
+        self.status_var.set(f"Qidiryapman: {barcode}...")
+        self.root.update()
+        
+        # Database ulanishini tekshirish
+        conn = db_conn()
+        if not conn:
+            error_msg = (
+                "MySQL serverga ulanib bo'lmadi!\n\n"
+                "Tekshirishlar:\n"
+                "1. MySQL server ishlayotganini tekshiring (ASUS kompyuteridagi MySQL server)\n"
+                "2. Console'da Ctrl+Shift+D bosib database testini o'tkazing\n"
+                "3. Database holatini tekshiring"
+            )
+            messagebox.showerror("Database Ulanish Xatosi", error_msg)
+            self.status_var.set("[OGOHLANTIRISH] Database ga ulanib bo'lmadi")
+            return
+        
+        # Buyurtma yoki bemor topish
+        try:
+            order_data = self.find_order_by_barcode(barcode)
+            
+            if order_data:
+                self.status_var.set(f"[OK] Topildi: {order_data.get('fish', 'N/A')}")
+                self.load_order_data(order_data)
+            else:
+                # Batafsil xato xabari
+                messagebox.showwarning(
+                    "Topilmadi", 
+                    f"Barkod '{barcode}' bo'yicha ma'lumot topilmadi.\n\n"
+                    "Tekshirishlar:\n"
+                    "1. Barkod to'g'riligini tekshiring\n"
+                    "2. Database'da ma'lumot borligini tekshiring (Ctrl+Shift+D)"
+                )
+                self.status_var.set("[OGOHLANTIRISH] Ma'lumot topilmadi")
+        except Exception as e:
+            error_msg = f"Ma'lumot o'qishda xato: {type(e).__name__}: {e}"
+            print(f"[XATO] {error_msg}")
+            messagebox.showerror("Xatolik", error_msg)
+            self.status_var.set("[OGOHLANTIRISH] Xatolik yuz berdi")
+    
+    def find_order_by_barcode(self, barcode):
+        """Barcode bo'yicha buyurtma topish"""
+        conn = db_conn()
+        if not conn:
+            return None
+
+        try:
+            cursor = conn.cursor(dictionary=True)
+
+            # Sample ID, kod_yollanma, natija_kodi yoki order_id bo'yicha qidirish
+            query = """
+                SELECT
+                    o.id as order_id,
+                    o.bemor_id,
+                    o.sana_vaqt,
+                    o.sample_id,
+                    o.emizikli,
+                    o.cycle_day,
+                    o.cycle_note,
+                    o.menopauza,
+                    o.homiladorlik_hafta,
+                    o.gormon_dori,
+                    o.klinik_izoh,
+                    b.id as bemor_id,
+                    b.fish,
+                    b.yosh,
+                    b.jins,
+                    b.tugilgan_sana,
+                    b.telefon,
+                    b.shifokor,
+                    b.kod_yollanma,
+                    b.natija_kodi,
+                    b.sample_id as bemor_sample_id,
+                    COALESCE(o.vazn_buyrak, NULL) as vazn_buyrak
+                FROM orders o
+                INNER JOIN bemorlar b ON o.bemor_id = b.id
+                WHERE o.sample_id = %s
+                   OR b.sample_id = %s
+                   OR b.kod_yollanma = %s
+                   OR b.natija_kodi = %s
+                   OR o.id = %s
+                ORDER BY o.sana_vaqt DESC
+                LIMIT 1
+            """
+
+            cursor.execute(query, (barcode, barcode, barcode, barcode, barcode))
+            result = cursor.fetchone()
+
+            return result
+
+        except Exception as e:
+            print(f"[XATO] Qidirish xatosi: {e}")
+            return None
+        finally:
+            cursor.close()
+    
+    def load_order_data(self, order_data):
+        """Buyurtma ma'lumotlarini yuklash"""
+        # Agar oldingi buyurtmada saqlanmagan ma'lumotlar bo'lsa, so'roq chiqarish
+        if (self.previous_order_id and 
+            self.previous_order_id != order_data['order_id'] and 
+            self.test_results and 
+            not self.is_saved):
+            # Saqlanmagan ma'lumotlar bor
+            response = messagebox.askyesno(
+                "Diqqat",
+                f"Oldingi buyurtma (ID: {self.previous_order_id}) uchun saqlanmagan natijalar bor.\n\n"
+                "Bazaga saqlashni xohlaysizmi?",
+                icon="warning"
+            )
+            if response:
+                # Saqlash
+                self.save_to_db()
+            # Agar "Yo'q" bosilsa, oldingi natijalar bekor qilinadi
+        
+        # Yangi buyurtma ma'lumotlarini yuklash
+        self.previous_order_id = self.current_order_id
+        self.current_order_id = order_data['order_id']
+        self.current_bemor_data = order_data
+        self.is_saved = False
+        self.is_printed = False
+        
+        # Bemor ma'lumotlarini ko'rsatish
+        self.display_patient_info(order_data)
+        
+        # Tahlillarni yuklash
+        self.load_tests()
+    
+    def display_patient_info(self, data):
+        """Bemor ma'lumotlarini ko'rsatish"""
+        self.patient_info.config(state=tk.NORMAL)
+        self.patient_info.delete(1.0, tk.END)
+
+        # Emizikli va sikl ma'lumotlarini olish
+        emizikli = data.get('emizikli', 0) or 0
+        cycle_day = data.get('cycle_day', '') or ''
+        cycle_note = (data.get('cycle_note', '') or '').strip()
+        menopauza = data.get('menopauza', 0) or 0
+        homiladorlik_hafta = data.get('homiladorlik_hafta', None)
+        gormon_dori = (data.get('gormon_dori', '') or '').strip()
+        klinik_izoh = (data.get('klinik_izoh', '') or '').strip()
+        # cycle_note da "emizikli" matni bo'lsa ham emizikli sifatida ko'rish
+        cn_lower = cycle_note.lower()
+        is_emizikli_from_note = 'emizikli' in cn_lower and 'emas' not in cn_lower
+
+        vazn_buyrak = data.get('vazn_buyrak')
+        vazn_str = f"\nVazn: {vazn_buyrak} kg" if vazn_buyrak else ""
+        info = f"""F.I.SH: {data.get('fish', 'N/A')}
+Yosh: {data.get('yosh', 'N/A')}
+Jins: {data.get('jins', 'N/A')}
+Tug\'ilgan sana: {data.get('tugilgan_sana', 'N/A')}{vazn_str}
+Telefon: {data.get('telefon', 'N/A')}
+Shifokor: {data.get('shifokor', 'N/A')}
+
+Buyurtma ID: {data.get('order_id', 'N/A')}
+Sample ID: {data.get('sample_id', 'N/A')}
+Kod yo\'llanma: {data.get('kod_yollanma', 'N/A')}
+Natija kodi: {data.get('natija_kodi', 'N/A')}
+
+Sana: {data.get('sana_vaqt', 'N/A')}"""
+
+        # Tegilgan teglar uchun config
+        self.patient_info.tag_config('emizikli_tag', foreground='red', font=('Arial', 10, 'bold'))
+        self.patient_info.tag_config('cycle_tag', foreground='#8B0000', font=('Arial', 10, 'bold'))
+        self.patient_info.tag_config('normal_tag', foreground='black', font=('Arial', 10))
+        self.patient_info.tag_config('warning_tag', foreground='#D35400', font=('Arial', 10, 'bold'))
+        self.patient_info.tag_config('pregnancy_tag', foreground='#8E44AD', font=('Arial', 10, 'bold'))
+        self.patient_info.tag_config('med_tag', foreground='#2980B9', font=('Arial', 10, 'bold'))
+
+        self.patient_info.insert(tk.END, info.strip(), 'normal_tag')
+
+        # Menstrual sikl va klinik ma'lumotlarini qo'shimcha ko'rsatish
+        has_special = (emizikli or is_emizikli_from_note or cycle_day or cycle_note
+                       or menopauza or homiladorlik_hafta or gormon_dori)
+        if has_special:
+            self.patient_info.insert(tk.END, "\n\n──── Bemor holati ────\n", 'normal_tag')
+
+            # Menstrual sikl
+            if cycle_day:
+                self.patient_info.insert(tk.END, f"📅 Menstrual sikl: {cycle_day}-kuni\n", 'cycle_tag')
+
+            # Menopauza
+            if menopauza == 1:
+                self.patient_info.insert(tk.END, "⚠ MENOPAUZA davri\n", 'warning_tag')
+                self.patient_info.insert(tk.END, "   FSH, LH, Estradiol normalari o'zgargan!\n", 'warning_tag')
+
+            # Homiladorlik
+            if homiladorlik_hafta:
+                hafta = int(homiladorlik_hafta)
+                if hafta <= 12:
+                    trimestr = "1-trimestr"
+                elif hafta <= 27:
+                    trimestr = "2-trimestr"
+                else:
+                    trimestr = "3-trimestr"
+                self.patient_info.insert(tk.END, f"🤰 HOMILADOR: {hafta}-hafta ({trimestr})\n", 'pregnancy_tag')
+                self.patient_info.insert(tk.END, "   HCG, Prolaktin, Estradiol normalari o'zgargan!\n", 'pregnancy_tag')
+
+            # Emizikli
+            if emizikli == 1 or is_emizikli_from_note:
+                self.patient_info.insert(tk.END, "🍼 EMIZIKLI (laktatsiya)\n", 'emizikli_tag')
+                self.patient_info.insert(tk.END, "   Prolaktin, CA15-3 normalari o'zgargan!\n", 'emizikli_tag')
+
+            # Gormon dori
+            if gormon_dori:
+                self.patient_info.insert(tk.END, f"💊 Gormon dori: {gormon_dori}\n", 'med_tag')
+                self.patient_info.insert(tk.END, "   Gormon tahlillariga ta'sir qilishi mumkin!\n", 'med_tag')
+
+            # Cycle note (faqat yuqoridagilar ko'rsatilmagan bo'lsa)
+            if cycle_note and not is_emizikli_from_note and not menopauza and not homiladorlik_hafta:
+                self.patient_info.insert(tk.END, f"📋 Izoh: {cycle_note}\n", 'cycle_tag')
+
+            # Agar hech biri yo'q bo'lsa
+            if not (emizikli or is_emizikli_from_note or menopauza or homiladorlik_hafta or gormon_dori):
+                if not cycle_day and not cycle_note:
+                    self.patient_info.insert(tk.END, "Qo'shimcha klinik ma'lumot yo'q\n", 'normal_tag')
+
+        self.patient_info.config(state=tk.DISABLED)
+
+        # Tahrirlash tugmasini faollashtirish
+        if hasattr(self, 'tahrirlash_btn'):
+            self.tahrirlash_btn.config(state=tk.NORMAL)
+    
+    def _close_active_popup(self):
+        """Ochiq dropdown/popup ni yopish (Manfiy/Musbat va boshqalar)"""
+        if self.result_entry:
+            try:
+                self.result_entry.destroy()
+            except Exception:
+                pass
+            self.result_entry = None
+            self.editing_item = None
+            self.editing_test_id = None
+
+    def clear_patient_data(self):
+        """Bemor ma'lumotlarini tozalash"""
+        # Avval ochiq popup ni yopish (Manfiy/Musbat dropdown osilib qolmasligi uchun)
+        self._close_active_popup()
+        self.barcode_entry.delete(0, tk.END)
+        self.patient_info.config(state=tk.NORMAL)
+        self.patient_info.delete(1.0, tk.END)
+        self.patient_info.config(state=tk.DISABLED)
+        # Tahlillarni tozalash
+        for item in self.tests_tree.get_children():
+            self.tests_tree.delete(item)
+        self.current_order_id = None
+        self.current_bemor_data = None
+        self.current_tests = []
+        self.test_results = {}
+        if hasattr(self, 'tahrirlash_btn'):
+            self.tahrirlash_btn.config(state=tk.DISABLED)
+        self.status_var.set("[OGOHLANTIRISH] Yuklash uchun bemor tanlang")
+    
+    def edit_patient(self):
+        """Bemor ma'lumotlarini tahrirlash oynasi"""
+        if not self.current_bemor_data:
+            messagebox.showwarning("Ogohlantirish", "Avval bemor ma'lumotlarini yuklang!")
+            return
+        
+        bemor_id = self.current_bemor_data.get('bemor_id')
+        if not bemor_id:
+            messagebox.showwarning("Ogohlantirish", "Bemor ID topilmadi!")
+            return
+        
+        # Tahrirlash oynasi
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"Bemor tahrirlash (ID: {bemor_id})")
+        dialog.geometry("450x480")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+        
+        # Joriy ma'lumotlarni olish
+        fish = self.current_bemor_data.get('fish', '')
+        fish_parts = fish.split(' ', 1) if fish else ['', '']
+        familiya = fish_parts[0] if fish_parts else ''
+        ism = fish_parts[1] if len(fish_parts) > 1 else ''
+        
+        conn = db_conn()
+        if conn:
+            try:
+                cursor = conn.cursor(dictionary=True)
+                cursor.execute("SELECT * FROM bemorlar WHERE id = %s", (bemor_id,))
+                bemor = cursor.fetchone()
+                cursor.close()
+                if bemor:
+                    familiya = bemor.get('familiya', familiya)
+                    ism = bemor.get('ism', ism)
+            except:
+                pass
+        
+        # Form
+        main_f = ttk.Frame(dialog, padding=20)
+        main_f.pack(fill=tk.BOTH, expand=True)
+        
+        fields = [
+            ("Familiya:", "familiya", familiya),
+            ("Ism:", "ism", ism),
+            ("Tug'ilgan sana (dd.mm.yyyy):", "tugilgan_sana", str(self.current_bemor_data.get('tugilgan_sana', '') or '')),
+            ("Yosh:", "yosh", str(self.current_bemor_data.get('yosh', '') or '')),
+            ("Telefon:", "telefon", str(self.current_bemor_data.get('telefon', '') or '')),
+            ("Manzil:", "manzil", str(self.current_bemor_data.get('manzil', '') or '')),
+            ("Yuborgan (Shifokor):", "shifokor", str(self.current_bemor_data.get('shifokor', '') or '')),
+        ]
+        
+        entries = {}
+        jins_var = tk.StringVar(value=self.current_bemor_data.get('jins', 'Erkak'))
+        
+        for i, (label_text, key, default_val) in enumerate(fields):
+            ttk.Label(main_f, text=label_text).grid(row=i, column=0, sticky=tk.E, padx=5, pady=4)
+            entry = ttk.Entry(main_f, width=30)
+            entry.insert(0, default_val)
+            entry.grid(row=i, column=1, sticky=tk.W, padx=5, pady=4)
+            entries[key] = entry
+        
+        # Jins
+        row = len(fields)
+        ttk.Label(main_f, text="Jins:").grid(row=row, column=0, sticky=tk.E, padx=5, pady=4)
+        jins_combo = ttk.Combobox(main_f, textvariable=jins_var, values=["Erkak", "Ayol"], state="readonly", width=28)
+        jins_combo.grid(row=row, column=1, sticky=tk.W, padx=5, pady=4)
+        
+        # Sample ID ko'rsatish
+        sample_id = self.current_bemor_data.get('sample_id', 'N/A')
+        row += 1
+        ttk.Label(main_f, text=f"Natija kodi (sample_id): {sample_id}", 
+                 font=("Arial", 9, "bold")).grid(row=row, column=0, columnspan=2, pady=10)
+        
+        # Tugmalar
+        row += 1
+        btn_f = ttk.Frame(main_f)
+        btn_f.grid(row=row, column=0, columnspan=2, pady=10)
+        
+        def saqlash():
+            fam = entries['familiya'].get().strip()
+            ism_v = entries['ism'].get().strip()
+            if not fam:
+                messagebox.showwarning("Diqqat", "Familiyani kiriting!")
+                return
+            
+            full_fish = f"{fam} {ism_v}".strip()
+            tug_sana = entries['tugilgan_sana'].get().strip()
+            yosh_v = entries['yosh'].get().strip()
+            tel = entries['telefon'].get().strip()
+            manzil = entries['manzil'].get().strip()
+            shifokor_v = entries['shifokor'].get().strip()
+            jins_v = jins_var.get()
+            
+            conn2 = db_conn()
+            if not conn2:
+                messagebox.showerror("Xato", "Database ga ulanib bo'lmadi!")
+                return
+            try:
+                cursor2 = conn2.cursor()
+                # familiya/ism maydonlari bor bo'lsa alohida yangilash
+                try:
+                    cursor2.execute("""
+                        UPDATE bemorlar SET fish=%s, familiya=%s, ism=%s, 
+                        tugilgan_sana=%s, yosh=%s, telefon=%s, manzil=%s, 
+                        shifokor=%s, jins=%s WHERE id=%s
+                    """, (full_fish, fam, ism_v, tug_sana or None, 
+                          yosh_v or None, tel, manzil, shifokor_v, jins_v, bemor_id))
+                except:
+                    cursor2.execute("""
+                        UPDATE bemorlar SET fish=%s, tugilgan_sana=%s, yosh=%s, 
+                        telefon=%s, manzil=%s, shifokor=%s, jins=%s WHERE id=%s
+                    """, (full_fish, tug_sana or None, yosh_v or None, 
+                          tel, manzil, shifokor_v, jins_v, bemor_id))
+                conn2.commit()
+                cursor2.close()
+                messagebox.showinfo("Muvaffaqiyat", "Bemor ma'lumotlari yangilandi!")
+                dialog.destroy()
+                # Asosiy oynani yangilash
+                self.refresh_data()
+            except Exception as e:
+                conn2.rollback()
+                messagebox.showerror("Xato", f"Saqlashda xato: {e}")
+        
+        tk.Button(btn_f, text="✓ Saqlash", command=saqlash,
+                 bg="#28a745", fg="white", font=("Arial", 10, "bold"),
+                 width=12, pady=4).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_f, text="✗ Bekor qilish", command=dialog.destroy,
+                 bg="#dc3545", fg="white", font=("Arial", 10),
+                 width=14, pady=4).pack(side=tk.LEFT, padx=5)
+    
+    def load_tests(self):
+        """Tahlillarni yuklash - yaxshilangan xato boshqaruvi"""
+        # Ochiq popup ni yopish (agar mavjud bo'lsa)
+        self._close_active_popup()
+        if not self.current_order_id:
+            print("[OGOHLANTIRISH] load_tests: current_order_id yo'q")
+            return
+        
+        conn = db_conn()
+        if not conn:
+            print("[XATO] load_tests: Database ga ulanib bo'lmadi")
+            messagebox.showerror("Xatolik", "Database ga ulanib bo'lmadi. Ma'lumotlarni yuklab bo'lmadi.")
+            return
+        
+        try:
+            cursor = conn.cursor(dictionary=True)
+            print(f"[YANGILANMOQDA] Tahlillarni yuklayapman (Order ID: {self.current_order_id})...")
+            
+            query = """
+                SELECT 
+                    oi.id,
+                    oi.tahlil_id,
+                    oi.nomi,
+                    oi.narxi,
+                    COALESCE(t.sample, '') as test_type,
+                    COALESCE(tn.response_options, '') as response_options,
+                    COALESCE(tn.standard_blank_path, '') as standard_blank_path,
+                    COALESCE(tn.type, '') as type
+                FROM order_items oi
+                LEFT JOIN tahlillar t ON oi.tahlil_id = t.id
+                LEFT JOIN tahlillar_norma tn ON oi.nomi = tn.tahlil_nomi
+                WHERE oi.order_id = %s
+                ORDER BY oi.id
+            """
+            
+            cursor.execute(query, (self.current_order_id,))
+            self.current_tests = cursor.fetchall()
+
+            # ── Panel member testlarini yashirish ──────────────────────────────
+            # Agar "Lipid spektri" yoki "Buyrak paneli" panel buyurtmada bo'lsa,
+            # ularning tarkibidagi yakka testlar (tahlil_id bo'yicha) ko'rsatilmaydi —
+            # natija panelning JSON qatorida saqlanadi, alohida qator ortiqcha bo'ladi.
+            _has_lipid_panel  = any(_is_lipid_spektri_test(t.get('nomi', ''))  for t in self.current_tests)
+            _has_buyrak_panel = any(_is_buyrak_paneli_test(t.get('nomi', '')) for t in self.current_tests)
+            if _has_lipid_panel or _has_buyrak_panel:
+                _skip_member_ids = set()
+                if _has_lipid_panel:
+                    _skip_member_ids |= LIPID_PANEL_MEMBER_IDS
+                if _has_buyrak_panel:
+                    _skip_member_ids |= BUYRAK_PANEL_MEMBER_IDS
+                self.current_tests = [
+                    t for t in self.current_tests
+                    if t.get('tahlil_id') not in _skip_member_ids
+                ]
+            # ─────────────────────────────────────────────────────────────────
+
+            # Bazadan natijalarni yuklash (agar saqlangan bo'lsa)
+            cursor.execute("""
+                SELECT id FROM results WHERE order_id = %s
+            """, (self.current_order_id,))
+            result_row = cursor.fetchone()
+            
+            if result_row:
+                result_id = result_row['id']
+                # result_items dan natijalarni olish
+                cursor.execute("""
+                    SELECT tahlil_nomi, qiymat 
+                    FROM result_items 
+                    WHERE result_id = %s
+                """, (result_id,))
+                saved_results = {}
+                for row in cursor.fetchall():
+                    saved_results[row['tahlil_nomi']] = row['qiymat']
+                
+                # test_results ga yuklash (test_id bo'yicha)
+                for test in self.current_tests:
+                    test_name = test.get('nomi', '')
+                    if test_name in saved_results:
+                        self.test_results[test['id']] = saved_results[test_name]
+            
+            # Treeview ni tozalash
+            for item in self.tests_tree.get_children():
+                self.tests_tree.delete(item)
+            
+            # Bemor ma'lumotlari (norma uchun)
+            jins = self.current_bemor_data.get('jins', '') if self.current_bemor_data else ''
+            yosh = self.current_bemor_data.get('yosh', None) if self.current_bemor_data else None
+            try:
+                yosh_int = int(yosh) if yosh else None
+            except:
+                yosh_int = None
+            
+            # test_results jadvalidan natijalarni yuklash
+            cursor.execute("""
+                SELECT test_name, result_data, status
+                FROM test_results
+                WHERE order_id = %s
+            """, (str(self.current_order_id),))
+            test_results_data = {}
+            for row in cursor.fetchall():
+                test_results_data[row['test_name']] = {
+                    'result_data': row['result_data'],
+                    'status': row['status']
+                }
+
+            # test_results jadvalidan JSON natijalarni self.test_results ga yuklash
+            # (multi-component testlar uchun: REVMOPROBA, bilirubin va boshqalar)
+            for _t in self.current_tests:
+                _tname = _t.get('nomi', '')
+                if _tname in test_results_data:
+                    _rd = (test_results_data[_tname].get('result_data') or '').strip()
+                    if _rd:
+                        self.test_results[_t['id']] = _rd
+
+            # ── Barcha norma ma'lumotlarini BIR so'rovda yuklash (performance) ──
+            _all_test_names = [t.get('nomi', '') for t in self.current_tests if t.get('nomi')]
+            _norma_cache = {}      # {test_name: norma_row}
+            _blank_cache = {}      # {test_name: standard_blank_path}
+            if _all_test_names:
+                _ph = ','.join(['%s'] * len(_all_test_names))
+                try:
+                    cursor.execute(
+                        f"SELECT tahlil_nomi, norma, birlik, type, "
+                        f"standard_blank_path, response_options "
+                        f"FROM tahlillar_norma WHERE tahlil_nomi IN ({_ph})",
+                        _all_test_names
+                    )
+                    for _nr in cursor.fetchall():
+                        _tn = _nr.get('tahlil_nomi', '')
+                        _norma_cache[_tn] = _nr
+                        _bp = (_nr.get('standard_blank_path') or '').strip()
+                        if _bp:
+                            _blank_cache[_tn] = _bp
+                except Exception as _e:
+                    print(f"[OGOHLANTIRISH] Norma batch yuklashda xato: {_e}")
+
+            # Kesh yordamida norma oluvchi ichki funksiya (DB so'rovi YO'Q)
+            def _get_norma_fast(tn):
+                if is_categorical_test(tn):
+                    return {"norma": "Har qanday qiymat norma hisoblanadi",
+                            "unit": "", "type": "categorical"}
+                _row = _norma_cache.get(tn)
+                if _row:
+                    _tt = ((_row.get('type') or 'numeric')).strip().lower()
+                    if _tt == 'categorical':
+                        return {"norma": "Har qanday qiymat norma hisoblanadi",
+                                "unit": _row.get('birlik', ''), "type": "categorical"}
+                    _norma_text = _row.get('norma') or '-'
+                    if _norma_text and _norma_text != '-' and (jins or yosh_int is not None):
+                        _sel = select_norma_by_patient(_norma_text, jins, yosh_int)
+                        if _sel:
+                            _norma_text = _sel
+                    return {"norma": _norma_text, "unit": _row.get('birlik', ''), "type": _tt}
+                # Faqat bazadan — kod ichidagi TEST_NORMAS ishlatilmaydi
+                return {"norma": "-", "unit": "", "type": "text"}
+
+            # Tahlillarni ko'rsatish
+            has_siydik = False
+            row_idx = 0
+            for test in self.current_tests:
+                test_id = test['id']
+                test_name = test.get('nomi', 'N/A')
+                # test_type None bo'lishi mumkin, shuning uchun xavfsiz tekshirish
+                test_type_raw = test.get('test_type') or ''
+                test_type = str(test_type_raw).upper() if test_type_raw else ''
+                
+                # test_results jadvalidan statusni olish
+                test_result = test_results_data.get(test_name, {})
+                result_status = test_result.get('status', 'Kutilmoqda')
+                
+                # Siydik tahlili bormi tekshirish
+                if 'SIYDIK' in test_type or 'siydik' in test_name.lower() or 'urine' in test_name.lower():
+                    has_siydik = True
+                
+                # Bilirubin, Revmoproba, Koagulogramma — multi-component tekshirish
+                test_name_lower = test_name.lower()
+                is_bilirubin     = any(k in test_name_lower for k in ['bilirubin', 'билирубин'])
+                is_revmoproba    = 'revmoproba' in test_name_lower or ('revmo' in test_name_lower and 'proba' in test_name_lower)
+                is_koagulogramma = ('koagulogramma' in test_name_lower or 'koagul' in test_name_lower)
+                is_qondan_mazok  = 'qondan' in test_name_lower and 'mazok' in test_name_lower
+                is_gtt           = _is_gtt_test(test_name)
+                is_lipid_spektri = _is_lipid_spektri_test(test_name)
+                is_buyrak_paneli = _is_buyrak_paneli_test(test_name)
+
+                def _parse_json_result(tid):
+                    raw = self.test_results.get(tid, "")
+                    if raw and isinstance(raw, str) and raw.strip().startswith('{'):
+                        try:
+                            import json as _jj
+                            return _jj.loads(raw)
+                        except Exception:
+                            pass
+                    return {}
+
+                def _insert_sub_row(display_name, tag_suffix, val, norma_t):
+                    nonlocal row_idx
+                    row_idx += 1
+                    # Parent test statusi — bazadan saqlangan bo'lsa "Saqlandi"
+                    _parent_saved = (result_status == 'Saqlandi' or result_status == 'saqlandi')
+                    if not val:
+                        _st = 'kutilmoqda'
+                        _status_text = "Kutilmoqda"
+                    elif norma_t == 'Manfiy (-)' and 'manfiy' not in val.lower():
+                        _st = 'patologiya'
+                        _status_text = "Saqlandi" if _parent_saved else "Tayyor"
+                    elif _parent_saved:
+                        _st = 'saqlandi'
+                        _status_text = "Saqlandi"
+                    else:
+                        _st = 'tayyor'
+                        _status_text = "Tayyor"
+                    _rt  = 'row_even' if row_idx % 2 == 0 else 'row_odd'
+                    self.tests_tree.insert("", tk.END, values=(
+                        row_idx,
+                        f"  \u2514\u2500 {display_name}",
+                        _status_text,
+                        val,
+                        norma_t
+                    ), tags=(f"{test_id}_{tag_suffix}", _st, _rt))
+
+                if is_bilirubin:
+                    # 3 ta sub-qator: Umumiy, Bog'langan, Erkin
+                    rd = _parse_json_result(test_id)
+                    norma_info = _get_norma_fast(test_name)
+                    nt = norma_info.get("norma", "-")
+                    row_idx += 1  # header qatori (birinchi sub-row shu bo'ladi)
+                    row_idx -= 1  # undo – _insert_sub_row o'zi ko'taradi
+                    _insert_sub_row("Umumiy bilirubin",    "umumiy",     str(rd.get('umumiy', '')),     nt)
+                    _insert_sub_row("Bog\u2018langan bilirubin", "bog_langan", str(rd.get('bog_langan', '')), nt)
+                    _insert_sub_row("Erkin bilirubin",     "erkin",      str(rd.get('erkin', '')),      nt)
+
+                elif is_revmoproba:
+                    # 3 ta sub-qator: CRP, RF, ASLO (foydalanuvchi tartibi)
+                    rd = _parse_json_result(test_id)
+                    is_auto = 'avtomat' in test_name_lower
+                    sfx = " avtomat" if is_auto else ""
+                    # qo'lda uchun norma "Manfiy (-)", avtomat uchun "-"
+                    nt = "-" if is_auto else "Manfiy (-)"
+                    _insert_sub_row(f"CRP (S-reaktivniy belok){sfx}",  "crp",  str(rd.get('crp', '')),  nt)
+                    _insert_sub_row(f"RF (Revmatoidniy faktor){sfx}",  "rf",   str(rd.get('rf', '')),   nt)
+                    _insert_sub_row(f"ASLO (Antistreptolizin-O){sfx}", "aslo", str(rd.get('aslo', '')), nt)
+
+                elif is_koagulogramma:
+                    # 6 ta sub-qator: PT sek, PT Kviku, MNO, TT, ACHTV, Fibrinogen
+                    rd = _parse_json_result(test_id)
+                    norma_info = _get_norma_fast(test_name)
+                    nt = norma_info.get("norma", "-")
+                    _insert_sub_row("PT sekundalarda",          "pt_sek",     str(rd.get('pt_sek', '')),     "13-15 sek")
+                    _insert_sub_row("PT bo\u2018yicha Kviku (%)", "pt_kviku",   str(rd.get('pt_kviku', '')),   "70-100 %")
+                    _insert_sub_row("MNO / INR",                "pt_mno",     str(rd.get('pt_mno', '')),     "0.9-1.15 INR")
+                    _insert_sub_row("TT (Tromboplastin vaqti)", "tt",         str(rd.get('tt', '')),         "11-18 sek")
+                    _insert_sub_row("ACHTV",                    "achtv",      str(rd.get('achtv', '')),      "25-40 sek")
+                    _insert_sub_row("Fibrinogen",               "fibrinogen", str(rd.get('fibrinogen', '')), "2.0-4.0 g/l")
+
+                elif is_gtt:
+                    # GTT: natoshchak, 1 soat, 2 soat sub-qatorlari
+                    rd = _parse_json_result(test_id)
+                    _insert_sub_row("Natoshchak",            "natoshchak", str(rd.get('natoshchak', '')), "3.2-6.1")
+                    _insert_sub_row("1 soat o\u2018tgach",  "bir_soat",   str(rd.get('bir_soat', '')),   "\u22649.4")
+                    _insert_sub_row("2 soat o\u2018tgach",  "ikki_soat",  str(rd.get('ikki_soat', '')),  "\u22647.8")
+
+                elif is_lipid_spektri:
+                    # LIPID SPEKTRI: 10 ta sub-qator (4 manual + 6 hisoblangan)
+                    rd = _parse_json_result(test_id)
+                    _insert_sub_row("Umumiy xolesterin (TC)",                    "tc",      str(rd.get('tc', '')),      "<5.2 mmol/l")
+                    _insert_sub_row("HDL — Yuqori zichlikli lipoprotein",         "hdl",     str(rd.get('hdl', '')),     "E:≥1.0 / A:≥1.2 mmol/l")
+                    _insert_sub_row("LDL — Past zichlikli lipoprotein",           "ldl",     str(rd.get('ldl', '')),     "<3.4 mmol/l")
+                    _insert_sub_row("Trigliseridlar (TG)",                        "tg",      str(rd.get('tg', '')),      "0.7-1.7 mmol/l")
+                    _insert_sub_row("VLDL-xolesterin (hisoblangan)",              "vldl",    str(rd.get('vldl', '')),    "0.26-1.04 mmol/l")
+                    _insert_sub_row("Non-HDL xolesterin (TC−HDL)",               "non_hdl", str(rd.get('non_hdl', '')), "<3.4 mmol/l")
+                    _insert_sub_row("Aterogenlik koeffisienti (KA) — xavf darajasi", "ka",   str(rd.get('ka', '')),      "<3.0 yaxshi / 3-4 xavf / >4 yuqori")
+                    _insert_sub_row("TC/HDL nisbati",                             "tc_hdl",  str(rd.get('tc_hdl', '')),  "<5.0")
+                    _insert_sub_row("LDL/HDL nisbati",                            "ldl_hdl", str(rd.get('ldl_hdl', '')), "<3.5")
+                    _insert_sub_row("TG/HDL nisbati",                             "tg_hdl",  str(rd.get('tg_hdl', '')),  "<1.5")
+
+                elif is_buyrak_paneli:
+                    # BUYRAK PANELI: 8 ta sub-qator (4 manual + 4 hisoblangan)
+                    rd = _parse_json_result(test_id)
+                    # Formula maydonlarini har doim qayta hisoblash (eski/noto'g'ri DB qiymatlarini almashtirib)
+                    try:
+                        _m_d = float(rd.get('mochevina') or 0)
+                        _kr_d = float(rd.get('kreatinin') or 0)
+                        _sk_d = float(rd.get('siydik_kislota') or 0)
+                        if _m_d and _kr_d:
+                            rd['bun'] = round(_m_d * 28.02 / 60.06, 2)
+                            rd['bun_cr'] = round(_kr_d / _m_d, 1)
+                        if _m_d or _kr_d or _sk_d:
+                            rd['umumiy_azot'] = round(_m_d * 28/60 + _kr_d * 42/(113.12*1000) + _sk_d * 56/(168.11*1000), 2)
+                        # GFR yo'q bo'lsa — bemor yoshi/jinsi bo'yicha hisoblash
+                        if not rd.get('gfr') and _kr_d > 0 and self.current_bemor_data:
+                            import math as _math_tv
+                            _yosh_tv = self.current_bemor_data.get('yosh')
+                            _jins_tv = (self.current_bemor_data.get('jins') or '').lower()
+                            _yi_tv = int(_yosh_tv) if _yosh_tv else None
+                            if _yi_tv and _yi_tv >= 18:
+                                _isf = 'ayol' in _jins_tv or _jins_tv in ('f', 'w', 'female')
+                                _kappa, _alpha, _mult = (61.9, -0.241, 142) if _isf else (79.6, -0.302, 142)
+                                _ratio = _kr_d / _kappa
+                                _gfr_tv = _mult * _math_tv.pow(_ratio, _alpha if _ratio <= 1 else -1.200) * _math_tv.pow(0.9938, _yi_tv)
+                                if _isf: _gfr_tv *= 1.012
+                                rd['gfr'] = round(_gfr_tv, 1)
+                    except Exception:
+                        pass
+                    _insert_sub_row("Mochevina",                               "mochevina",        str(rd.get('mochevina', '')),        "2.5-8.3 mmol/l")
+                    _insert_sub_row("Kreatinin",                               "kreatinin",        str(rd.get('kreatinin', '')),        "E:62-115 / A:53-97 mkmol/l")
+                    _insert_sub_row("Siydik kislotasi",                        "siydik_kislota",   str(rd.get('siydik_kislota', '')),   "E:210-420 / A:150-350 mkmol/l")
+                    _insert_sub_row("Albumin",                                 "albumin",          str(rd.get('albumin', '')),          "35-52 g/l")
+                    _insert_sub_row("Mochevina azoti (BUN, hisoblangan)",        "bun",              str(rd.get('bun', '')),              "1.1-3.9 mmol/l")
+                    _insert_sub_row("Mochevina/Kreatinin nisbati",              "bun_cr",           str(rd.get('bun_cr', '')),           "10-20")
+                    _insert_sub_row("Umumiy azot miqdori (hisoblangan)",        "umumiy_azot",      str(rd.get('umumiy_azot', '')),      "1.2-4.1 mmol/l")
+                    _insert_sub_row("GFR — Klubochkaviy filtrlash (CKD-EPI)",  "gfr",              str(rd.get('gfr', '')),              "≥90 normal | 60-89 yengil | <60 pasaygan")
+
+                elif is_qondan_mazok:
+                    # Qondan mazok (morfologiya) — bitta asosiy qator + xulosa ko'rish
+                    rd = _parse_json_result(test_id)
+                    row_idx += 1
+                    _rt = 'row_even' if row_idx % 2 == 0 else 'row_odd'
+                    if rd:
+                        # Natija ustuni: leykogramma + xulosa qisqartmasi
+                        _parts = []
+                        if rd.get('wbc'): _parts.append(f"WBC:{rd['wbc']}")
+                        if rd.get('segment'): _parts.append(f"Seg:{rd['segment']}%")
+                        if rd.get('limfotsit'): _parts.append(f"Lim:{rd['limfotsit']}%")
+                        _natija = ', '.join(_parts) if _parts else "Kiritilgan"
+                        _xulosa = (rd.get('xulosa') or '')[:60]
+                        _display = _natija + (f" | {_xulosa}" if _xulosa else '')
+                        _st = 'saqlandi' if result_status in ('Saqlandi', 'saqlandi') else 'tayyor'
+                        _st_txt = "Saqlandi" if result_status in ('Saqlandi', 'saqlandi') else "Tayyor"
+                    else:
+                        _display = ""
+                        _st = 'kutilmoqda'
+                        _st_txt = "Kutilmoqda"
+                    self.tests_tree.insert("", tk.END, values=(
+                        row_idx, test_name, _st_txt, _display, "-"
+                    ), tags=(test_id, _st, _rt))
+
+                else:
+                    # Oddiy tahlil
+                    row_idx += 1
+                    
+                    # test_results jadvalidan natija va statusni olish
+                    result_data_str = test_result.get('result_data', '')
+                    display_result = ""
+                    if result_data_str:
+                        try:
+                            import json
+                            result_data = json.loads(result_data_str)
+                            # Natijani ko'rsatish
+                            if isinstance(result_data, dict):
+                                if 'result' in result_data:
+                                    display_result = str(result_data['result'])
+                                elif 'qon_guruhi' in result_data and 'rezus_omil' in result_data:
+                                    display_result = f"{result_data.get('qon_guruhi', '')} {result_data.get('rezus_omil', '')}"
+                                elif 'pg1' in result_data or 'pg2' in result_data:
+                                    # Pepsinogen — chiroyli ko'rinish
+                                    parts = []
+                                    if result_data.get('pg1'):
+                                        parts.append(f"PG1:{result_data['pg1']}")
+                                    if result_data.get('pg2'):
+                                        parts.append(f"PG2:{result_data['pg2']}")
+                                    if result_data.get('pg_ratio'):
+                                        parts.append(f"Nisbat:{result_data['pg_ratio']}")
+                                    display_result = ", ".join(parts)
+                                else:
+                                    # Boshqa JSON natijalar — _format_result_value dan foydalanamiz
+                                    display_result = _format_result_value(result_data_str)
+                            else:
+                                display_result = str(result_data)
+                        except:
+                            display_result = str(result_data_str)
+                    
+                    # Statusni aniqlash
+                    if result_status == 'Saqlandi' or result_status == 'saqlandi':
+                        status = "Saqlandi"
+                    elif result_status == 'completed' or result_status == 'Tayyor':
+                        status = "Tayyor"
+                    elif result_status == 'printed' or result_status == 'Chop etildi':
+                        status = "Chop etildi"
+                    else:
+                        status = "Kutilmoqda"
+
+                    # DB da natija yo'q bo'lsa — xotiradagi natijani ko'rsatish
+                    if not display_result:
+                        _mem = self.test_results.get(test_id, "")
+                        if _mem:
+                            _mem_s = str(_mem).strip()
+                            if _mem_s.startswith('{'):
+                                try:
+                                    import json as _jm
+                                    _md = _jm.loads(_mem_s)
+                                    display_result = str(_md.get('result', _mem_s))
+                                except Exception:
+                                    display_result = _mem_s
+                            else:
+                                display_result = _mem_s
+                            if status == "Kutilmoqda":
+                                status = "Tayyor"
+
+                    # Norma olish (keshdan - DB so'rovi yo'q)
+                    norma_info = _get_norma_fast(test_name)
+                    norma_text = norma_info.get("norma", "-")
+
+                    # Standart blanka fayl yo'lini keshdan olish (DB so'rovi yo'q)
+                    standard_blank_path = _blank_cache.get(test_name, '')
+                    
+                    # Norma ustunida shablon fayl yo'lini ko'rsatish (agar standart blanka bo'lsa)
+                    display_norma = norma_text
+                    if standard_blank_path:
+                        # Norma ustunida shablon fayl yo'li (to'liq yo'l)
+                        display_norma = standard_blank_path
+                    
+                    # Status rangini belgilash
+                    if status == 'Kutilmoqda':
+                        tag = 'kutilmoqda'
+                    elif status == 'Tayyor':
+                        tag = 'tayyor'
+                    elif status == 'Saqlandi':
+                        tag = 'saqlandi'
+                    elif status == 'Chop etildi':
+                        tag = 'chop_etildi'
+                    else:
+                        tag = ''
+
+                    row_tag = 'row_even' if row_idx % 2 == 0 else 'row_odd'
+                    self.tests_tree.insert("", tk.END, values=(
+                        row_idx,
+                        test_name,
+                        status,
+                        display_result,
+                        display_norma
+                    ), tags=(test_id, tag, row_tag))
+            
+            # Siydik tahlili bo'lsa, siydik ro'yxatini ko'rsatish
+            if has_siydik:
+                self.load_siydik_list()
+            
+        except mysql.connector.errors.ProgrammingError as e:
+            error_msg = f"SQL xatosi: {e}"
+            print(f"[XATO] {error_msg}")
+            messagebox.showerror("Database Xatosi", f"SQL so'rov xatosi:\n{error_msg}\n\nJadval nomlari yoki maydonlar noto'g'ri bo'lishi mumkin.")
+        except mysql.connector.errors.OperationalError as e:
+            error_msg = f"Database operatsiya xatosi: {e}"
+            print(f"[XATO] {error_msg}")
+            messagebox.showerror("Database Xatosi", f"Database operatsiya xatosi:\n{error_msg}\n\nDatabase yopilgan yoki jadval mavjud emas.")
+        except Exception as e:
+            error_msg = f"Tahlillarni yuklash xatosi: {type(e).__name__}: {e}"
+            print(f"[XATO] {error_msg}")
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror("Xatolik", error_msg)
+        finally:
+            try:
+                cursor.close()
+            except:
+                pass
+            try:
+                conn.close()
+            except:
+                pass
+    
+    def load_siydik_list(self):
+        """Siydik analizlarini yuklash va ko'rsatish"""
+        if not self.current_order_id:
+            return
+        
+        conn = db_conn()
+        if not conn:
+            return
+        
+        try:
+            cursor = conn.cursor(dictionary=True)
+            
+            # Siydik analizlarini bazadan qidirish
+            sample_id = self.current_bemor_data.get('sample_id', '')
+            
+            # URIT analizlarini bazadan qidirish (pdf_documents yoki results jadvalidan)
+            # sample_id maydoni bo'lmasa, faqat order_id bo'yicha qidirish
+            query = """
+                SELECT 
+                    id,
+                    order_id,
+                    file_path,
+                    file_type,
+                    created_at
+                FROM pdf_documents
+                WHERE order_id = %s
+                  AND file_type = 'SIYDIK_TAHLILI'
+                ORDER BY created_at DESC
+                LIMIT 10
+            """
+            
+            cursor.execute(query, (self.current_order_id,))
+            siydik_results = cursor.fetchall()
+            
+            # Siydik ro'yxatini ko'rsatish (pastda)
+            if siydik_results:
+                self.show_siydik_list(siydik_results)
+            
+        except Exception as e:
+            print(f"[XATO] Siydik ro'yxatini yuklashda xato: {e}")
+        finally:
+            try:
+                cursor.close()
+            except:
+                pass
+            try:
+                conn.close()
+            except:
+                pass
+    
+    def show_siydik_list(self, siydik_results):
+        """Siydik ro'yxatini ko'rsatish oynasini yaratish"""
+        # Agar oyna allaqachon mavjud bo'lsa, yangilash
+        if hasattr(self, 'siydik_window') and self.siydik_window.winfo_exists():
+            self.siydik_window.destroy()
+        
+        # Yangi oyna yaratish
+        self.siydik_window = tk.Toplevel(self.root)
+        self.siydik_window.title("Siydik Analizlari Ro'yxati")
+        self.siydik_window.geometry("800x400")
+        self.siydik_window.transient(self.root)
+        
+        # Sarlavha
+        ttk.Label(self.siydik_window, text="Siydik Analizlari", font=("Arial", 14, "bold")).pack(pady=10)
+        
+        # Jadval
+        columns = ("ID", "Sample ID", "Fayl", "Sana")
+        self.siydik_tree = ttk.Treeview(self.siydik_window, columns=columns, show="headings", height=10)
+        
+        for col in columns:
+            self.siydik_tree.heading(col, text=col)
+            self.siydik_tree.column(col, width=150)
+        
+        scrollbar = ttk.Scrollbar(self.siydik_window, orient=tk.VERTICAL, command=self.siydik_tree.yview)
+        self.siydik_tree.configure(yscrollcommand=scrollbar.set)
+        
+        self.siydik_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=10)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=10)
+        
+        # Natijalarni ko'rsatish
+        for row in siydik_results:
+            file_path = row.get('file_path', '')
+            file_name = os.path.basename(file_path) if file_path else 'N/A'
+            created_at = str(row.get('created_at', '')) if row.get('created_at') else 'N/A'
+            
+            # sample_id maydoni bo'lmasa, order_id dan olish
+            sample_id_value = row.get('sample_id', '') or str(row.get('order_id', ''))
+            self.siydik_tree.insert("", tk.END, values=(
+                row.get('id', ''),
+                sample_id_value,
+                file_name,
+                created_at
+            ), tags=(file_path,))
+        
+        # Double-click event - blankani ochish
+        self.siydik_tree.bind("<Double-1>", self.on_siydik_double_click)
+        
+        # Tugmalar
+        btn_frame = ttk.Frame(self.siydik_window)
+        btn_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        ttk.Button(btn_frame, text="[FAYL] Blankani Ochish", command=self.open_siydik_blank).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="[XATO] Yopish", command=self.siydik_window.destroy).pack(side=tk.LEFT, padx=5)
+    
+    def on_siydik_double_click(self, event):
+        """Siydik blankasida double-click"""
+        self.open_siydik_blank()
+    
+    def open_siydik_blank(self):
+        """Siydik blankasini ochish"""
+        selection = self.siydik_tree.selection()
+        if not selection:
+            messagebox.showwarning("Diqqat", "Avval blankani tanlang")
+            return
+        
+        item = self.siydik_tree.item(selection[0])
+        file_path = item['tags'][0] if item['tags'] else None
+        
+        if not file_path or not os.path.exists(file_path):
+            messagebox.showerror("Xatolik", f"Fayl topilmadi: {file_path}")
+            return
+        
+        # Word faylni ochish
+        try:
+            os.startfile(file_path)
+        except Exception as e:
+            messagebox.showerror("Xatolik", f"Faylni ochishda xato: {e}")
+    
+    def refresh_tests_display(self):
+        """Tahlillar jadvalini yangilash"""
+        # Eski elementlarni o'chirish
+        for item in self.tests_tree.get_children():
+            self.tests_tree.delete(item)
+        
+        # Yangi ma'lumotlarni yuklash
+        try:
+            conn = db_conn()
+            if not conn:
+                return
+            
+            cursor = conn.cursor(dictionary=True)
+            
+            # Order testlarini olish
+            cursor.execute("""
+                SELECT oi.id,
+                       oi.nomi as test_name,
+                       tn.type as test_type,
+                       tn.norma,
+                       tn.birlik,
+                       IFNULL(tr.status, 'Kutilmoqda') as status,
+                       tr.result_data
+                FROM order_items oi
+                LEFT JOIN tahlillar_norma tn ON oi.nomi = tn.tahlil_nomi
+                LEFT JOIN test_results tr 
+                    ON tr.order_id = %s 
+                    AND tr.test_name = oi.nomi
+                WHERE oi.order_id = %s
+                ORDER BY oi.id
+            """, (str(self.current_order_id), self.current_order_id))
+            
+            tests = cursor.fetchall()
+            
+            # Jadvalga qo'shish
+            for i, test in enumerate(tests, 1):
+                status = test.get('status', 'Kutilmoqda')
+                
+                # Tag
+                if status == 'Kutilmoqda' or status == 'pending':
+                    tag = 'kutilmoqda'
+                    status_display = 'Kutilmoqda'
+                elif status == 'Saqlandi' or status == 'saqlandi':
+                    tag = 'saqlandi'
+                    status_display = 'Saqlandi'
+                elif status == 'Tayyor' or status == 'completed':
+                    tag = 'tayyor'
+                    status_display = 'Tayyor'
+                elif status == 'Chop etildi' or status == 'printed':
+                    tag = 'chop_etildi'
+                    status_display = 'Chop etildi'
+                else:
+                    tag = ''
+                    status_display = status
+                
+                # Natijani olish
+                natija = "-"
+                if test.get('result_data'):
+                    import json
+                    try:
+                        data = json.loads(test['result_data'])
+                        if 'result' in data:
+                            natija = data['result']
+                        elif 'qon_guruhi' in data:
+                            natija = f"{data.get('qon_guruhi', '')} {data.get('rezus_omil', '')}"
+                    except:
+                        pass
+                
+                self.tests_tree.insert("", "end", values=(
+                    i,
+                    test['test_name'],
+                    status_display,
+                    natija,
+                    test.get('norma', '-')
+                ), tags=(tag,))
+            
+            cursor.close()
+            conn.close()
+        
+        except Exception as e:
+            messagebox.showerror("Xato", f"Jadval yangilashda xato: {e}")
+            import traceback
+            traceback.print_exc()
+            if 'conn' in locals():
+                try:
+                    conn.close()
+                except:
+                    pass
+    
+    def show_context_menu(self, event):
+        """Context menu ko'rsatish (o'ng tugma)"""
+        selection = self.tests_tree.selection()
+        if not selection:
+            return
+        
+        menu = tk.Menu(self.root, tearoff=0)
+        menu.add_command(label="Natijani Kiritish", command=self.show_result_input_popup)
+        menu.post(event.x_root, event.y_root)
+    
+    def show_result_input_popup(self, event=None):
+        """Natija kiritish popup oynasini ko'rsatish"""
+        if not self.current_order_id:
+            messagebox.showwarning("Ogohlantirish", "Avval buyurtma tanlang!")
+            return
+        
+        selection = self.tests_tree.selection()
+        if not selection:
+            return
+        
+        # Tanlangan testni olish
+        item = self.tests_tree.item(selection[0])
+        values = item['values']
+        
+        if len(values) < 2:
+            return
+        
+        test_name = values[1]  # Tahlil nomi (2-ustun)
+        order_id = str(self.current_order_id)
+        
+        # Popup ochish
+        self.show_result_popup(order_id, test_name)
+    
+    def show_result_popup(self, order_id, test_name):
+        """Natija kiritish popup oynasini ko'rsatish"""
+        # Database dan test ma'lumotlarini olish
+        try:
+            conn = db_conn()
+            if not conn:
+                messagebox.showerror("Xato", "Database ga ulanib bo'lmadi!")
+                return
+            
+            cursor = conn.cursor(dictionary=True)
+            
+            # Test va natija ma'lumotlarini birga olish
+            cursor.execute("""
+                SELECT tn.*,
+                       tr.result_data,
+                       tr.status as result_status,
+                       tn.response_options
+                FROM tahlillar_norma tn
+                LEFT JOIN test_results tr 
+                    ON tr.test_name = tn.tahlil_nomi 
+                    AND tr.order_id = %s
+                WHERE tn.tahlil_nomi = %s
+                LIMIT 1
+            """, (order_id, test_name))
+            
+            test_data = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            
+            if not test_data:
+                messagebox.showerror("Xato", f"Test '{test_name}' topilmadi!")
+                return
+            
+            # Popup yaratish
+            popup = tk.Toplevel(self.root)
+            popup.title(f"Natija Kiritish")
+            popup.geometry("500x450")
+            popup.transient(self.root)
+            popup.grab_set()
+            
+            # Sarlavha
+            header_frame = ttk.Frame(popup, padding=10)
+            header_frame.pack(fill="x")
+            ttk.Label(header_frame, text=test_name, 
+                     font=("Arial", 12, "bold")).pack(anchor="w")
+            
+            # Test turiga qarab forma ko'rsatish
+            test_type = test_data.get('type', 'numeric')
+            test_name_lower = test_name.lower()
+            
+            # Qon guruhi test turini aniqlash (bazadan yoki test nomidan)
+            if test_type == 'blood_group' or any(keyword in test_name_lower for keyword in ['qon guruhi', 'qon guruh', 'rezus', 'резус', 'guruh', 'группа']):
+                self.show_blood_group_form(popup, order_id, test_data)
+            elif (test_type == 'positive_negative' or test_type == 'express') and \
+                    'ifa' not in test_name_lower and 'ифа' not in test_name_lower:
+                self.show_positive_negative_form(popup, order_id, test_data)
+            else:
+                self.show_numeric_form(popup, order_id, test_data)
+        
+        except Exception as e:
+            messagebox.showerror("Xato", f"Ma'lumot olishda xato: {e}")
+            import traceback
+            traceback.print_exc()
+            if 'conn' in locals():
+                try:
+                    conn.close()
+                except:
+                    pass
+    
+    def show_positive_negative_form(self, popup, order_id, test_data):
+        """Positive/Negative test uchun forma"""
+        import json
+        
+        # Saqlangan natijani olish
+        saved_result = {}
+        if test_data.get('result_data'):
+            try:
+                saved_result = json.loads(test_data['result_data'])
+            except:
+                saved_result = {}
+        
+        # Javob variantlarini olish
+        response_options = test_data.get('response_options', '')
+        if response_options and response_options.strip():
+            options = [opt.strip() for opt in response_options.split(',')]
+        else:
+            # Default
+            options = ["Manfiy", "Kuchsiz musbat", "Musbat"]
+        
+        # Frame
+        frame = ttk.Frame(popup, padding=20)
+        frame.pack(fill="both", expand=True)
+        
+        ttk.Label(frame, text="Natijani tanlang:", 
+                 font=("Arial", 10)).pack(anchor="w", pady=(10,5))
+        
+        # Radio buttons
+        result_var = tk.StringVar(value=saved_result.get('result', ''))
+        
+        for option in options:
+            ttk.Radiobutton(
+                frame,
+                text=option,
+                variable=result_var,
+                value=option
+            ).pack(anchor="w", pady=5, padx=20)
+        
+        # Tugmalar
+        buttons_frame = ttk.Frame(frame)
+        buttons_frame.pack(pady=20)
+        
+        def save_and_close():
+            result = result_var.get()
+            if not result:
+                messagebox.showwarning("Ogohlantirish", "Natijani tanlang!")
+                return
+            
+            if self.save_test_result(order_id, test_data['tahlil_nomi'], 
+                                    {'result': result}, 'positive_negative'):
+                popup.destroy()
+                self.refresh_tests_display()  # Jadval yangilash
+        
+        ttk.Button(buttons_frame, text="Saqlash", 
+                  command=save_and_close, width=15).pack(side="left", padx=5)
+        ttk.Button(buttons_frame, text="Bekor qilish", 
+                  command=popup.destroy, width=15).pack(side="left", padx=5)
+    
+    def show_blood_group_form(self, popup, order_id, test_data):
+        """Qon guruhi test uchun forma"""
+        import json
+        
+        # Saqlangan natijani olish
+        saved_result = {}
+        if test_data.get('result_data'):
+            try:
+                saved_result = json.loads(test_data['result_data'])
+            except:
+                saved_result = {}
+        
+        # Javob variantlarini olish
+        response_options = test_data.get('response_options', '')
+        if response_options and response_options.strip():
+            options = [opt.strip() for opt in response_options.split(',')]
+        else:
+            # Default qon guruhi variantlari
+            options = ["O(I) Rh+", "A(II) Rh+", "B(III) Rh+", "AB (IV) Rh+", 
+                      "O(I) Rh-", "A(II) Rh-", "B(III) Rh-", "AB (IV) Rh-"]
+        
+        # Frame
+        frame = ttk.Frame(popup, padding=20)
+        frame.pack(fill="both", expand=True)
+        
+        # Agar response_options bo'lsa, dropdown yoki radio buttonlar orqali ko'rsatish
+        if response_options and response_options.strip():
+            ttk.Label(frame, text="Natijani tanlang:", 
+                     font=("Arial", 10)).pack(anchor="w", pady=(10,5))
+            
+            result_var = tk.StringVar(value=saved_result.get('result', ''))
+            
+            # Dropdown yoki radio buttonlar
+            if len(options) <= 8:
+                # Radio buttonlar (8 tagacha)
+                for option in options:
+                    ttk.Radiobutton(
+                        frame,
+                        text=option,
+                        variable=result_var,
+                        value=option
+                    ).pack(anchor="w", pady=3, padx=20)
+            else:
+                # Dropdown (8 tadan ko'p bo'lsa)
+                combo = ttk.Combobox(frame, textvariable=result_var, values=options, 
+                                    state="readonly", width=40, font=("Arial", 11))
+                combo.pack(anchor="w", pady=5, padx=20)
+                combo.set(result_var.get() if result_var.get() else "")
+        else:
+            # Eski usul (qon guruhi va rezus alohida)
+            # Qon guruhi
+            ttk.Label(frame, text="Qon Guruhi:", 
+                     font=("Arial", 10, "bold")).pack(anchor="w", pady=(10,5))
+            
+            qon_var = tk.StringVar(value=saved_result.get('qon_guruhi', ''))
+            
+            qon_frame = ttk.Frame(frame)
+            qon_frame.pack(fill="x", pady=5, padx=20)
+            
+            for group in ["I(0)", "II(A)", "III(B)", "IV(AB)"]:
+                ttk.Radiobutton(
+                    qon_frame,
+                    text=group,
+                    variable=qon_var,
+                    value=group
+                ).pack(side="left", padx=10)
+            
+            # Rezus faktor
+            ttk.Label(frame, text="Rezus Omil:", 
+                     font=("Arial", 10, "bold")).pack(anchor="w", pady=(20,5))
+            
+            rezus_var = tk.StringVar(value=saved_result.get('rezus_omil', ''))
+            
+            ttk.Radiobutton(
+                frame,
+                text="Rh+ (Rezus Musbat)",
+                variable=rezus_var,
+                value="Rh+"
+            ).pack(anchor="w", pady=5, padx=20)
+            
+            ttk.Radiobutton(
+                frame,
+                text="Rh- (Rezus Manfiy)",
+                variable=rezus_var,
+                value="Rh-"
+            ).pack(anchor="w", pady=5, padx=20)
+        
+        # Tugmalar
+        buttons_frame = ttk.Frame(frame)
+        buttons_frame.pack(pady=20)
+        
+        def save_and_close():
+            if response_options and response_options.strip():
+                # response_options bo'lsa, natijani to'g'ridan-to'g'ri saqlash
+                result = result_var.get()
+                if not result:
+                    messagebox.showwarning("Ogohlantirish", "Natijani tanlang!")
+                    return
+                
+                if self.save_test_result(order_id, test_data['tahlil_nomi'],
+                                        {'result': result},
+                                        'blood_group'):
+                    popup.destroy()
+                    self.refresh_tests_display()
+            else:
+                # Eski usul (qon guruhi va rezus alohida)
+                qon = qon_var.get()
+                rezus = rezus_var.get()
+                
+                if not qon or not rezus:
+                    messagebox.showwarning("Ogohlantirish", 
+                                         "Qon guruhi va rezus faktorni tanlang!")
+                    return
+                
+                if self.save_test_result(order_id, test_data['tahlil_nomi'],
+                                        {'qon_guruhi': qon, 'rezus_omil': rezus},
+                                        'blood_group'):
+                    popup.destroy()
+                    self.refresh_tests_display()
+        
+        ttk.Button(buttons_frame, text="Saqlash", 
+                  command=save_and_close, width=15).pack(side="left", padx=5)
+        ttk.Button(buttons_frame, text="Bekor qilish", 
+                  command=popup.destroy, width=15).pack(side="left", padx=5)
+    
+    def show_numeric_form(self, popup, order_id, test_data):
+        """Oddiy raqamli test uchun forma"""
+        import json
+        
+        # Saqlangan natijani olish
+        saved_result = {}
+        if test_data.get('result_data'):
+            try:
+                saved_result = json.loads(test_data['result_data'])
+            except:
+                saved_result = {}
+        
+        # Javob variantlarini olish
+        response_options = test_data.get('response_options', '')
+        if response_options and response_options.strip():
+            options = [opt.strip() for opt in response_options.split(',')]
+        else:
+            options = None
+        
+        # Frame
+        frame = ttk.Frame(popup, padding=20)
+        frame.pack(fill="both", expand=True)
+        
+        result_var = tk.StringVar(value=saved_result.get('result', ''))
+        
+        # Agar response_options bo'lsa, dropdown yoki radio buttonlar orqali ko'rsatish
+        if options:
+            ttk.Label(frame, text="Natijani tanlang:", 
+                     font=("Arial", 10)).pack(anchor="w", pady=(10,5))
+            
+            # Dropdown yoki radio buttonlar
+            if len(options) <= 8:
+                # Radio buttonlar (8 tagacha)
+                for option in options:
+                    ttk.Radiobutton(
+                        frame,
+                        text=option,
+                        variable=result_var,
+                        value=option
+                    ).pack(anchor="w", pady=3, padx=20)
+            else:
+                # Dropdown (8 tadan ko'p bo'lsa)
+                combo = ttk.Combobox(frame, textvariable=result_var, values=options, 
+                                    state="readonly", width=40, font=("Arial", 11))
+                combo.pack(anchor="w", pady=5, padx=20)
+                combo.set(result_var.get() if result_var.get() else "")
+        else:
+            # Oddiy Entry (response_options yo'q bo'lsa)
+            ttk.Label(frame, text="Natija:", 
+                     font=("Arial", 10)).pack(anchor="w", pady=(10,5))
+            
+            entry = ttk.Entry(frame, textvariable=result_var, width=40, font=("Arial", 11))
+            entry.pack(anchor="w", pady=5)
+            entry.focus()
+            
+            # Enter tugmasini saqlash bilan bog'lash
+            entry.bind("<Return>", lambda e: save_and_close())
+        
+        # Norma
+        if test_data.get('norma'):
+            ttk.Label(frame, text=f"Norma: {test_data['norma']}", 
+                     foreground="gray", font=("Arial", 9)).pack(anchor="w", pady=5)
+        
+        # Birlik
+        if test_data.get('birlik'):
+            ttk.Label(frame, text=f"Birlik: {test_data['birlik']}", 
+                     foreground="gray", font=("Arial", 9)).pack(anchor="w", pady=2)
+        
+        # Tugmalar
+        buttons_frame = ttk.Frame(frame)
+        buttons_frame.pack(pady=20)
+        
+        def save_and_close():
+            result = result_var.get().strip()
+            if not result:
+                messagebox.showwarning("Ogohlantirish", "Natijani tanlang yoki kiriting!")
+                return
+            
+            if self.save_test_result(order_id, test_data['tahlil_nomi'],
+                                    {'result': result}, 'numeric'):
+                popup.destroy()
+                self.refresh_tests_display()
+        
+        ttk.Button(buttons_frame, text="Saqlash", 
+                  command=save_and_close, width=15).pack(side="left", padx=5)
+        ttk.Button(buttons_frame, text="Bekor qilish", 
+                  command=popup.destroy, width=15).pack(side="left", padx=5)
+    
+    def save_test_result(self, order_id, test_name, result_data, test_type):
+        """Natijani database ga saqlash - mustaqil connection bilan"""
+        import json
+
+        conn = self._create_fresh_connection()
+        if not conn:
+            messagebox.showerror("Xato", "Database ga ulanib bo'lmadi!")
+            return False
+
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            result_json = json.dumps(result_data, ensure_ascii=False)
+
+            cursor.execute("""
+                INSERT INTO test_results
+                (order_id, test_name, test_type, result_data, status)
+                VALUES (%s, %s, %s, %s, 'Saqlandi')
+                ON DUPLICATE KEY UPDATE
+                result_data = VALUES(result_data),
+                status = 'Saqlandi',
+                updated_at = CURRENT_TIMESTAMP
+            """, (order_id, test_name, test_type, result_json))
+
+            conn.commit()
+            return True
+
+        except Exception as e:
+            print(f"[XATO] save_test_result: {e}")
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror("Xato", f"Saqlashda xato: {e}")
+            return False
+        finally:
+            if cursor is not None:
+                try:
+                    cursor.close()
+                except:
+                    pass
+            try:
+                conn.close()
+            except:
+                pass
+    
+    def on_test_cell_click(self, event):
+        """Jadval katakchasiga bosilganda - natija yoki norma ustunida bo'lsa"""
+        region = self.tests_tree.identify_region(event.x, event.y)
+        if region == "cell":
+            # Bosilgan qatorni aniqlab, selectionni darhol yangilaymiz.
+            # Bu holda on_test_cell_edit selection() da to'g'ri qatorni oladi.
+            row_id = self.tests_tree.identify_row(event.y)
+            if row_id:
+                self.tests_tree.selection_set(row_id)
+                self.tests_tree.focus(row_id)
+            column = self.tests_tree.identify_column(event.x)
+            if column == "#4":  # Natija ustuni
+                self.on_test_cell_edit(event)
+            elif column == "#5":  # Norma ustuni - standart blanka tanlash
+                self.on_norma_cell_click(event)
+    
+    def on_test_cell_edit(self, event):
+        """Natija katakchasini tahrirlash"""
+        selection = self.tests_tree.selection()
+        if not selection:
+            return
+        
+        item = selection[0]
+        region = self.tests_tree.identify_region(event.x, event.y)
+        
+        # Faqat natija ustunida edit qilish
+        if region == "cell":
+            column = self.tests_tree.identify_column(event.x)  # Faqat x koordinata
+            if column != "#4":  # Natija ustuni emas
+                return
+        
+        item_data = self.tests_tree.item(item)
+        tag = item_data['tags'][0] if item_data['tags'] else None
+        
+        if not tag:
+            return
+        
+        # Multi-component qatorlarini tekshirish (bilirubin, revmoproba, koagulogramma, ...)
+        # Tag formati: "{test_id}_suffix" (masalan: "123_umumiy", "456_rf", "789_pt_sek")
+        tag_str = str(tag)
+        if "_" in tag_str:
+            parts = tag_str.split("_", 1)
+            if len(parts) == 2:
+                base_test_id = parts[0]
+                test_id_mc = None
+                try:
+                    test_id_mc = int(base_test_id)
+                except Exception:
+                    pass
+
+                if test_id_mc:
+                    # Asosiy dialog ochish — show_result_input_dialog barcha turlarni boshqaradi
+                    self.show_result_input_dialog(test_id_mc)
+                    return
+        
+        # Oddiy test_id
+        test_id = tag
+        try:
+            test_id = int(test_id)
+        except:
+            return
+        
+        # Test nomini topish
+        test_name = "Tahlil"
+        test_data = None
+        for test in self.current_tests:
+            if test['id'] == test_id:
+                test_name = test.get('nomi', 'Tahlil')
+                test_data = test
+                break
+        
+        # Siydik / Umumiy qon: Natija ustuniga bosilganda popup ochish (Natijani ko'rish)
+        result_json = self.test_results.get(test_id, '')
+        if result_json and isinstance(result_json, str) and result_json.strip().startswith('{'):
+            try:
+                import json as _j
+                rd = _j.loads(result_json)
+                if isinstance(rd, dict) and rd.get('type') in ('urine', 'hematology', 'hematology_cbc'):
+                    self._show_analyzer_result_popup(test_id)
+                    return
+            except Exception:
+                pass
+        
+        test_name_lower = test_name.lower()
+        
+        # Test turini aniqlash (DB so'rovi YO'Q - test_data dan o'qish)
+        test_type = (test_data.get('test_type') or '').strip().lower() if test_data else ''
+        type_from_norma = (test_data.get('type') or '').strip().lower() if test_data else ''
+        
+        # 1. Qon guruhi
+        if type_from_norma == 'blood_group' or any(k in test_name_lower for k in ['qon guruhi', 'rezus']):
+            self.edit_result_inline_with_options(item, test_id, test_name, test_data, is_blood_group=True)
+            return
+        
+        # 2. Maxsus jadval dialoglari (aniq tartib bilan, to'liq nom ustunlik qiladi)
+        # 2a. Brutsellez
+        if any(k in test_name_lower for k in ['brutsellez', 'brusellez', 'heddelson', 'xeddelson', 'rayta']):
+            self.show_brusellez_form(test_id, test_name, test_data)
+            return
+        # 2b. Najas tahlili
+        if 'najas' in test_name_lower:
+            self.show_najas_form(test_id, test_name, test_data)
+            return
+        # 2c. Pepsinogen
+        if 'pepsinogen' in test_name_lower:
+            self.show_pepsinogen_form(test_id, test_name, test_data)
+            return
+        # 2d. Nechiporenko
+        if any(k in test_name_lower for k in ['nechiporenko', 'nicheporenko']):
+            self.show_nechiporenko_form(test_id, test_name, test_data)
+            return
+        # 2e. Zimnitskiy
+        if any(k in test_name_lower for k in ['zimnitskiy', 'зимницкий']):
+            self.show_zimnitskiy_form(test_id, test_name, test_data)
+            return
+        # 2e2. GTT — Glyukozaga tolerantlik testi
+        if _is_gtt_test(test_name_lower):
+            self.show_gtt_form(test_id, test_name, test_data)
+            return
+        # 2f. Spermogramma
+        if 'spermogramma' in test_name_lower:
+            self.show_spermogramma_form(test_id, test_name, test_data)
+            return
+        # 2g. TORCH
+        if 'torch' in test_name_lower:
+            self.show_torch_form(test_id, test_name, test_data)
+            return
+        # 2h. Urologik / Mujskoy mazok — AVVAL tekshiriladi (mazok so'zi ham bor)
+        if any(k in test_name_lower for k in ['urologik', 'mujskoy', 'erkaklar']):
+            self.show_urologik_form(test_id, test_name, test_data)
+            return
+        # 2i. Qondan mazok (morfologiya) — AVVAL tekshiriladi
+        if 'qondan' in test_name_lower and 'mazok' in test_name_lower:
+            self.show_qondan_mazok_form(test_id, test_name, test_data)
+            return
+        # 2ii. Ginekologik surtma — faqat aniq ginekologik testlar
+        if 'ginekolog' in test_name_lower:
+            self.show_ginekologik_form(test_id, test_name, test_data)
+            return
+        # 2j. Umumiy 'surtma' yoki 'mazok' — ginekologik default
+        if any(k in test_name_lower for k in ['surtma', 'mazok']):
+            self.show_ginekologik_form(test_id, test_name, test_data)
+            return
+
+        # 3. Express (Manfiy/Musbat) — gepatit, RW, sifilis va boshqalar
+        # IFA/ИФА testlarida raqamli natija kiritiladi — Manfiy/Musbat ko'rsatilmaydi
+        _is_ifa = 'ifa' in test_name_lower or 'ифа' in test_name_lower
+        if not _is_ifa and (type_from_norma in ('positive_negative', 'express', 'ekspress') or
+                any(k in test_name_lower for k in ['gepatit', 'hbsag', 'hcv', 'rw', 'sifilis', 'ekspress', 'hiv'])):
+            self.edit_result_inline_with_options(
+                item, test_id, test_name, test_data,
+                response_options='Manfiy (-),Musbat (+)'
+            )
+            return
+
+        # 4. response_options bor bo'lsa (bazadan yuklangan)
+        response_options = test_data.get('response_options', '') if test_data else ''
+        if response_options and response_options.strip():
+            self.edit_result_inline_with_options(item, test_id, test_name, test_data, response_options=response_options)
+            return
+
+        # 5. Bilirubin
+        result_template = self.get_result_template_from_db(test_name)
+        if result_template or 'bilirubin' in test_name_lower:
+            if not result_template:
+                bilirubin_template = {
+                    "type": "multi_component",
+                    "components": [
+                        {"name": "Umumiy bilirubin", "key": "umumiy", "unit": "мкмоль/л", "readonly": False},
+                        {"name": "Bog'langan bilirubin", "key": "bog_langan", "unit": "мкмоль/л", "readonly": False},
+                        {"name": "Erkin bilirubin", "key": "erkin", "unit": "мкмоль/л", "readonly": True, "formula": "umumiy - bog_langan"}
+                    ]
+                }
+                result_template = bilirubin_template
+            self.show_template_based_dialog(test_id, test_name, test_data, result_template)
+            return
+        
+        # 5.5. KOAGULOGRAMMA / Protrombin uchun multi-component dialog
+        if any(k in test_name_lower for k in ['koagulogramma', 'koagul', 'protrombin', 'prothrombin', 'pt/mno', 'pti, pt']):
+            _coag_components = [
+                {"name": "PT sekundalarda",       "key": "pt_sek",   "unit": "sek", "norma": "13-15",    "readonly": False},
+                {"name": "PT bo'yicha Kviku (%)", "key": "pt_kviku", "unit": "%",   "norma": "70-100",   "readonly": False},
+                {"name": "MNO / INR",             "key": "pt_mno",   "unit": "INR", "norma": "0.9-1.15", "readonly": False},
+            ]
+            if any(k in test_name_lower for k in ['koagulogramma', 'koagul']):
+                _coag_components += [
+                    {"name": "TT (Tromboplastin vaqti)", "key": "tt",         "unit": "sek", "norma": "11-18",   "readonly": False},
+                    {"name": "ACHTV",                    "key": "achtv",      "unit": "sek", "norma": "25-40",   "readonly": False},
+                    {"name": "Fibrinogen",               "key": "fibrinogen", "unit": "g/l", "norma": "2.0-4.0", "readonly": False},
+                ]
+            self.show_template_based_dialog(test_id, test_name, test_data,
+                                            {"type": "multi_component", "components": _coag_components})
+            return
+
+        # 6. Oddiy natija kiritish — inline entry
+        self.edit_result_inline(item, test_id)
+
+    def on_norma_cell_click(self, event):
+        """Norma ustuniga bosilganda - 'Natijani ko'rish' yoki standart blanka tanlash"""
+        selection = self.tests_tree.selection()
+        if not selection:
+            return
+
+        item = selection[0]
+        item_data = self.tests_tree.item(item)
+        tag = item_data['tags'][0] if item_data['tags'] else None
+
+        if not tag:
+            return
+
+        # Test ID ni olish
+        test_id = tag
+        try:
+            test_id = int(str(test_id).split('_')[0])
+        except Exception:
+            return
+
+        # "Natijani ko'rish" tugmasi bosildimi?
+        current_values = self.tests_tree.item(item, 'values')
+        norma_cell_val = current_values[4].strip() if len(current_values) > 4 else ''
+
+        # Har qanday apostraf varianti uchun ishonchli tekshiruv
+        if norma_cell_val.lower().startswith("natijani ko"):
+            self._show_analyzer_result_popup(test_id)
+            return
+
+        # Test nomini topish
+        test_name = "Tahlil"
+        test_data = None
+        for test in self.current_tests:
+            if test['id'] == test_id:
+                test_name = test.get('nomi', 'Tahlil')
+                test_data = test
+                break
+
+        # Standart blanka fayl yo'lini olish
+        standard_blank_path = self.get_standard_blank_path(test_name)
+        
+        # Agar standart blanka bo'lsa, shablonni tanlash dialogi
+        if standard_blank_path:
+            # Mavjud shablonni ochish
+            import tkinter.filedialog as filedialog
+            
+            # Bemor ma'lumotlarini olish
+            order_info = {}
+            if self.current_bemor_data:
+                order_info = {
+                    'sample_id': self.current_bemor_data.get('sample_id', ''),
+                    'order_id': self.current_order_id,
+                    'fish': self.current_bemor_data.get('fish', ''),
+                    'yosh': self.current_bemor_data.get('yosh', ''),
+                    'jins': self.current_bemor_data.get('jins', ''),
+                    'tugilgan_sana': self.current_bemor_data.get('tugilgan_sana', ''),
+                    'telefon': self.current_bemor_data.get('telefon', ''),
+                    'shifokor': self.current_bemor_data.get('shifokor', ''),
+                    'manzil': self.current_bemor_data.get('manzil', ''),
+                }
+            
+            # Shablonni tanlash yoki mavjud shablonni ochish
+            choice = messagebox.askyesnocancel(
+                "Standart Blanka",
+                f"Tahlil: {test_name}\n\n"
+                f"Mavjud shablon: {os.path.basename(standard_blank_path)}\n\n"
+                "Shablonni ochish yoki boshqa shablonni tanlash?",
+                icon="question"
+            )
+            
+            if choice is True:  # Ha - mavjud shablonni ochish
+                try:
+                    temp_path = open_template_with_patient_data(standard_blank_path, order_info)
+                    os.startfile(temp_path)
+                    self.status_var.set(f"Shablon ochildi: {os.path.basename(standard_blank_path)}")
+                except Exception as e:
+                    messagebox.showerror("Xatolik", f"Shablon ochishda xato: {str(e)}")
+            elif choice is False:  # Yo'q - boshqa shablonni tanlash
+                file_path = filedialog.askopenfilename(
+                    title="Shablon faylini tanlang",
+                    filetypes=[("Word Documents", "*.docx"), ("All Files", "*.*")],
+                    initialdir=os.path.dirname(standard_blank_path) if standard_blank_path else os.path.dirname(__file__)
+                )
+                if file_path:
+                    try:
+                        temp_path = open_template_with_patient_data(file_path, order_info)
+                        os.startfile(temp_path)
+                        self.status_var.set(f"Shablon ochildi: {os.path.basename(file_path)}")
+                    except Exception as e:
+                        messagebox.showerror("Xatolik", f"Shablon ochishda xato: {str(e)}")
+        else:
+            # Standart blanka yo'q - oddiy norma ko'rsatish
+            messagebox.showinfo("Ma'lumot", f"Bu tahlil uchun standart blanka mavjud emas.\n\nTahlil: {test_name}")
+    
+    def _show_analyzer_result_popup(self, test_id):
+        """Analizator natijasini ko'rsatish popup oynasi (siydik / gemotologiya)"""
+        import json as _json
+        result_json = self.test_results.get(test_id, '')
+        if not result_json:
+            messagebox.showinfo("Ma'lumot", "Bu tahlil uchun natija mavjud emas.")
+            return
+
+        # Test nomini topish
+        test_name = "Tahlil natijalari"
+        for test in self.current_tests:
+            if test['id'] == test_id:
+                test_name = test.get('nomi', test_name)
+                break
+
+        try:
+            result_dict = _json.loads(result_json)
+        except Exception:
+            messagebox.showinfo(test_name, str(result_json))
+            return
+
+        json_type = result_dict.get('type', '')
+
+        # Siydik uchun alohida to'liq mikroskopiya oynasi
+        if json_type == 'urine':
+            try:
+                self._show_urine_mikroskopiya_popup(test_id, test_name, result_dict)
+            except Exception as _ue:
+                import traceback as _tb
+                messagebox.showerror(
+                    "Mikroskopiya oynasi xatosi",
+                    f"Mikroskopiya oynasini ochishda xato:\n{_ue}\n\n{_tb.format_exc()[-400:]}"
+                )
+            return
+
+        # Gemotologiya va boshqalar uchun oddiy info popup
+        sid    = result_dict.get('sid', '')
+        sno    = result_dict.get('sno', '')
+        source = result_dict.get('source', '')
+
+        popup = tk.Toplevel(self.root)
+        popup.title(test_name)
+        popup.geometry("520x560")
+        popup.resizable(True, True)
+        popup.transient(self.root)
+        popup.grab_set()
+
+        ttk.Label(popup, text=test_name,
+                  font=("Arial", 12, "bold")).pack(pady=(12, 4), padx=10)
+
+        meta_parts = []
+        if source:
+            meta_parts.append(f"Analizator: {source}")
+        if sid:
+            meta_parts.append(f"Sample ID: {sid}")
+        if sno:
+            meta_parts.append(f"Sample NO: {sno}")
+        if meta_parts:
+            ttk.Label(popup, text="  |  ".join(meta_parts),
+                      foreground="#555").pack(pady=2, padx=10, anchor="w")
+
+        ttk.Separator(popup, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=10, pady=6)
+
+        frame = ttk.Frame(popup)
+        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=4)
+
+        cols  = ("Tahlil nomi", "Natija")
+        tree  = ttk.Treeview(frame, columns=cols, show="headings", height=20)
+        tree.heading("Tahlil nomi", text="Tahlil nomi")
+        tree.column("Tahlil nomi", width=230, anchor=tk.W)
+        tree.heading("Natija", text="Natija")
+        tree.column("Natija", width=180, anchor=tk.CENTER)
+        tree.tag_configure("ab", foreground="red", font=("Arial", 9, "bold"))
+
+        sb = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        skip_keys = {'result', 'type', 'source', 'sid', 'sno', 'actual_value',
+                     'unit', 'flag', 'param_key', 'db_name', 'code', 'name',
+                     'all_analytes'}
+
+        if json_type in ('hematology', 'hematology_cbc'):
+            try:
+                from hematology_window import CLINICAL_PARAMETERS, HL7_TO_DB_NAME
+            except Exception:
+                CLINICAL_PARAMETERS = {}
+                HL7_TO_DB_NAME      = {}
+
+            if json_type == 'hematology':
+                aval    = result_dict.get('actual_value', '')
+                unit    = result_dict.get('unit', '')
+                flag    = result_dict.get('flag', '').upper()
+                db_name = result_dict.get('db_name', result_dict.get('param_key', test_name))
+                disp    = f"{aval} {unit}".strip()
+                is_ab   = ('H' in flag or 'L' in flag) and flag != 'N'
+                tree.insert("", tk.END, values=(db_name, disp),
+                            tags=("ab",) if is_ab else ())
+            else:
+                for pk in CLINICAL_PARAMETERS:
+                    db_nm = HL7_TO_DB_NAME.get(pk, pk)
+                    val   = result_dict.get(db_nm, result_dict.get(pk, ''))
+                    if val:
+                        tree.insert("", tk.END, values=(db_nm, val))
+        else:
+            for key, val in result_dict.items():
+                if key not in skip_keys and val:
+                    tree.insert("", tk.END, values=(key, str(val)))
+
+        ttk.Button(popup, text="Yopish",
+                   command=popup.destroy).pack(pady=10)
+        popup.focus_set()
+
+    def _show_urine_mikroskopiya_popup(self, test_id, test_name, result_dict):
+        """Siydik tahlili uchun to'liq mikroskopiya kiritish oynasi.
+        Chap panel: URIT-50 analitlari (faqat ko'rish).
+        O'ng panel: Mikroskopiya maydonlari (tahrirlash mumkin, avtomatik to'ladi).
+        Saqlash: faqat xotirada (DB ga emas), test_results ga yoziladi.
+        """
+        import json as _json
+
+        # ── Mikroskopiya maydonlari ────────────────────────────────────────
+        MIKRO_FIELDS = [
+            # (kod,     uzbek nomi,                     norma,     birlik)
+            ('SEC',   "Epiteliy: yassi",               "1.0-15",  "ko'ruv maydonida"),
+            ('TEC',   "Epiteliy: o'tuvchi",            "manfiy",  "preparatda"),
+            ('RTEC',  "Epiteliy: buyrak",              "manfiy",  "preparatda"),
+            ('WBC',   "Leykotsitlar",                  "0-7",     "ko'ruv maydonida"),
+            ('RBC-D', "Eritrotsitlar: o'zgargan",      "1-2",     "ko'ruv maydonida"),
+            ('RBC-U', "Eritrotsitlar: o'zgarmagan",    "0-1",     "ko'ruv maydonida"),
+            ('CAST',  "Silindrlar",                    "manfiy",  "preparatda"),
+            ('MUC',   "Shilliq",                       "manfiy",  "preparatda"),
+            ('CRY',   "Tuzlar",                        "manfiy",  "preparatda"),
+            ('BACT',  "Bakteriyalar",                  "manfiy",  "preparatda"),
+            ('YEAST', "Zamburug'lar",                  "manfiy",  "preparatda"),
+        ]
+
+        sid          = result_dict.get('sid', '')
+        sno          = result_dict.get('sno', '')
+        source       = result_dict.get('source', 'URIT-50')
+        all_analytes = result_dict.get('all_analytes', {})
+        saved_mikro  = result_dict.get('mikroskopiya', {})
+
+        # ── LEU + BLD dan avtomatik mikroskopiya hisoblash ────────────────
+        def _calc_auto_mikro(leu_val, bld_val):
+            leu = (leu_val or '0').strip().upper()
+            bld = (bld_val or '0').strip().upper()
+
+            # WBC (LEU dan)
+            if '+3' in leu or '500' in leu:
+                wbc, wbc_red = "300-400", True
+            elif '+2' in leu or '125' in leu:
+                wbc, wbc_red = "100-125", True
+            elif '+1' in leu or '70' in leu:
+                wbc, wbc_red = "50-60", False
+            elif '15' in leu:
+                wbc, wbc_red = "10-15", False
+            else:
+                wbc, wbc_red = "4-5", False
+
+            # RBC (BLD dan)
+            if '+3' in bld or '200' in bld:
+                rbcd, rbcu, rbc_red = "100-120", "10-20", True
+            elif '+2' in bld or '80' in bld:
+                rbcd, rbcu, rbc_red = "40-50", "5-10", True
+            elif '25' in bld or ('+1' in bld and '+/-' not in bld and '+-' not in bld):
+                rbcd, rbcu, rbc_red = "15-20", "3-4", True
+            elif '10' in bld or '+/-' in bld or '+-' in bld:
+                rbcd, rbcu, rbc_red = "8-10", "1-2", False
+            else:
+                rbcd, rbcu, rbc_red = "1-2", "0-1", False
+
+            return {
+                'SEC':   {'value': '2-3',  'is_red': False},
+                'TEC':   {'value': '-',    'is_red': False},
+                'RTEC':  {'value': '-',    'is_red': False},
+                'WBC':   {'value': wbc,    'is_red': wbc_red},
+                'RBC-D': {'value': rbcd,   'is_red': rbc_red},
+                'RBC-U': {'value': rbcu,   'is_red': rbc_red},
+                'CAST':  {'value': '-',    'is_red': False},
+                'MUC':   {'value': '-',    'is_red': False},
+                'CRY':   {'value': '-',    'is_red': False},
+                'BACT':  {'value': '-',    'is_red': False},
+                'YEAST': {'value': '-',    'is_red': False},
+            }
+
+        leu_raw  = all_analytes.get('LEU', '') or all_analytes.get('leu', '')
+        bld_raw  = all_analytes.get('BLD', '') or all_analytes.get('bld', '')
+        auto_mikro = _calc_auto_mikro(leu_raw, bld_raw)
+
+        # ── Popup oyna ────────────────────────────────────────────────────
+        popup = tk.Toplevel(self.root)
+        popup.title(f"Siydik Mikroskopiyasi")
+        popup.geometry("1060x640")
+        popup.minsize(900, 520)
+        popup.resizable(True, True)
+        popup.transient(self.root)
+        popup.grab_set()
+
+        # Sarlavha paneli
+        hdr_bg = "#1a3a5c"
+        hdr = tk.Frame(popup, bg=hdr_bg)
+        hdr.pack(fill=tk.X)
+        tk.Label(hdr, text=test_name, bg=hdr_bg, fg="white",
+                 font=("Arial", 13, "bold")).pack(side=tk.LEFT, padx=12, pady=8)
+        meta = f"Analizator: {source}"
+        if sid:
+            meta += f"   |   Sample ID: {sid}"
+        if sno:
+            meta += f"   |   Sample NO: {sno}"
+        tk.Label(hdr, text=meta, bg=hdr_bg, fg="#aac8e8",
+                 font=("Arial", 9)).pack(side=tk.LEFT, padx=6)
+
+        # Kontent (2 panel)
+        content = ttk.Frame(popup, padding=6)
+        content.pack(fill=tk.BOTH, expand=True)
+
+        # ── SOL panel: URIT-50 analitlari (Treeview, faqat ko'rish) ──────
+        left = ttk.LabelFrame(content, text="URIT-50 Analitlari  (faqat ko'rish)", padding=4)
+        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=(0, 6))
+        left.configure(width=340)
+        left.pack_propagate(False)
+
+        try:
+            from urine_window import PARAM_NAMES as _PNAMES, ANALYTES as _URIT_AN
+        except Exception:
+            _PNAMES  = {}
+            _URIT_AN = list(all_analytes.keys())
+
+        ucols = ("Tahlil nomi", "Natija")
+        utree = ttk.Treeview(left, columns=ucols, show="headings", height=20)
+        utree.heading("Tahlil nomi", text="Tahlil nomi")
+        utree.column("Tahlil nomi", width=160, anchor=tk.W)
+        utree.heading("Natija", text="Natija")
+        utree.column("Natija", width=155, anchor=tk.W)
+        utree.tag_configure("ab", foreground="red", font=("Arial", 9, "bold"))
+        usb = ttk.Scrollbar(left, orient=tk.VERTICAL, command=utree.yview)
+        utree.configure(yscrollcommand=usb.set)
+        utree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        usb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        for code in _URIT_AN:
+            val = (all_analytes.get(code) or '').strip()
+            if not val:
+                continue
+            name_disp = _PNAMES.get(code, code)
+            is_ab = ('+' in val or '>' in val or '<' in val) and \
+                    'normal' not in val.lower() and 'neg' not in val.lower()
+            utree.insert("", tk.END, values=(name_disp, val),
+                         tags=("ab",) if is_ab else ())
+
+        # ── O'NG panel: Mikroskopiya kiritish ────────────────────────────
+        right = ttk.LabelFrame(
+            content,
+            text="SIYDIK CHO'KMASI MIKROSKOPIYASI   ✏ Natijani o'zgartirish mumkin",
+            padding=4
+        )
+        right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Fizik xossalari: miqdori, rangi, tiniqligi
+        fizik_frame = ttk.LabelFrame(right, text="Siydikning miqdori, rangi, tiniqligi", padding=4)
+        fizik_frame.pack(fill=tk.X, pady=(0, 6))
+        saved_fizik = result_dict.get('fizik', {})
+        miqdori_var = tk.StringVar(value=saved_fizik.get('miqdori', ''))
+        rangi_var = tk.StringVar(value=saved_fizik.get('rangi', ''))
+        tiniqligi_var = tk.StringVar(value=saved_fizik.get('tiniqligi', ''))
+        ttk.Label(fizik_frame, text="Miqdori (ml):").grid(row=0, column=0, sticky=tk.W, padx=(0, 4), pady=2)
+        tk.Entry(fizik_frame, textvariable=miqdori_var, width=12).grid(row=0, column=1, sticky=tk.W, pady=2)
+        ttk.Label(fizik_frame, text="Norma: 30-300").grid(row=0, column=2, sticky=tk.W, padx=(8, 0), pady=2)
+        ttk.Label(fizik_frame, text="Rangi:").grid(row=1, column=0, sticky=tk.W, padx=(0, 4), pady=2)
+        rangi_combo = ttk.Combobox(fizik_frame, textvariable=rangi_var, width=18, values=[
+            "Och sariq", "Sariq", "To'q sariq", "Qizg'ish", "Qon aralash", "Shaffof", "Bulutli"
+        ])
+        rangi_combo.grid(row=1, column=1, sticky=tk.W, pady=2)
+        ttk.Label(fizik_frame, text="Norma: och sariq").grid(row=1, column=2, sticky=tk.W, padx=(8, 0), pady=2)
+        ttk.Label(fizik_frame, text="Tiniqligi:").grid(row=2, column=0, sticky=tk.W, padx=(0, 4), pady=2)
+        tiniqligi_combo = ttk.Combobox(fizik_frame, textvariable=tiniqligi_var, width=18, values=[
+            "Tiniq", "Biroz xira", "Xira", "Bulutli", "Cho'kindi bilan"
+        ])
+        tiniqligi_combo.grid(row=2, column=1, sticky=tk.W, pady=2)
+        ttk.Label(fizik_frame, text="Norma: Tiniq").grid(row=2, column=2, sticky=tk.W, padx=(8, 0), pady=2)
+
+        # Jadval sarlavhasi
+        col_defs = [("Ko'rsatkich", 195), ("Kod", 52), ("Natija ✏", 88),
+                    ("Norma", 80), ("Birlik", 145)]
+        hdr_row = tk.Frame(right, bg=hdr_bg)
+        hdr_row.pack(fill=tk.X, pady=(0, 3))
+        for col_text, col_px in col_defs:
+            tk.Label(hdr_row, text=col_text, bg=hdr_bg, fg="white",
+                     font=("Arial", 9, "bold"),
+                     width=col_px // 8, anchor="w"
+                     ).pack(side=tk.LEFT, padx=3, pady=4)
+
+        # Scrollable maydon (Canvas + Frame)
+        cf = tk.Frame(right)
+        cf.pack(fill=tk.BOTH, expand=True)
+        canvas = tk.Canvas(cf, highlightthickness=0)
+        vsb = ttk.Scrollbar(cf, orient=tk.VERTICAL, command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        rows_frame = tk.Frame(canvas)
+        canvas.create_window((0, 0), window=rows_frame, anchor="nw")
+        rows_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        def _wheel(e):
+            canvas.yview_scroll(
+                -1 if (getattr(e, 'delta', 0) > 0 or getattr(e, 'num', 0) == 4) else 1,
+                'units'
+            )
+        canvas.bind('<MouseWheel>', _wheel)
+        rows_frame.bind('<MouseWheel>', _wheel)
+
+        entry_vars = {}   # {code: tk.StringVar}
+
+        # ── Silindrlar (CAST) turlari ──────────────────────────────────────
+        CAST_TYPES = [
+            "Gialinli silindr",
+            "Donador (granulyar) silindr",
+            "Eritrotsitli silindr",
+            "Leykotsitli silindr",
+            "Epitelial silindr",
+            "Yog'li silindr",
+            "Mumli (vakoviy) silindr",
+            "Keng silindr",
+        ]
+
+        # ── Tuzlar (CRY) turlari — guruh bo'yicha ─────────────────────────
+        CRY_TYPES = [
+            # (guruh,               nomi)
+            ("Kislotali siydik", "Oksalat kalsiy (Ca oxalate)"),
+            ("Kislotali siydik", "Amorf uratlar (Uraturiya)"),
+            ("Kislotali siydik", "Siydik kislotasi kristallari"),
+            ("Kislotali siydik", "Natriy urat"),
+            ("Kislotali siydik", "Ammoniy urat"),
+            ("Ishqoriy siydik",  "Fosfatlar (amorf)"),
+            ("Ishqoriy siydik",  "Tripelfosfat (Mg-ammoniy fosfat)"),
+            ("Ishqoriy siydik",  "Kalsiy fosfat"),
+            ("Ishqoriy siydik",  "Kalsiy karbonat"),
+        ]
+
+        # ── Tanlash popup yordamchi funksiyasi ────────────────────────────
+        def _open_picker(title, items, var):
+            """Checkbox + miqdor tanlash mini-oynasi.
+            items: list of str  yoki list of (guruh, nomi) tuples.
+            Natija: "Gialinli silindr (1-2), Donador (++)" formatida var ga yoziladi.
+            """
+            win = tk.Toplevel(popup)
+            win.title(title)
+            win.geometry("440x500")
+            win.resizable(False, True)
+            win.transient(popup)
+            win.grab_set()
+
+            # Sarlavha
+            tk.Label(win, text=title, font=("Arial", 11, "bold"),
+                     bg="#1a3a5c", fg="white").pack(fill=tk.X, ipady=7)
+            tk.Label(win, text="Turi tanlang va miqdorni kiriting (masalan: ++, 1-2, 10-15 ta)",
+                     font=("Arial", 8), fg="#555").pack(pady=(4, 0), padx=8, anchor="w")
+
+            # Scrollable ichki qism
+            fo = tk.Frame(win)
+            fo.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+            cv2  = tk.Canvas(fo, highlightthickness=0)
+            sb2  = ttk.Scrollbar(fo, orient=tk.VERTICAL, command=cv2.yview)
+            cv2.configure(yscrollcommand=sb2.set)
+            sb2.pack(side=tk.RIGHT, fill=tk.Y)
+            cv2.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            inner = tk.Frame(cv2, bg="white")
+            cv2.create_window((0, 0), window=inner, anchor="nw")
+            inner.bind("<Configure>",
+                       lambda e: cv2.configure(scrollregion=cv2.bbox("all")))
+
+            def _wh2(e):
+                cv2.yview_scroll(
+                    -1 if (getattr(e, 'delta', 0) > 0 or getattr(e, 'num', 0) == 4) else 1,
+                    'units')
+            cv2.bind('<MouseWheel>', _wh2)
+            inner.bind('<MouseWheel>', _wh2)
+
+            # Mavjud qiymatni parse qilish (oldindan belgilash uchun)
+            existing = var.get().strip()
+            pre_map = {}   # {nomi_lower: qty}
+            if existing and existing not in ('-', ''):
+                for part in existing.split(','):
+                    part = part.strip()
+                    if '(' in part and part.endswith(')'):
+                        nm  = part[:part.rfind('(')].strip()
+                        qty = part[part.rfind('(') + 1:-1].strip()
+                        pre_map[nm.lower()] = qty
+                    elif part:
+                        pre_map[part.lower()] = ''
+
+            check_rows = []   # [(nomi, BooleanVar, StringVar_qty)]
+            last_grp = None
+
+            for item in items:
+                if isinstance(item, tuple):
+                    grp, nomi = item
+                else:
+                    grp, nomi = None, item
+
+                # Guruh sarlavhasi
+                if grp and grp != last_grp:
+                    tk.Label(inner, text=f" {grp} ",
+                             font=("Arial", 8, "italic"), fg="white",
+                             bg="#4a7bab").pack(fill=tk.X, pady=(6, 1), padx=0)
+                    last_grp = grp
+
+                pre_qty = pre_map.get(nomi.lower(), None)
+                b_var   = tk.BooleanVar(value=(pre_qty is not None))
+                q_var   = tk.StringVar(value=(pre_qty or ''))
+
+                row_f = tk.Frame(inner, bg="white")
+                row_f.pack(fill=tk.X, pady=1, padx=4)
+                row_f.bind('<MouseWheel>', _wh2)
+
+                cb = tk.Checkbutton(row_f, text=nomi, variable=b_var,
+                                    bg="white", font=("Arial", 9), anchor="w",
+                                    width=30)
+                cb.pack(side=tk.LEFT)
+                cb.bind('<MouseWheel>', _wh2)
+
+                q_ent = tk.Entry(row_f, textvariable=q_var, width=9,
+                                 font=("Arial", 9), relief=tk.SOLID, borderwidth=1)
+                q_ent.pack(side=tk.LEFT, padx=(4, 2))
+                q_ent.bind('<MouseWheel>', _wh2)
+                tk.Label(row_f, text="miqdor", bg="white",
+                         font=("Arial", 8), fg="#999").pack(side=tk.LEFT)
+
+                def _auto_check(bv=b_var, qe=q_ent):
+                    if bv.get():
+                        qe.focus_set()
+                cb.configure(command=_auto_check)
+
+                check_rows.append((nomi, b_var, q_var))
+
+            # Tasdiqlash
+            def _confirm():
+                parts = []
+                for nomi, bv, qv in check_rows:
+                    if bv.get():
+                        qty = qv.get().strip()
+                        parts.append(f"{nomi} ({qty})" if qty else nomi)
+                var.set(', '.join(parts) if parts else '-')
+                win.destroy()
+
+            btn_f = tk.Frame(win, pady=6)
+            btn_f.pack(fill=tk.X, side=tk.BOTTOM)
+            tk.Button(btn_f, text="  Tasdiqlash  ", command=_confirm,
+                      bg="#28a745", fg="white", font=("Arial", 10, "bold"),
+                      relief=tk.RAISED, padx=12, pady=3, cursor="hand2"
+                      ).pack(side=tk.RIGHT, padx=8)
+            ttk.Button(btn_f, text="Bekor qilish",
+                       command=win.destroy).pack(side=tk.RIGHT, padx=4)
+            win.focus_set()
+
+        # ── Har bir mikroskopiya qatori ───────────────────────────────────
+        for idx, (code, label, norma, birlik) in enumerate(MIKRO_FIELDS):
+            # Qiymatni aniqlash: saqlangan → avtomatik
+            if code in saved_mikro and saved_mikro[code] != '':
+                init_val = saved_mikro[code]
+                row_bg   = '#fffbe6'   # sariq — foydalanuvchi qo'lda kiritgan
+            elif code in auto_mikro:
+                init_val = auto_mikro[code]['value']
+                row_bg   = '#f5f7fa' if idx % 2 == 0 else 'white'
+            else:
+                init_val = '-'
+                row_bg   = '#f5f7fa' if idx % 2 == 0 else 'white'
+
+            row = tk.Frame(rows_frame, bg=row_bg)
+            row.pack(fill=tk.X, padx=2, pady=1)
+            row.bind('<MouseWheel>', _wheel)
+
+            tk.Label(row, text=label, bg=row_bg, font=("Arial", 9),
+                     width=24, anchor="w").pack(side=tk.LEFT, padx=(4, 2))
+            tk.Label(row, text=code, bg=row_bg, font=("Arial", 9, "italic"),
+                     fg="#555", width=7, anchor="center").pack(side=tk.LEFT, padx=2)
+
+            is_red = code in auto_mikro and auto_mikro[code].get('is_red', False)
+            ab_fg  = "#cc0000" if is_red else "black"
+            var = tk.StringVar(value=init_val)
+            entry_vars[code] = var
+
+            # CAST va CRY uchun kengaytirilgan entry + picker tugma
+            if code in ('CAST', 'CRY'):
+                pick_items = CAST_TYPES if code == 'CAST' else CRY_TYPES
+                pick_title = "Silindrlar tanlash" if code == 'CAST' else "Tuzlar (kristallar) tanlash"
+                ent_w = 26   # kengroq entry (picker natijasi uzun bo'lishi mumkin)
+                ent = tk.Entry(row, textvariable=var, width=ent_w,
+                               font=("Arial", 9), fg=ab_fg,
+                               relief=tk.SOLID, borderwidth=1)
+                ent.pack(side=tk.LEFT, padx=(4, 1))
+                ent.bind('<MouseWheel>', _wheel)
+                tk.Button(
+                    row, text=" ▼ ", font=("Arial", 8),
+                    relief=tk.RAISED, bg="#e0e8f0", cursor="hand2",
+                    command=lambda v=var, it=pick_items, ti=pick_title:
+                        _open_picker(ti, it, v)
+                ).pack(side=tk.LEFT, padx=(0, 4))
+            else:
+                ent = tk.Entry(row, textvariable=var, width=10, font=("Arial", 10),
+                               fg=ab_fg, relief=tk.SOLID, borderwidth=1)
+                ent.pack(side=tk.LEFT, padx=4)
+                ent.bind('<MouseWheel>', _wheel)
+
+            tk.Label(row, text=norma, bg=row_bg, font=("Arial", 9),
+                     fg="#666", width=10, anchor="center").pack(side=tk.LEFT, padx=2)
+            tk.Label(row, text=birlik, bg=row_bg, font=("Arial", 9),
+                     fg="#444", anchor="w").pack(side=tk.LEFT, padx=4)
+
+        # ── Quyi tugmalar ─────────────────────────────────────────────────
+        btn_frame = tk.Frame(popup, pady=8, padx=10)
+        btn_frame.pack(fill=tk.X)
+
+        def do_save():
+            """Mikroskopiya qiymatlarini xotirada saqlash (DB ga emas)"""
+            mikro_data = {code: var.get().strip() for code, var in entry_vars.items()}
+            result_dict['mikroskopiya'] = mikro_data
+            result_dict['fizik'] = {
+                'miqdori': miqdori_var.get().strip(),
+                'rangi': rangi_var.get().strip(),
+                'tiniqligi': tiniqligi_var.get().strip()
+            }
+            self.test_results[test_id] = _json.dumps(result_dict, ensure_ascii=False)
+            popup.destroy()
+            # Jadval qatorini yangilash
+            for tr_item in self.tests_tree.get_children():
+                td = self.tests_tree.item(tr_item)
+                t_tag = td['tags'][0] if td['tags'] else None
+                if t_tag:
+                    try:
+                        tid = int(str(t_tag).split('_')[0])
+                        if tid == test_id:
+                            self.refresh_single_test_display(tr_item, test_id)
+                            break
+                    except Exception:
+                        pass
+
+        tk.Button(
+            btn_frame, text="  Saqlash  ", command=do_save,
+            bg="#28a745", fg="white", font=("Arial", 11, "bold"),
+            relief=tk.RAISED, padx=18, pady=4, cursor="hand2"
+        ).pack(side=tk.RIGHT, padx=6)
+        ttk.Button(
+            btn_frame, text="Bekor qilish", command=popup.destroy
+        ).pack(side=tk.RIGHT, padx=4)
+
+        popup.update_idletasks()
+        popup.focus_set()
+
+    def edit_result_inline(self, item, test_id):
+        """Jadvalda to'g'ridan-to'g'ri natija kiritish - yaxshilangan"""
+        # Test ma'lumotlarini olish
+        test_data = None
+        test_name = ""
+        for test in self.current_tests:
+            if test['id'] == test_id:
+                test_data = test
+                test_name = test.get('nomi', '')
+                break
+        
+        if not test_data:
+            return
+        
+        # Test turini aniqlash (DB so'rovi YO'Q - test_data dan o'qish)
+        test_type_from_db = test_data.get('type', '') if test_data else ''
+        response_options = test_data.get('response_options', '') if test_data else ''
+        
+        # Qon guruhi testlarini aniqlash
+        test_name_lower = test_name.lower()
+        is_blood_group = False
+        if test_type_from_db == 'blood_group':
+            is_blood_group = True
+        elif any(keyword in test_name_lower for keyword in ['qon guruhi', 'qon guruh', 'rezus']):
+            is_blood_group = True
+        
+        # Agar response_options yoki qon guruhi bo'lsa, maxsus inline edit
+        if response_options and response_options.strip():
+            self.edit_result_inline_with_options(item, test_id, test_name, test_data, response_options=response_options)
+            return
+        elif is_blood_group:
+            self.edit_result_inline_with_options(item, test_id, test_name, test_data, is_blood_group=True)
+            return
+        
+        # Oddiy Entry widget yaratish
+        # Eski Entry ni yopish
+        if self.result_entry:
+            try:
+                self.result_entry.destroy()
+            except:
+                pass
+        
+        # Katakcha koordinatalarini olish
+        bbox = self.tests_tree.bbox(item, "#4")
+        if not bbox:
+            return
+        
+        # Entry widget yaratish - kattaroq va ko'rinadigan
+        self.result_entry = ttk.Entry(self.tests_tree, font=("Arial", 11))
+        # Katakcha kattaligini biroz kattalashtirish
+        entry_width = max(bbox[2], 200)
+        entry_height = max(bbox[3], 25)
+        self.result_entry.place(x=bbox[0], y=bbox[1], width=entry_width, height=entry_height)
+        
+        # Eski natijani ko'rsatish
+        old_result = self.test_results.get(test_id, "")
+        if old_result:
+            # JSON formatida bo'lsa, oddiy ko'rinishga o'tkazish
+            if isinstance(old_result, str) and old_result.strip().startswith('{'):
+                try:
+                    import json
+                    result_dict = json.loads(old_result)
+                    # Faqat birinchi qiymatni ko'rsatish
+                    first_value = list(result_dict.values())[0] if result_dict else ""
+                    self.result_entry.insert(0, str(first_value))
+                except:
+                    self.result_entry.insert(0, str(old_result))
+            else:
+                self.result_entry.insert(0, str(old_result))
+        
+        self.editing_item = item
+        self.editing_test_id = test_id
+        
+        # Focus va tanlash
+        self.result_entry.focus()
+        self.result_entry.select_range(0, tk.END)
+        
+        # Enter yoki Escape bosilganda
+        def on_enter(event):
+            self.save_inline_result()
+            self._navigate_to_item(item, direction='next')
+
+        def on_escape(event):
+            self.cancel_inline_edit()
+            self.tests_tree.focus_set()
+
+        def on_tab(event):
+            self.save_inline_result()
+            self._navigate_to_item(item, direction='next')
+            return "break"  # Tab eventini to'xtatish
+
+        def on_up(event):
+            self.save_inline_result()
+            self._navigate_to_item(item, direction='prev')
+            return "break"
+
+        def on_down(event):
+            self.save_inline_result()
+            self._navigate_to_item(item, direction='next')
+            return "break"
+
+        self.result_entry.bind("<Return>",  on_enter)
+        self.result_entry.bind("<Escape>",  on_escape)
+        self.result_entry.bind("<Tab>",     on_tab)
+        self.result_entry.bind("<Up>",      on_up)
+        self.result_entry.bind("<Down>",    on_down)
+        # FocusOut - faqat boshqa joyga o'tganda saqlash
+        self.result_entry.bind("<FocusOut>", lambda e: self.save_inline_result())
+    
+    def edit_result_inline_with_options(self, item, test_id, test_name, test_data, response_options=None, is_blood_group=False):
+        """Jadvalda variantlar bilan natija kiritish — Listbox (klaviatura to'liq qo'llab-quvvatlanadi)"""
+        import json
+
+        # Eski widget ni yopish
+        if self.result_entry:
+            try:
+                self.result_entry.destroy()
+            except:
+                pass
+
+        # Katakcha koordinatalarini olish
+        bbox = self.tests_tree.bbox(item, "#4")
+        if not bbox:
+            return
+
+        # Eski natijani olish
+        old_result = self.test_results.get(test_id, "")
+        old_result_value = ""
+        if old_result:
+            if isinstance(old_result, str) and old_result.strip().startswith('{'):
+                try:
+                    result_dict = json.loads(old_result)
+                    old_result_value = list(result_dict.values())[0] if result_dict else ""
+                except:
+                    old_result_value = str(old_result)
+            else:
+                old_result_value = str(old_result)
+
+        # Variantlarni aniqlash
+        if is_blood_group:
+            options = ["O(I) Rh+", "A(II) Rh+", "B(III) Rh+", "AB (IV) Rh+",
+                       "O(I) Rh-", "A(II) Rh-", "B(III) Rh-", "AB (IV) Rh-"]
+        elif response_options and response_options.strip():
+            options = [opt.strip() for opt in response_options.split(',')]
+        else:
+            self.edit_result_inline(item, test_id)
+            return
+
+        # ── Natijani xotirada saqlash ──────────────────────────────
+        def do_save(result):
+            if not result:
+                return
+            if is_blood_group:
+                if "Rh+" in result:
+                    qon_part = result.replace("Rh+", "").strip()
+                    rezus = "Rh+"
+                elif "Rh-" in result:
+                    qon_part = result.replace("Rh-", "").strip()
+                    rezus = "Rh-"
+                else:
+                    qon_part = result
+                    rezus = ""
+                result_data = {'qon_guruhi': qon_part, 'rezus_omil': rezus}
+            else:
+                result_data = {'result': result}
+            self.test_results[test_id] = json.dumps(result_data, ensure_ascii=False)
+            self.refresh_single_test_display(item, test_id)
+
+        # ── Popup yopish yordamchisi ───────────────────────────────
+        def close_popup(widget):
+            try:
+                widget.destroy()
+            except:
+                pass
+            self.result_entry  = None
+            self.editing_item  = None
+            self.editing_test_id = None
+
+        # ══════════════════════════════════════════════════════════
+        #  8 ta va undan kam variant  →  Listbox (klaviatura uchun)
+        # ══════════════════════════════════════════════════════════
+        if len(options) <= 8:
+            ROW_H   = 24
+            popup_w = max(bbox[2], 220)
+            popup_h = len(options) * ROW_H + 6
+
+            popup_frame = tk.Frame(
+                self.tests_tree,
+                bg="white",
+                relief=tk.SOLID,
+                borderwidth=1,
+                highlightthickness=1,
+                highlightbackground="#3377CC"
+            )
+            popup_frame.place(
+                x=bbox[0],
+                y=bbox[1] + bbox[3],
+                width=popup_w,
+                height=popup_h
+            )
+
+            listbox = tk.Listbox(
+                popup_frame,
+                font=("Arial", 10),
+                height=len(options),
+                selectbackground="#3377CC",
+                selectforeground="white",
+                activestyle="none",
+                borderwidth=0,
+                highlightthickness=0,
+                relief=tk.FLAT
+            )
+            listbox.pack(fill="both", expand=True, padx=1, pady=1)
+
+            for opt in options:
+                listbox.insert(tk.END, opt)
+
+            # Oldingi tanlovni ko'rsatish
+            default_idx = 0
+            if old_result_value:
+                try:
+                    default_idx = options.index(old_result_value)
+                except ValueError:
+                    default_idx = 0
+            listbox.selection_set(default_idx)
+            listbox.activate(default_idx)
+            listbox.see(default_idx)
+
+            # ── Saqlash va keyingi qatorga o'tish ─────────────────
+            def save_and_next(event=None):
+                sel = listbox.curselection()
+                if sel:
+                    do_save(options[sel[0]])
+                close_popup(popup_frame)
+                self._navigate_to_item(item, direction='next')
+                return "break"
+
+            # ── Saqlash va oldingi qatorga o'tish ─────────────────
+            def save_and_prev(event=None):
+                sel = listbox.curselection()
+                if sel:
+                    do_save(options[sel[0]])
+                close_popup(popup_frame)
+                self._navigate_to_item(item, direction='prev')
+                return "break"
+
+            # ── Bekor qilish ──────────────────────────────────────
+            def on_escape(event=None):
+                close_popup(popup_frame)
+                self.tests_tree.focus_set()
+                return "break"
+
+            # ── Yuqori chekda → oldingi qatorga o'tish ───────────
+            def on_up(event=None):
+                sel = listbox.curselection()
+                if sel and sel[0] == 0:
+                    return save_and_prev()
+                # Aks holda Listbox o'zi boshqaradi
+
+            # ── Quyi chekda → keyingi qatorga o'tish ─────────────
+            def on_down(event=None):
+                sel = listbox.curselection()
+                if sel and sel[0] == len(options) - 1:
+                    return save_and_next()
+                # Aks holda Listbox o'zi boshqaradi
+
+            # ── Fokus yo'qolganda popup yopilsin ──────────────────
+            def on_focus_out(event=None):
+                # Listbox dan fokus chiqsa, popup ni yopish
+                self.tests_tree.after(100, lambda: _check_focus_and_close())
+
+            def _check_focus_and_close():
+                try:
+                    focused = self.root.focus_get()
+                    # Agar fokus popup ichidagi widget da bo'lmasa — yopish
+                    if focused is not listbox and focused is not popup_frame:
+                        close_popup(popup_frame)
+                except Exception:
+                    close_popup(popup_frame)
+
+            listbox.bind("<Return>",   save_and_next)
+            listbox.bind("<Tab>",      save_and_next)
+            listbox.bind("<Escape>",   on_escape)
+            listbox.bind("<Double-1>", save_and_next)
+            listbox.bind("<Up>",       on_up)
+            listbox.bind("<Down>",     on_down)
+            listbox.bind("<FocusOut>", on_focus_out)
+
+            self.result_entry    = popup_frame
+            self.editing_item    = item
+            self.editing_test_id = test_id
+            listbox.focus_set()
+
+        # ══════════════════════════════════════════════════════════
+        #  8 tadan ko'p variant  →  Combobox (Enter/Tab ishlaydi)
+        # ══════════════════════════════════════════════════════════
+        else:
+            combo = ttk.Combobox(
+                self.tests_tree,
+                values=options,
+                state="readonly",
+                width=30,
+                font=("Arial", 11)
+            )
+            combo.place(
+                x=bbox[0],
+                y=bbox[1],
+                width=max(bbox[2], 250),
+                height=max(bbox[3], 25)
+            )
+            if old_result_value:
+                combo.set(old_result_value)
+
+            def on_combo_confirm(event=None):
+                result = combo.get()
+                do_save(result)
+                close_popup(combo)
+                self._navigate_to_item(item, direction='next')
+                return "break"
+
+            def on_combo_escape(event=None):
+                close_popup(combo)
+                self.tests_tree.focus_set()
+                return "break"
+
+            combo.bind("<<ComboboxSelected>>", on_combo_confirm)
+            combo.bind("<Return>",  on_combo_confirm)
+            combo.bind("<Tab>",     on_combo_confirm)
+            combo.bind("<Escape>",  on_combo_escape)
+            combo.focus()
+
+            self.result_entry    = combo
+            self.editing_item    = item
+            self.editing_test_id = test_id
+    
+    def save_inline_result(self):
+        """Inline natijani saqlash - yaxshilangan"""
+        if not self.result_entry or not self.editing_item:
+            return
+        
+        result = self.result_entry.get().strip()
+        test_id = self.editing_test_id
+        
+        # Test ma'lumotlarini olish
+        test_data = None
+        test_name = ""
+        for test in self.current_tests:
+            if test['id'] == test_id:
+                test_data = test
+                test_name = test.get('nomi', '')
+                break
+        
+        if not test_data:
+            return
+        
+        # Natijani saqlash - faqat UI da saqlash, status "Tayyor" ga o'rnatish
+        # Bazaga saqlash "Saqlash" tugmasi bosilganda qilinadi
+        if result:
+            self.test_results[test_id] = result
+        else:
+            self.test_results.pop(test_id, None)
+        
+        # Jadvalni yangilash - faqat o'zgartirilgan qatorni
+        self.refresh_single_test_display(self.editing_item, test_id)
+        
+        # Entry ni yopish
+        try:
+            self.result_entry.destroy()
+        except:
+            pass
+        self.result_entry = None
+        self.editing_item = None
+        self.editing_test_id = None
+    
+    def refresh_single_test_display(self, item, test_id):
+        """Bitta tahlilni jadvalda yangilash"""
+        try:
+            # Test ma'lumotlarini topish
+            test_data = None
+            for test in self.current_tests:
+                if test['id'] == test_id:
+                    test_data = test
+                    break
+            
+            if not test_data:
+                return
+            
+            test_name = test_data.get('nomi', 'N/A')
+            # test_type None bo'lishi mumkin, shuning uchun xavfsiz tekshirish
+            test_type_raw = test_data.get('test_type') or ''
+            test_type = str(test_type_raw).upper() if test_type_raw else ''
+            
+            # Natijani olish
+            result_value = self.test_results.get(test_id, "")
+            
+            # Statusni aniqlash - natija bo'lsa "Tayyor", yo'q bo'lsa "Kutilmoqda"
+            # Bazaga saqlanganda "Saqlandi" ga o'zgaradi
+            status = "⏳ Kutilmoqda"
+            status_tag = 'kutilmoqda'
+            if result_value:
+                status = "[OK] Tayyor"
+                status_tag = 'tayyor'
+            
+            # Norma olish
+            jins = self.current_bemor_data.get('jins', '') if self.current_bemor_data else ''
+            yosh = self.current_bemor_data.get('yosh', None) if self.current_bemor_data else None
+            try:
+                yosh_int = int(yosh) if yosh else None
+            except:
+                yosh_int = None
+            
+            emizikli_flag = self.current_bemor_data.get('emizikli', 0) if self.current_bemor_data else 0
+            cycle_note_val = (self.current_bemor_data.get('cycle_note', '') or '') if self.current_bemor_data else ''
+            menopauza_flag = self.current_bemor_data.get('menopauza', 0) if self.current_bemor_data else 0
+            homiladorlik_hafta_val = self.current_bemor_data.get('homiladorlik_hafta', None) if self.current_bemor_data else None
+            norma_info = get_test_norma(test_name, jins, test_type, yosh_int,
+                                        tahlil_id=test_data.get('tahlil_id'),
+                                        emizikli=emizikli_flag, cycle_note=cycle_note_val,
+                                        menopauza=menopauza_flag, homiladorlik_hafta=homiladorlik_hafta_val)
+            norma_text = norma_info.get("norma", "-")
+
+            # Qator raqamini olish
+            current_values = self.tests_tree.item(item, 'values')
+            row_num = current_values[0] if current_values else ""
+            
+            # Natijani formatlash (JSON bo'lsa)
+            display_result = result_value
+            if isinstance(result_value, str) and result_value.strip().startswith('{'):
+                try:
+                    import json
+                    result_dict = json.loads(result_value)
+                    json_type = result_dict.get('type', '')
+
+                    if json_type in ('urine', 'hematology', 'hematology_cbc'):
+                        # Siydik / Gemotologiya:
+                        # Natija ustunida Sample ID (yoki Sample NO) ko'rinadi
+                        sid = result_dict.get('sid', '')
+                        sno = result_dict.get('sno', '')
+                        display_result = sid if sid else sno if sno else result_dict.get('result', '')
+                        # Norma ustunida "Natijani ko'rish" tugmasi
+                        norma_text = "Natijani ko'rish"
+
+                    elif 'result' in result_dict:
+                        # Bioximiya va boshqa analizatorlar:
+                        # Natija ustunida faqat result qiymati ko'rinadi
+                        display_result = str(result_dict['result'])
+                        # norma_text DB dan olingan qiymatida qoladi
+
+                    else:
+                        # Eski CBC format (source: BC-20S, WBC: ..., ...):
+                        # source va barcha parametrlarni ko'rsatish
+                        source = result_dict.get('source', '')
+                        skip = {'source', 'sid', 'sno', 'type', 'result'}
+                        parts = [f"{k}: {v}" for k, v in result_dict.items() if k not in skip and v]
+                        display_result = source + (" | " + ", ".join(parts) if parts else "")
+                        norma_text = "Natijani ko'rish"
+                except Exception:
+                    pass
+
+            # Qatorni yangilash
+            self.tests_tree.item(item, values=(
+                row_num,
+                test_name,
+                status,
+                display_result,
+                norma_text
+            ), tags=(str(test_id), status_tag))
+        except Exception as e:
+            print(f"[OGOHLANTIRISH] Jadvalni yangilashda xato: {e}")
+            # Agar xato bo'lsa, butun jadvalni qayta yuklash
+            self.load_tests()
+    
+    def cancel_inline_edit(self):
+        """Inline editni bekor qilish"""
+        if self.result_entry:
+            try:
+                self.result_entry.destroy()
+            except:
+                pass
+        self.result_entry = None
+        self.editing_item = None
+    
+    def on_test_double_click(self, event):
+        """Testga 2 marta bosilganda natija kiritish - on_test_cell_edit ga yo'naltirish"""
+        # on_test_cell_edit barcha maxsus testlarni (ginekologik, qon guruhi, express) to'g'ri boshqaradi
+        self.on_test_cell_edit(event)
+
+    # ──────────────────────────────────────────────────────────────────────────
+    #  EXCEL-USULI KLAVIATURA NAVIGATSIYASI
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def on_tree_nav_up(self, event):
+        """Treeview'da yuqori qatorga o'tish (edit ochilmaydi)"""
+        # Agar edit widget ochiq bo'lsa, ignore
+        if self.result_entry:
+            return "break"
+        sel = self.tests_tree.selection()
+        if sel:
+            prev_item = self.tests_tree.prev(sel[0])
+            if prev_item:
+                self.tests_tree.selection_set(prev_item)
+                self.tests_tree.focus(prev_item)
+                self.tests_tree.see(prev_item)
+        return "break"
+
+    def on_tree_nav_down(self, event):
+        """Treeview'da quyi qatorga o'tish (edit ochilmaydi)"""
+        if self.result_entry:
+            return "break"
+        sel = self.tests_tree.selection()
+        if sel:
+            next_item = self.tests_tree.next(sel[0])
+            if next_item:
+                self.tests_tree.selection_set(next_item)
+                self.tests_tree.focus(next_item)
+                self.tests_tree.see(next_item)
+        return "break"
+
+    def on_tree_open_edit(self, event):
+        """Enter / Right / Left — tanlangan qator uchun natija kiritish oynasini ochish"""
+        if self.result_entry:
+            return "break"
+        sel = self.tests_tree.selection()
+        if sel:
+            self._open_edit_for_item(sel[0])
+        return "break"
+
+    def _navigate_to_item(self, item, direction='next', delay=80):
+        """Keyingi (yoki oldingi) qatorga o'tib, tegishli edit ochish.
+        Barcha test turlari (express, qon guruhi, bilirubin, ginekologik) to'g'ri ochiladi."""
+        try:
+            target = self.tests_tree.next(item) if direction == 'next' else self.tests_tree.prev(item)
+            if target:
+                self.tests_tree.selection_set(target)
+                self.tests_tree.focus(target)
+                self.tests_tree.see(target)
+                self.root.after(delay, lambda: self._open_edit_for_item(target))
+            else:
+                # Jadval oxiri/boshi — fokusni treeview'ga qaytarish
+                self.tests_tree.focus_set()
+        except Exception:
+            pass
+
+    def _open_edit_for_item(self, item):
+        """Berilgan item uchun to'g'ri edit widgetini ochish (klaviatura uchun markaziy router)"""
+        item_data = self.tests_tree.item(item)
+        tag = item_data['tags'][0] if item_data['tags'] else None
+        if not tag:
+            return
+
+        tag_str = str(tag)
+
+        # ── Bilirubin subqatorlari (test_id_umumiy / bog_langan / erkin) ──────
+        if "_" in tag_str:
+            parts = tag_str.split("_", 1)
+            try:
+                test_id = int(parts[0])
+            except ValueError:
+                return
+            test_data, test_name = None, ""
+            for t in self.current_tests:
+                if t['id'] == test_id:
+                    test_data = t
+                    test_name = t.get('nomi', '')
+                    break
+            if test_data:
+                result_template = self.get_result_template_from_db(test_name)
+                if not result_template and 'bilirubin' in test_name.lower():
+                    result_template = {
+                        "type": "multi_component",
+                        "components": [
+                            {"name": "Umumiy bilirubin",   "key": "umumiy",     "unit": "мкмоль/л", "readonly": False},
+                            {"name": "Bog'langan bilirubin","key": "bog_langan", "unit": "мкмоль/л", "readonly": False},
+                            {"name": "Erkin bilirubin",     "key": "erkin",      "unit": "мкмоль/л", "readonly": True,
+                             "formula": "umumiy - bog_langan"}
+                        ]
+                    }
+                if result_template:
+                    self.show_template_based_dialog(test_id, test_name, test_data, result_template)
+            return
+
+        # ── Oddiy test ────────────────────────────────────────────────────────
+        try:
+            test_id = int(tag_str)
+        except ValueError:
+            return
+
+        test_data, test_name = None, ""
+        for t in self.current_tests:
+            if t['id'] == test_id:
+                test_data = t
+                test_name = t.get('nomi', '')
+                break
+        if not test_data:
+            return
+
+        tname_lower      = test_name.lower()
+        type_from_norma  = (test_data.get('type') or '').strip().lower()
+        response_options = (test_data.get('response_options') or '').strip()
+
+        # 1. Qon guruhi
+        if type_from_norma == 'blood_group' or any(k in tname_lower for k in ['qon guruhi', 'rezus']):
+            self.edit_result_inline_with_options(item, test_id, test_name, test_data, is_blood_group=True)
+            return
+
+        # 1.5. Maxsus tkinter dialog lar (har bir tahlil uchun alohida oyna)
+        if any(k in tname_lower for k in ['brutsellez', 'heddelson', 'xeddelson', 'rayta', 'wright']):
+            self.show_brusellez_form(test_id, test_name, test_data)
+            return
+        if 'najas' in tname_lower:
+            self.show_najas_form(test_id, test_name, test_data)
+            return
+        if 'pepsinogen' in tname_lower:
+            self.show_pepsinogen_form(test_id, test_name, test_data)
+            return
+        if any(k in tname_lower for k in ['nechiporenko', 'nicheporenko']):
+            self.show_nechiporenko_form(test_id, test_name, test_data)
+            return
+        if any(k in tname_lower for k in ['zimnitskiy', 'зимницкий']):
+            self.show_zimnitskiy_form(test_id, test_name, test_data)
+            return
+        if 'spermogramma' in tname_lower:
+            self.show_spermogramma_form(test_id, test_name, test_data)
+            return
+        if 'torch' in tname_lower:
+            self.show_torch_form(test_id, test_name, test_data)
+            return
+        if any(k in tname_lower for k in ['urologik', 'mujskoy', 'erkaklar']):
+            self.show_urologik_form(test_id, test_name, test_data)
+            return
+
+        # 2. Ginekologik surtma
+        if any(k in tname_lower for k in ['ginekolog', 'surtma', 'mazok']):
+            self.show_ginekologik_form(test_id, test_name, test_data)
+            return
+
+        # 3. Express (Manfiy / Musbat) — nom yoki tur bo'yicha
+        # IFA/ИФА testlarida raqamli natija kiritiladi — Manfiy/Musbat ko'rsatilmaydi
+        _is_ifa_t = 'ifa' in tname_lower or 'ифа' in tname_lower
+        if not _is_ifa_t and (type_from_norma in ('positive_negative', 'express', 'ekspress') or
+                any(k in tname_lower for k in ['gepatit', 'hbsag', 'hcv', 'rw ', 'sifilis', 'ekspress', 'hiv'])):
+            self.edit_result_inline_with_options(
+                item, test_id, test_name, test_data,
+                response_options='Manfiy (-),Musbat (+)'
+            )
+            return
+
+        # 4. response_options bor bo'lsa
+        if response_options:
+            self.edit_result_inline_with_options(item, test_id, test_name, test_data,
+                                                  response_options=response_options)
+            return
+
+        # 5. Bilirubin / multi-component template
+        result_template = self.get_result_template_from_db(test_name)
+        if result_template or 'bilirubin' in tname_lower:
+            if not result_template:
+                result_template = {
+                    "type": "multi_component",
+                    "components": [
+                        {"name": "Umumiy bilirubin",   "key": "umumiy",     "unit": "мкмоль/л", "readonly": False},
+                        {"name": "Bog'langan bilirubin","key": "bog_langan", "unit": "мкмоль/л", "readonly": False},
+                        {"name": "Erkin bilirubin",     "key": "erkin",      "unit": "мкмоль/л", "readonly": True,
+                         "formula": "umumiy - bog_langan"}
+                    ]
+                }
+            self.show_template_based_dialog(test_id, test_name, test_data, result_template)
+            return
+
+        # 5.5. KOAGULOGRAMMA / Protrombin uchun multi-component dialog
+        if any(k in tname_lower for k in ['koagulogramma', 'koagul', 'protrombin', 'prothrombin', 'pt/mno', 'pti, pt']):
+            _coag_components = [
+                {"name": "PT sekundalarda",       "key": "pt_sek",   "unit": "sek", "norma": "13-15",    "readonly": False},
+                {"name": "PT bo'yicha Kviku (%)", "key": "pt_kviku", "unit": "%",   "norma": "70-100",   "readonly": False},
+                {"name": "MNO / INR",             "key": "pt_mno",   "unit": "INR", "norma": "0.9-1.15", "readonly": False},
+            ]
+            if any(k in tname_lower for k in ['koagulogramma', 'koagul']):
+                _coag_components += [
+                    {"name": "TT (Tromboplastin vaqti)", "key": "tt",         "unit": "sek", "norma": "11-18",   "readonly": False},
+                    {"name": "ACHTV",                    "key": "achtv",      "unit": "sek", "norma": "25-40",   "readonly": False},
+                    {"name": "Fibrinogen",               "key": "fibrinogen", "unit": "g/l", "norma": "2.0-4.0", "readonly": False},
+                ]
+            self.show_template_based_dialog(test_id, test_name, test_data,
+                                            {"type": "multi_component", "components": _coag_components})
+            return
+
+        # 6. Oddiy raqamli / matnli natija
+        self.edit_result_inline(item, test_id)
+
+    def show_result_input_dialog(self, test_id):
+        """Natija kiritish dialog - maxsus testlar uchun alohida UI"""
+        # Test nomini topish
+        test_name = "Tahlil"
+        test_data = None
+        for test in self.current_tests:
+            if test['id'] == test_id:
+                test_name = test.get('nomi', 'Tahlil')
+                test_data = test
+                break
+        
+        # Maxsus testlarni tekshirish
+        test_name_lower = test_name.lower()
+        
+        # Qon guruhi va rezus omili uchun maxsus UI
+        if any(keyword in test_name_lower for keyword in ['qon guruhi', 'qon guruh', 'rezus', 'резус', 'guruh', 'группа']):
+            self.show_blood_group_dialog(test_id, test_name, test_data)
+            return
+
+        # Maxsus tkinter dialog lar
+        if any(k in test_name_lower for k in ['brutsellez', 'heddelson', 'xeddelson', 'rayta', 'wright']):
+            self.show_brusellez_form(test_id, test_name, test_data)
+            return
+        if 'najas' in test_name_lower:
+            self.show_najas_form(test_id, test_name, test_data)
+            return
+        if 'pepsinogen' in test_name_lower:
+            self.show_pepsinogen_form(test_id, test_name, test_data)
+            return
+        if any(k in test_name_lower for k in ['nechiporenko', 'nicheporenko']):
+            self.show_nechiporenko_form(test_id, test_name, test_data)
+            return
+        if any(k in test_name_lower for k in ['zimnitskiy', 'зимницкий']):
+            self.show_zimnitskiy_form(test_id, test_name, test_data)
+            return
+        if _is_gtt_test(test_name_lower):
+            self.show_gtt_form(test_id, test_name, test_data)
+            return
+        if 'spermogramma' in test_name_lower:
+            self.show_spermogramma_form(test_id, test_name, test_data)
+            return
+        if 'torch' in test_name_lower:
+            self.show_torch_form(test_id, test_name, test_data)
+            return
+        if any(k in test_name_lower for k in ['urologik', 'mujskoy', 'erkaklar']):
+            self.show_urologik_form(test_id, test_name, test_data)
+            return
+        if 'qondan' in test_name_lower and 'mazok' in test_name_lower:
+            self.show_qondan_mazok_form(test_id, test_name, test_data)
+            return
+        if any(k in test_name_lower for k in ['ginekolog', 'surtma', 'mazok']):
+            self.show_ginekologik_form(test_id, test_name, test_data)
+            return
+
+        # Bazadan result_template ni olish
+        result_template = self.get_result_template_from_db(test_name)
+
+        # REVMOPROBA uchun maxsus dialog (qo'lda va avtomat — 3 ta komponentli)
+        # Bu blok result_template tekshirishidan OLDIN bo'lishi kerak (options inject qilish uchun)
+        if 'revmoproba' in test_name_lower or ('revmo' in test_name_lower and 'proba' in test_name_lower):
+            is_auto = 'avtomat' in test_name_lower
+            sfx = " avtomat" if is_auto else ""
+            _javob_variantlari = [
+                'Manfiy (-)', 'Musbat (+/-)', 'Musbat (+)', 'Musbat (++)', 'Musbat (+++)'
+            ]
+            if not result_template:
+                result_template = {
+                    "type": "multi_component",
+                    "components": [
+                        {"name": f"CRP (S-reaktivniy belok){sfx}",  "key": "crp",  "unit": "mg/l",
+                         "norma": "Manfiy (-)", "readonly": False},
+                        {"name": f"RF (Revmatoidniy faktor){sfx}",  "key": "rf",   "unit": "ME/ml",
+                         "norma": "Manfiy (-)", "readonly": False},
+                        {"name": f"ASLO (Antistreptolizin-O){sfx}", "key": "aslo", "unit": "ME/ml",
+                         "norma": "Manfiy (-)", "readonly": False},
+                    ]
+                }
+            else:
+                # DB dan kelgan template bo'lsa ham, tartibni CRP, RF, ASLO ga majburlash
+                _comps = result_template.get('components', [])
+                _by_key = {c.get('key'): c for c in _comps}
+                _ordered = []
+                for _k in ['crp', 'rf', 'aslo']:
+                    if _k in _by_key:
+                        _ordered.append(_by_key[_k])
+                # Tartibda bo'lmagan boshqa komponentlarni oxiriga qo'shish
+                for _c in _comps:
+                    if _c.get('key') not in ('crp', 'rf', 'aslo'):
+                        _ordered.append(_c)
+                if _ordered:
+                    result_template['components'] = _ordered
+            # Qo'lda testlar uchun har bir komponentga options (Combobox uchun) inject qilish
+            if not is_auto:
+                for _comp in result_template.get('components', []):
+                    if 'options' not in _comp:
+                        _comp['options'] = _javob_variantlari
+            self.show_template_based_dialog(test_id, test_name, test_data, result_template)
+            return
+
+        # Bilirubin kabi bir nechta komponentli tahlillar uchun maxsus UI
+        if result_template:
+            self.show_template_based_dialog(test_id, test_name, test_data, result_template)
+            return
+
+        # Bilirubin uchun maxsus tekshirish (agar bazada template bo'lmasa)
+        if any(keyword in test_name_lower for keyword in ['bilirubin', 'билирубин']):
+            if not result_template:
+                result_template = {
+                    "type": "multi_component",
+                    "components": [
+                        {"name": "Umumiy bilirubin",    "key": "umumiy",     "unit": "мкмоль/л",
+                         "norma": "3.4-20.5", "readonly": False},
+                        {"name": "Bog'langan bilirubin", "key": "bog_langan", "unit": "мкмоль/л",
+                         "norma": "0.86-5.3", "readonly": False},
+                        {"name": "Erkin bilirubin",      "key": "erkin",      "unit": "мкмоль/л",
+                         "norma": "1.7-17.1", "readonly": True, "formula": "umumiy - bog_langan"},
+                    ]
+                }
+            self.show_template_based_dialog(test_id, test_name, test_data, result_template)
+            return
+
+        # KOAGULOGRAMMA uchun maxsus dialog
+        if 'koagulogramma' in test_name_lower or 'koagul' in test_name_lower:
+            if not result_template:
+                result_template = {
+                    "type": "multi_component",
+                    "components": [
+                        {"name": "PT sekundalarda",          "key": "pt_sek",     "unit": "sek",
+                         "norma": "13-15",      "readonly": False},
+                        {"name": "PT bo'yicha Kviku (%)",    "key": "pt_kviku",   "unit": "%",
+                         "norma": "70-100",     "readonly": False},
+                        {"name": "MNO / INR",                "key": "pt_mno",     "unit": "INR",
+                         "norma": "0.9-1.15",   "readonly": False},
+                        {"name": "TT (Tromboplastin vaqti)", "key": "tt",         "unit": "sek",
+                         "norma": "11-18",      "readonly": False},
+                        {"name": "ACHTV",                    "key": "achtv",      "unit": "sek",
+                         "norma": "25-40",      "readonly": False},
+                        {"name": "Fibrinogen",               "key": "fibrinogen", "unit": "g/l",
+                         "norma": "2.0-4.0",   "readonly": False},
+                    ]
+                }
+            self.show_template_based_dialog(test_id, test_name, test_data, result_template)
+            return
+
+        # PT (Protrombin) alohida test bo'lsa 3 ta sub-qiymat
+        if any(k in test_name_lower for k in ['protrombin', 'prothrombin', 'pt/mno', 'pt (', 'pt sek']):
+            if not result_template:
+                result_template = {
+                    "type": "multi_component",
+                    "components": [
+                        {"name": "PT sekundalarda",       "key": "pt_sek",   "unit": "sek",
+                         "norma": "13-15",    "readonly": False},
+                        {"name": "PT bo'yicha Kviku (%)", "key": "pt_kviku", "unit": "%",
+                         "norma": "70-100",   "readonly": False},
+                        {"name": "MNO / INR",             "key": "pt_mno",   "unit": "INR",
+                         "norma": "0.9-1.15", "readonly": False},
+                    ]
+                }
+            self.show_template_based_dialog(test_id, test_name, test_data, result_template)
+            return
+        
+        # Individual COAG sub-testlar: to'liq koagulogramma dialogi
+        _COAG_SUB_KEYS = [
+            'pt sekundalarda', "pt bo'yicha kviku", 'mno / inr', 'mno/inr',
+            'tromboplastin vaqti', 'achtv', 'fibrinogen',
+        ]
+        if any(k in test_name_lower for k in _COAG_SUB_KEYS):
+            _koag_tmpl = {
+                "type": "multi_component",
+                "components": [
+                    {"name": "PT sekundalarda",          "key": "pt_sek",     "unit": "sek", "norma": "13-15",    "readonly": False},
+                    {"name": "PT bo'yicha Kviku (%)",    "key": "pt_kviku",   "unit": "%",   "norma": "70-100",   "readonly": False},
+                    {"name": "MNO / INR",                "key": "pt_mno",     "unit": "INR", "norma": "0.9-1.15", "readonly": False},
+                    {"name": "TT (Tromboplastin vaqti)", "key": "tt",         "unit": "sek", "norma": "11-18",    "readonly": False},
+                    {"name": "ACHTV",                    "key": "achtv",      "unit": "sek", "norma": "25-40",    "readonly": False},
+                    {"name": "Fibrinogen",               "key": "fibrinogen", "unit": "g/l", "norma": "2.0-4.0",  "readonly": False},
+                ]
+            }
+            self.show_template_based_dialog(test_id, "KOAGULOGRAMMA", test_data, _koag_tmpl)
+            return
+
+        # Oddiy natija kiritish dialog
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Natija Kiriting")
+        dialog.geometry("400x250")
+        dialog.transient(self.root)
+        
+        ttk.Label(dialog, text=f"Tahlil: {test_name}", font=("Arial", 12, "bold")).pack(pady=10)
+        
+        ttk.Label(dialog, text="Natija:").pack(pady=5)
+        result_entry = ttk.Entry(dialog, width=40, font=("Arial", 12))
+        result_entry.pack(pady=5)
+        result_entry.focus()
+        
+        # Eski natijani ko'rsatish
+        old_result = self.test_results.get(test_id, "")
+        if old_result:
+            result_entry.insert(0, old_result)
+        
+        def save_and_close():
+            result = result_entry.get().strip()
+            if result:
+                self.test_results[test_id] = result
+
+                # DB ga ham darhol saqlash (qayta tahrirlash imkonini berish uchun)
+                if self.current_order_id:
+                    try:
+                        self.save_test_result(self.current_order_id, test_name,
+                                              {'result': result}, 'numeric')
+                        self.is_saved = False
+                    except Exception as _e:
+                        print(f"[OGOHLANTIRISH] Dialog dan DB ga saqlashda xato: {_e}")
+
+                self.load_tests()  # Yangilash
+                dialog.destroy()
+                self.status_var.set(f"[OK] Natija saqlandi: {test_name}")
+
+        ttk.Button(dialog, text="[SAQLASH] Saqlash", command=save_and_close).pack(pady=10)
+        result_entry.bind("<Return>", lambda e: save_and_close())
+
+    def show_blood_group_dialog(self, test_id, test_name, test_data):
+        """Qon guruhi va rezus omili uchun maxsus dialog"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Qon Guruhi va Rezus Omili")
+        dialog.geometry("600x400")
+        dialog.transient(self.root)
+        dialog.grab_set()  # Modal dialog qilish
+        
+        # Asosiy container
+        main_container = ttk.Frame(dialog, padding="20")
+        main_container.pack(fill=tk.BOTH, expand=True)
+        
+        # Sarlavha
+        title_label = ttk.Label(main_container, text=test_name, font=("Arial", 14, "bold"))
+        title_label.pack(pady=(0, 20))
+        
+        # Qon guruhi tanlash
+        group_frame = ttk.LabelFrame(main_container, text="Qon Guruhi", padding="20")
+        group_frame.pack(pady=10, padx=20, fill=tk.X)
+        
+        qon_guruh_var = tk.StringVar(value="")
+        # Qon guruhlari: faqat 4 ta variant (rim raqamlari bilan)
+        qon_guruhs = [
+            ("I(0)", "1(0)"),   # Rim va arab raqamlari
+            ("II(A)", "2(A)"),
+            ("III(B)", "3(B)"),
+            ("IV(AB)", "4(AB)")
+        ]
+        
+        # Radio buttonlar uchun container
+        radio_container = ttk.Frame(group_frame)
+        radio_container.pack(fill=tk.X)
+        
+        for i, (rim_format, arab_format) in enumerate(qon_guruhs):
+            # Ko'rsatish uchun rim raqamlari bilan, lekin qiymat sifatida arab raqamlari bilan saqlaymiz
+            # ttk.Radiobutton da font parametri ishlamaydi, shuning uchun tk.Radiobutton ishlatamiz
+            rb = tk.Radiobutton(
+                radio_container,
+                text=rim_format,  # Ko'rsatish: I(0), II(A), III(B), IV(AB)
+                variable=qon_guruh_var,
+                value=arab_format,  # Qiymat: 1(0), 2(A), 3(B), 4(AB)
+                font=("Arial", 12)
+            )
+            rb.grid(row=0, column=i, padx=15, pady=10, sticky=tk.W)
+        
+        # Rezus omili tanlash
+        rezus_frame = ttk.LabelFrame(main_container, text="Rezus Omili", padding="20")
+        rezus_frame.pack(pady=10, padx=20, fill=tk.X)
+        
+        rezus_var = tk.StringVar(value="")
+        
+        # Rezus radio buttonlar uchun container
+        rezus_container = ttk.Frame(rezus_frame)
+        rezus_container.pack(fill=tk.X)
+        
+        # ttk.Radiobutton da font parametri ishlamaydi, shuning uchun tk.Radiobutton ishlatamiz
+        tk.Radiobutton(
+            rezus_container,
+            text="Rh+ (Rezus Musbat)",
+            variable=rezus_var,
+            value="Rh+",
+            font=("Arial", 12)
+        ).pack(side=tk.LEFT, padx=30, pady=10)
+        
+        tk.Radiobutton(
+            rezus_container,
+            text="Rh- (Rezus Manfiy)",
+            variable=rezus_var,
+            value="Rh-",
+            font=("Arial", 12)
+        ).pack(side=tk.LEFT, padx=30, pady=10)
+        
+        # Eski natijani yuklash
+        old_result = self.test_results.get(test_id, "")
+        if old_result:
+            # Natijani parse qilish (turli formatlar: "1(0) Rh+", "I(0) Rh+", "1(0)+", "I (0)+" va h.k.)
+            old_result_clean = old_result.strip()
+            
+            # Rh+ yoki Rh- ni topish
+            if "Rh+" in old_result_clean:
+                rezus_var.set("Rh+")
+                group_part = old_result_clean.replace("Rh+", "").strip()
+            elif "Rh-" in old_result_clean:
+                rezus_var.set("Rh-")
+                group_part = old_result_clean.replace("Rh-", "").strip()
+            elif old_result_clean.endswith("+") or " +" in old_result_clean:
+                rezus_var.set("Rh+")
+                group_part = old_result_clean.replace("+", "").strip()
+            elif old_result_clean.endswith("-") or " -" in old_result_clean:
+                rezus_var.set("Rh-")
+                group_part = old_result_clean.replace("-", "").strip()
+            else:
+                group_part = old_result_clean
+            
+            # Qon guruhini topish (rim yoki arab raqamlari bilan)
+            # Rim raqamlari bilan tekshirish
+            if "I(0)" in group_part or "I (0)" in group_part or "1(0)" in group_part or "1 (0)" in group_part:
+                qon_guruh_var.set("1(0)")
+            elif "II(A)" in group_part or "II (A)" in group_part or "2(A)" in group_part or "2 (A)" in group_part:
+                qon_guruh_var.set("2(A)")
+            elif "III(B)" in group_part or "III (B)" in group_part or "3(B)" in group_part or "3 (B)" in group_part:
+                qon_guruh_var.set("3(B)")
+            elif "IV(AB)" in group_part or "IV (AB)" in group_part or "4(AB)" in group_part or "4 (AB)" in group_part:
+                qon_guruh_var.set("4(AB)")
+        
+        def save_and_close():
+            qon_guruh = qon_guruh_var.get()  # 1(0), 2(A), 3(B), 4(AB)
+            rezus = rezus_var.get()  # Rh+ yoki Rh-
+            
+            if not qon_guruh:
+                messagebox.showwarning("Diqqat", "Qon guruhini tanlang!")
+                return
+            
+            if not rezus:
+                messagebox.showwarning("Diqqat", "Rezus omilini tanlang!")
+                return
+            
+            # Natijani formatlash: "1(0) Rh+" yoki "2(A) Rh-" (arab raqamlari bilan - oson tushuniladigan format)
+            result = f"{qon_guruh} {rezus}"
+            self.test_results[test_id] = result
+            self.load_tests()  # Yangilash
+            dialog.destroy()
+            self.status_var.set(f"[OK] Natija saqlandi: {test_name} = {result}")
+        
+        # Tugmalar
+        btn_frame = ttk.Frame(main_container)
+        btn_frame.pack(pady=30)
+        
+        ttk.Button(btn_frame, text="[SAQLASH] Saqlash", command=save_and_close, width=20).pack(side=tk.LEFT, padx=10)
+        ttk.Button(btn_frame, text="[XATO] Bekor qilish", command=dialog.destroy, width=20).pack(side=tk.LEFT, padx=10)
+        
+        # Dialog fokusini o'rnatish
+        dialog.focus_set()
+    
+    def get_result_template_from_db(self, test_name):
+        """Bazadan result_template ni olish"""
+        conn = db_conn()
+        if not conn:
+            return None
+        
+        try:
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute(
+                "SELECT result_template FROM tahlillar_norma WHERE tahlil_nomi = %s",
+                (test_name,)
+            )
+            result = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            
+            if result and result.get('result_template'):
+                import json
+                try:
+                    return json.loads(result['result_template'])
+                except:
+                    return None
+            return None
+        except Exception as e:
+            print(f"[OGOHLANTIRISH] Template olishda xato: {e}")
+            if 'conn' in locals():
+                try:
+                    conn.close()
+                except:
+                    pass
+            return None
+    
+    def open_shablon_with_tables(self, template_path):
+        """
+        Shablonni ochish oynasi - faqat jadvallarni ko'rsatadi
+        Word dokumentini ochib, barcha jadvallarni o'zgartirmasdan ko'rsatadi
+        """
+        if not template_path or not os.path.exists(template_path):
+            messagebox.showerror("Xatolik", f"Shablon fayli topilmadi:\n{template_path}")
+            return
+        
+        try:
+            # Word dokumentini ochish
+            doc = Document(template_path)
+            
+            # Dialog oynasi
+            dialog = tk.Toplevel(self.root)
+            dialog.title(f"Shablon: {os.path.basename(template_path)}")
+            dialog.geometry("1000x700")
+            dialog.transient(self.root)
+            dialog.grab_set()
+            
+            # Asosiy container
+            main_frame = ttk.Frame(dialog, padding="10")
+            main_frame.pack(fill=tk.BOTH, expand=True)
+            
+            # Sarlavha
+            title_label = ttk.Label(
+                main_frame, 
+                text=f"Shablon: {os.path.basename(template_path)}", 
+                font=("Arial", 14, "bold")
+            )
+            title_label.pack(pady=(0, 10))
+            
+            # Scrollbar bilan frame
+            canvas_frame = ttk.Frame(main_frame)
+            canvas_frame.pack(fill=tk.BOTH, expand=True)
+            
+            # Canvas va scrollbar
+            canvas = tk.Canvas(canvas_frame, bg="white")
+            scrollbar = ttk.Scrollbar(canvas_frame, orient="vertical", command=canvas.yview)
+            scrollable_frame = ttk.Frame(canvas)
+            
+            scrollable_frame.bind(
+                "<Configure>",
+                lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            )
+            
+            canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+            canvas.configure(yscrollcommand=scrollbar.set)
+            
+            canvas.pack(side="left", fill="both", expand=True)
+            scrollbar.pack(side="right", fill="y")
+            
+            # Jadvallarni ko'rsatish
+            tables_found = 0
+            for table_idx, table in enumerate(doc.tables):
+                tables_found += 1
+                
+                # Jadval uchun frame
+                table_frame = ttk.LabelFrame(
+                    scrollable_frame, 
+                    text=f"Jadval {table_idx + 1}",
+                    padding="10"
+                )
+                table_frame.pack(fill=tk.X, pady=10, padx=10)
+                
+                # Jadval ma'lumotlarini ko'rsatish
+                info_text = f"Qatorlar: {len(table.rows)}, Ustunlar: {len(table.columns)}\n\n"
+                
+                # Jadval matnini ko'rsatish
+                table_text = ""
+                for row_idx, row in enumerate(table.rows):
+                    row_data = []
+                    for cell in row.cells:
+                        cell_text = cell.text.strip()
+                        row_data.append(cell_text)
+                    table_text += " | ".join(row_data) + "\n"
+                    if row_idx == 0:  # Sarlavha qatori
+                        table_text += "-" * 80 + "\n"
+                
+                # Text widget
+                text_widget = tk.Text(
+                    table_frame, 
+                    wrap=tk.WORD, 
+                    height=min(len(table.rows) + 2, 15),
+                    width=100,
+                    font=("Courier New", 9)
+                )
+                text_widget.pack(fill=tk.BOTH, expand=True)
+                text_widget.insert("1.0", info_text + table_text)
+                text_widget.config(state=tk.DISABLED)  # Faqat o'qish uchun
+            
+            if tables_found == 0:
+                no_tables_label = ttk.Label(
+                    scrollable_frame,
+                    text="[OGOHLANTIRISH] Bu shablonda jadval topilmadi",
+                    font=("Arial", 12),
+                    foreground="orange"
+                )
+                no_tables_label.pack(pady=50)
+            else:
+                info_label = ttk.Label(
+                    scrollable_frame,
+                    text=f"[OK] Jami {tables_found} ta jadval topildi",
+                    font=("Arial", 10),
+                    foreground="green"
+                )
+                info_label.pack(pady=10)
+            
+            # Tugmalar
+            btn_frame = ttk.Frame(main_frame)
+            btn_frame.pack(pady=10)
+            
+            def open_in_word():
+                """Word da ochish"""
+                try:
+                    os.startfile(template_path)
+                    self.status_var.set(f"Shablon Word da ochildi: {os.path.basename(template_path)}")
+                except Exception as e:
+                    messagebox.showerror("Xatolik", f"Word da ochishda xato: {str(e)}")
+            
+            ttk.Button(btn_frame, text="Word da ochish", command=open_in_word, width=20).pack(side=tk.LEFT, padx=5)
+            ttk.Button(btn_frame, text="Yopish", command=dialog.destroy, width=20).pack(side=tk.LEFT, padx=5)
+            
+            # Mouse wheel scroll
+            def on_mousewheel(event):
+                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            canvas.bind_all("<MouseWheel>", on_mousewheel)
+            
+            dialog.focus_set()
+            
+        except Exception as e:
+            messagebox.showerror("Xatolik", f"Shablon ochishda xato: {str(e)}")
+            import traceback
+            traceback.print_exc()
+    
+    def get_standard_blank_path(self, test_name):
+        """
+        Bazadan standart blanka fayl yo'lini olish
+        tahlillar_norma jadvalidan standard_blank_path yoki shablon_fayl maydonini qidiradi
+        """
+        try:
+            conn = db_conn()
+            if not conn:
+                return None
+            
+            cursor = conn.cursor(dictionary=True)
+            # Avval standard_blank_path maydonini tekshirish
+            try:
+                cursor.execute(
+                    "SELECT standard_blank_path FROM tahlillar_norma WHERE tahlil_nomi = %s",
+                    (test_name,)
+                )
+                result = cursor.fetchone()
+                if result and result.get('standard_blank_path'):
+                    path = result['standard_blank_path'].strip()
+                    if path:
+                        # Yo'lni to'g'rilash (agar kerak bo'lsa)
+                        path = path.replace('/', '\\') if os.name == 'nt' else path.replace('\\', '/')
+                        if os.path.exists(path):
+                            cursor.close()
+                            conn.close()
+                            return path
+                        else:
+                            # Fayl topilmasa, lekin yo'l mavjud bo'lsa, qaytaramiz (foydalanuvchi to'g'rilashi mumkin)
+                            print(f"[OGOHLANTIRISH] Standart blanka fayl topilmadi: {path}")
+                            cursor.close()
+                            conn.close()
+                            return path  # Yo'lni qaytaramiz, chunki bazada saqlangan
+            except Exception as e:
+                # Agar standard_blank_path maydoni yo'q bo'lsa yoki xato bo'lsa
+                print(f"[OGOHLANTIRISH] standard_blank_path olishda xato: {e}")
+                pass
+            
+            # Agar topilmasa, shablon_ochish modulidan foydalanish (fallback)
+            template_path, template_name = get_template_for_test(test_name)
+            if template_path and os.path.exists(template_path):
+                cursor.close()
+                conn.close()
+                return template_path
+            
+            cursor.close()
+            conn.close()
+            return None
+        except Exception as e:
+            print(f"[OGOHLANTIRISH] Standart blanka yo'lini olishda xato: {e}")
+            import traceback
+            traceback.print_exc()
+            if 'conn' in locals():
+                try:
+                    conn.close()
+                except:
+                    pass
+            return None
+
+    def _open_word_template_dialog(self, test_id, test_name, template_path):
+        """Word shablon faylini bemor ma'lumotlari bilan ochish (BRUSELLYOZ, NAJAS, va h.k.)"""
+        import tkinter.filedialog as _fdia
+        order_info = {}
+        if self.current_bemor_data:
+            order_info = {
+                'sample_id': self.current_bemor_data.get('sample_id', ''),
+                'order_id': self.current_order_id,
+                'fish': self.current_bemor_data.get('fish', ''),
+                'yosh': self.current_bemor_data.get('yosh', ''),
+                'jins': self.current_bemor_data.get('jins', ''),
+                'tugilgan_sana': self.current_bemor_data.get('tugilgan_sana', ''),
+                'telefon': self.current_bemor_data.get('telefon', ''),
+                'shifokor': self.current_bemor_data.get('shifokor', ''),
+                'manzil': self.current_bemor_data.get('manzil', ''),
+            }
+        choice = messagebox.askyesnocancel(
+            "Standart Shablon",
+            f"Tahlil: {test_name}\n\n"
+            f"Shablon: {os.path.basename(template_path)}\n\n"
+            "Ha — shablonni ochish\nYo'q — boshqa faylni tanlash",
+            icon="question"
+        )
+        if choice is True:
+            try:
+                temp_path = open_template_with_patient_data(template_path, order_info)
+                os.startfile(temp_path)
+                self.status_var.set(f"Shablon ochildi: {os.path.basename(template_path)}")
+            except Exception as _e:
+                messagebox.showerror("Xatolik", f"Shablon ochishda xato: {str(_e)}")
+        elif choice is False:
+            file_path = _fdia.askopenfilename(
+                title="Shablon faylini tanlang",
+                filetypes=[("Word Documents", "*.docx"), ("All Files", "*.*")],
+                initialdir=os.path.dirname(template_path) if template_path else os.path.dirname(__file__)
+            )
+            if file_path:
+                try:
+                    temp_path = open_template_with_patient_data(file_path, order_info)
+                    os.startfile(temp_path)
+                    self.status_var.set(f"Shablon ochildi: {os.path.basename(file_path)}")
+                except Exception as _e:
+                    messagebox.showerror("Xatolik", f"Shablon ochishda xato: {str(_e)}")
+
+    def show_qondan_mazok_form(self, test_id, test_name, test_data):
+        """Qondan mazok (morfologiya) — CBC + morfologiya + avtomatik xulosa."""
+        import json, tkinter.ttk as ttk
+
+        # ── Eski natijani olish ──────────────────────────────────────────────
+        old = {}
+        _ex = self.test_results.get(test_id, '')
+        if _ex and str(_ex).strip().startswith('{'):
+            try: old = json.loads(str(_ex))
+            except Exception: old = {}
+
+        # ── CBC (Umumiy qon tahlili) ma'lumotlarini olish ────────────────────
+        cbc = {}
+        for _t in (self.current_tests or []):
+            if _is_hematology_cbc_test(_t.get('nomi', '')):
+                _raw = self.test_results.get(_t['id'], '')
+                if _raw and str(_raw).strip().startswith('{'):
+                    try: cbc = json.loads(str(_raw))
+                    except Exception: cbc = {}
+                break
+
+        def _fv(key):
+            """old_result yoki default bo'sh string"""
+            return str(old.get(key, '') or '')
+
+        def _cbc_val(kod):
+            v = cbc.get(kod)
+            if v is None: return ''
+            try: return f"{float(v):.2f}".rstrip('0').rstrip('.')
+            except: return str(v)
+
+        # ── Popup picker yordamchi ───────────────────────────────────────────
+        def _open_morfo_picker(parent_win, title, items, result_var):
+            """Checkbox + ixtiyoriy miqdor tanlash mini-oynasi (like urine tuzlar)."""
+            win = tk.Toplevel(parent_win)
+            win.title(title)
+            win.geometry("420x460")
+            win.resizable(False, True)
+            win.transient(parent_win)
+            win.grab_set()
+            tk.Label(win, text=title, font=("Arial", 11, "bold"),
+                     bg="#1a3a5c", fg="white").pack(fill="x", ipady=6)
+            tk.Label(win, text="Tanlang va miqdor kiriting (masalan: +, ++, +++, yo'q)",
+                     font=("Arial", 8), fg="#555").pack(pady=(3, 0), padx=6, anchor="w")
+            fo = tk.Frame(win); fo.pack(fill="both", expand=True, padx=6, pady=4)
+            cv2 = tk.Canvas(fo, highlightthickness=0)
+            sb2 = ttk.Scrollbar(fo, orient="vertical", command=cv2.yview)
+            cv2.configure(yscrollcommand=sb2.set)
+            sb2.pack(side="right", fill="y"); cv2.pack(side="left", fill="both", expand=True)
+            inner2 = tk.Frame(cv2, bg="white")
+            cv2.create_window((0, 0), window=inner2, anchor="nw")
+            inner2.bind("<Configure>", lambda e: cv2.configure(scrollregion=cv2.bbox("all")))
+            existing_txt = result_var.get().strip()
+            pre_map = {}
+            for part in existing_txt.split(','):
+                part = part.strip()
+                if '(' in part and part.endswith(')'):
+                    nm = part[:part.rfind('(')].strip(); qty = part[part.rfind('(') + 1:-1].strip()
+                    pre_map[nm.lower()] = qty
+                elif part and part != '-':
+                    pre_map[part.lower()] = ''
+            check_rows = []
+            last_grp = None
+            for item in items:
+                grp, nomi = item if isinstance(item, tuple) else (None, item)
+                if grp and grp != last_grp:
+                    tk.Label(inner2, text=f"  {grp}  ", font=("Arial", 8, "italic"),
+                             fg="white", bg="#4a7bab").pack(fill="x", pady=(5, 1))
+                    last_grp = grp
+                pqty = pre_map.get(nomi.lower(), None)
+                bv = tk.BooleanVar(value=(pqty is not None))
+                qv = tk.StringVar(value=(pqty or ''))
+                rf = tk.Frame(inner2, bg="white"); rf.pack(fill="x", pady=1, padx=4)
+                cb = tk.Checkbutton(rf, text=nomi, variable=bv, bg="white",
+                                    font=("Arial", 9), anchor="w", width=32)
+                cb.pack(side="left")
+                qe = tk.Entry(rf, textvariable=qv, width=8, font=("Arial", 9),
+                              relief=tk.SOLID, borderwidth=1)
+                qe.pack(side="left", padx=(3, 1))
+                tk.Label(rf, text="miqdor", bg="white", font=("Arial", 7),
+                         fg="#999").pack(side="left")
+                cb.configure(command=lambda bvv=bv, qee=qe: qee.focus_set() if bvv.get() else None)
+                check_rows.append((nomi, bv, qv))
+            def _confirm():
+                parts = []
+                for nm, bv, qv in check_rows:
+                    if bv.get():
+                        q = qv.get().strip()
+                        parts.append(f"{nm} ({q})" if q else nm)
+                result_var.set(', '.join(parts) if parts else '-')
+                win.destroy()
+            bf = tk.Frame(win, pady=5); bf.pack(fill="x", side="bottom")
+            tk.Button(bf, text="  Tasdiqlash  ", command=_confirm,
+                      bg="#28a745", fg="white", font=("Arial", 10, "bold"),
+                      padx=10, pady=3).pack(side="right", padx=8)
+            tk.Button(bf, text="Bekor", command=win.destroy,
+                      font=("Arial", 9)).pack(side="right", padx=4)
+
+        # ── Avtomatik xulosa generator (professional klinik tahlil) ─────────
+        def _auto_xulosa(morph_dict):
+            def _f(k):
+                try: return float(cbc.get(k) or 0)
+                except: return 0.0
+
+            hgb   = _f('HGB');   mcv  = _f('MCV');    mch  = _f('MCH')
+            mchc  = _f('MCHC');  rdw  = _f('RDW-CV'); rbc  = _f('RBC')
+            wbc   = _f('WBC');   gran = _f('GRAN%');   lym  = _f('LYM%')
+            plt_v = _f('PLT');   mpv  = _f('MPV');     nlr  = _f('NLR')
+
+            sentences = []   # asosiy gaplar
+            tavsiya   = []   # tavsiyalar
+            urgency   = []   # shoshilinch topilmalar
+
+            # ─── 1. GEMOGLOBIN / ERITROTSIT tahlili ─────────────────────────
+            if hgb > 0:
+                if hgb < 120:
+                    if mcv > 0 and mcv < 80 and mch > 0 and mch < 27:
+                        if rdw > 14.5:
+                            sentences.append(
+                                "Gemoglobin darajasi pasaygan ({:.0f} g/L), eritrotsitlar "
+                                "mayda (MCV {:.0f} fL) va rangpast (MCH {:.1f} pg); "
+                                "RDW oshgan ({:.1f}%) — mikrotsitar gipoxrom anemiya, "
+                                "temir tanqisligi anemiyasi ehtimoli yuqori".format(
+                                    hgb, mcv, mch, rdw))
+                            tavsiya.append("ferritin, serum temir (Fe), TIBC")
+                        else:
+                            sentences.append(
+                                "Gemoglobin pasaygan ({:.0f} g/L), eritrotsitlar mayda "
+                                "(MCV {:.0f} fL) va rangpast (MCH {:.1f} pg); RDW me'yor "
+                                "doirasida — mikrotsitar anemiya, talassemiya ehtimoli "
+                                "inkor qilinmaydi".format(hgb, mcv, mch))
+                            tavsiya.append("gemoglobin elektroforezi, ferritin")
+                    elif mcv > 0 and mcv > 100:
+                        sentences.append(
+                            "Gemoglobin pasaygan ({:.0f} g/L), eritrotsitlar yirik "
+                            "(MCV {:.0f} fL) — makrotsitar anemiya; B12 vitamini yoki "
+                            "folat kislota tanqisligi ehtimoli".format(hgb, mcv))
+                        tavsiya.append("vitamin B12, folat kislota")
+                    else:
+                        sentences.append(
+                            "Gemoglobin pasaygan ({:.0f} g/L), eritrotsitlar o'lchami "
+                            "me'yor doirasida — normositar anemiya; surunkali kasallik "
+                            "anemiyasi yoki boshqa sabab".format(hgb))
+                elif hgb > 160:
+                    sentences.append(
+                        "Gemoglobin oshgan ({:.0f} g/L) — eritrositoz / politsitemiya "
+                        "belgilari".format(hgb))
+                else:
+                    sentences.append(
+                        "Gemoglobin me'yor doirasida ({:.0f} g/L)".format(hgb))
+
+            # ─── 2. LEYKOTSITLAR tahlili ─────────────────────────────────────
+            if wbc > 0:
+                if wbc > 10.0:
+                    if gran > 75:
+                        leyk_s = (
+                            "Leykotsitlar oshgan (WBC {:.1f}×10⁹/L), neytrofillar "
+                            "ustunlik qilmoqda ({:.0f}%) — neytrofil leykotsitoz; "
+                            "bakterial infeksiya yoki o'tkir yallig'lanish ehtimoli".format(
+                                wbc, gran))
+                        if nlr > 3:
+                            leyk_s += " (NLR {:.1f} — yallig'lanish jarayoniga xos)".format(nlr)
+                        sentences.append(leyk_s)
+                        tavsiya.append("CRP, ESR")
+                    elif lym > 50:
+                        sentences.append(
+                            "Leykotsitlar oshgan (WBC {:.1f}×10⁹/L), limfotsitlar "
+                            "ustunlik qilmoqda ({:.0f}%) — limfositoz; o'tkir virus "
+                            "infeksiyasi yoki reaktiv o'zgarish ehtimoli".format(wbc, lym))
+                    else:
+                        sentences.append(
+                            "Leykotsitlar oshgan (WBC {:.1f}×10⁹/L) — leykotsitoz, "
+                            "sabab aniqlashtirish zarur".format(wbc))
+                elif wbc < 4.0:
+                    sentences.append(
+                        "Leykotsitlar kamaygan (WBC {:.1f}×10⁹/L) — leykopenia; "
+                        "virus infeksiyasi, immunosupressiya yoki dori ta'siri "
+                        "ehtimoli".format(wbc))
+
+            # ─── 3. CHAP SILJISH / MIELOSITLAR ───────────────────────────────
+            try:
+                tayoqcha = float(morph_dict.get('tayoqcha') or 0)
+                if tayoqcha > 6:
+                    sentences.append(
+                        "Tayoqcha yadroli neytrofillar oshgan ({:.0f}%) — chap siljish, "
+                        "faol bakterial infeksiya yoki toksik reaksiya belgilari".format(tayoqcha))
+            except: pass
+            try:
+                mielot = float(morph_dict.get('mielot') or 0)
+                if mielot > 0:
+                    urgency.append(
+                        "Surtmada mielositlar aniqlandi ({:.0f}%) — mieloproliferativ "
+                        "jarayon yoki og'ir infeksiya, gematolog maslahati zarur".format(mielot))
+            except: pass
+
+            # ─── 4. EOZINOFIL ────────────────────────────────────────────────
+            try:
+                eos = float(morph_dict.get('eozinofil') or 0)
+                if eos > 5:
+                    sentences.append(
+                        "Eozinofillar oshgan ({:.0f}%) — eozinofilia; "
+                        "allergiya, parazitar infeksiya yoki autoimmun jarayon "
+                        "ehtimoli".format(eos))
+            except: pass
+
+            # ─── 5. TROMBOTSITLAR ────────────────────────────────────────────
+            if plt_v > 0:
+                if plt_v > 450:
+                    mpv_s = ("; MPV {:.1f} fL".format(mpv)) if mpv > 0 else ""
+                    sentences.append(
+                        "Trombotsitlar oshgan (PLT {:.0f}×10⁹/L{}) — trombositoz; "
+                        "reaktiv sabab (infeksiya, yallig'lanish) yoki "
+                        "mieloproliferativ jarayon ehtimoli".format(plt_v, mpv_s))
+                elif plt_v < 150:
+                    if mpv > 0 and mpv > 12:
+                        sentences.append(
+                            "Trombotsitlar kamaygan (PLT {:.0f}×10⁹/L), MPV oshgan "
+                            "({:.1f} fL) — trombositopeniya, destruktsiya ehtimoli "
+                            "(ITP)".format(plt_v, mpv))
+                    else:
+                        sentences.append(
+                            "Trombotsitlar kamaygan (PLT {:.0f}×10⁹/L) — "
+                            "trombositopeniya".format(plt_v))
+
+            # ─── 6. MORFOLOGIK TOPILMALAR surtmadan ─────────────────────────
+            morfo_list = []
+            scale_map = [
+                ('anizositoz',   'anizositoz'),
+                ('poykylositoz', 'poikilositoz'),
+                ('gipoxromiya',  'gipoxromiya'),
+                ('mikrotsitoz',  'mikrotsitoz'),
+                ('makrotsitoz',  'makrotsitoz'),
+            ]
+            for key, label in scale_map:
+                val = morph_dict.get(key, "yo'q")
+                if val in ('+', '++', '+++'):
+                    morfo_list.append("{} ({})".format(label, val))
+
+            eritr_sh = (morph_dict.get('eritr_shakllar') or '').strip()
+            if eritr_sh and eritr_sh not in ('-', ''):
+                morfo_list.append("eritrotsit shakllari: {}".format(eritr_sh))
+                esl = eritr_sh.lower()
+                if any(x in esl for x in ['shizo', 'fragment']):
+                    urgency.append("Shizotsitlar aniqlandi — mikroangiopatik gemoliz "
+                                   "ehtimoli, shoshilinch konsultatsiya zarur")
+                if any(x in esl for x in ['target', 'nishon']):
+                    sentences.append("Target eritrotsitlar (nishon shakl) aniqlandi — "
+                                     "gemoglobinopatiya ehtimoli")
+
+            baz_v = morph_dict.get('bazofil_don', "yo'q")
+            if baz_v not in ("yo'q", '', None):
+                morfo_list.append("bazofil donadkor eritrotsitlar: {}".format(baz_v))
+
+            leyk_m = (morph_dict.get('leyk_morfo') or '').strip()
+            if leyk_m and leyk_m not in ('-', ''):
+                morfo_list.append("leykotsitlar morfologiyasi: {}".format(leyk_m))
+                lml = leyk_m.lower()
+                if any(x in lml for x in ['blast', 'atipik']):
+                    urgency.append("Atipik/blast hujayralar aniqlandi — "
+                                   "gematolog konsultatsiyasi shoshilinch zarur")
+                if 'gipersegment' in lml:
+                    sentences.append("Gipersegmentlangan neytrofillar — megaloblastik "
+                                     "o'zgarish ehtimoli")
+                    tavsiya.append("vitamin B12, folat kislota")
+
+            plt_morfo = (morph_dict.get('plt_morfo') or '').strip()
+            if plt_morfo and plt_morfo not in ('-', ''):
+                morfo_list.append("trombotsit morfologiyasi: {}".format(plt_morfo))
+
+            plt_miqdor = (morph_dict.get('plt_miqdor') or 'Normal')
+            if plt_miqdor not in ('Normal', '') and not any('trombosit' in s.lower() for s in sentences):
+                if plt_miqdor == "Ko'paygan":
+                    sentences.append("Surtmada trombotsitlar soni oshgan")
+                elif plt_miqdor == "Kamaygan":
+                    sentences.append("Surtmada trombotsitlar soni kamaygan")
+
+            if morfo_list:
+                sentences.append(
+                    "Surtmada qo'shimcha topilmalar: {}".format("; ".join(morfo_list)))
+
+            # ─── 7. XULOSA MATNI YIG'ISH ─────────────────────────────────────
+            DISCLAIMER = (
+                "Bu laborator xulosa bo'lib, yakuniy tashxis emas. "
+                "Natijani mutaxassis shifokor bilan muhokama qiling."
+            )
+
+            if urgency:
+                # Shoshilinch topilmalar — eng oldinga
+                all_parts = urgency + sentences
+            else:
+                all_parts = sentences
+
+            if not all_parts:
+                return (
+                    "Periferik qon surtmasida patologik o'zgarishlar aniqlanmadi. "
+                    "Umumiy qon tahlili ko'rsatkichlari me'yor doirasida.\n\n"
+                    + DISCLAIMER
+                )
+
+            # Jumlalarni birlashtirish
+            text = "Periferik qon surtmasi tahlili:\n"
+            text += " ".join(s.rstrip('.') + "." for s in all_parts)
+            if tavsiya:
+                uniq_tav = list(dict.fromkeys(tavsiya))
+                text += "\n\nQo'shimcha tekshiruv tavsiya etiladi: {}.".format(
+                    ", ".join(uniq_tav))
+            text += "\n\n" + DISCLAIMER
+            return text
+
+        # ── Dialog oynasi ────────────────────────────────────────────────────
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Qondan Mazok (Morfologiya) — Natija Kiritish")
+        dialog.geometry("1020x720")
+        dialog.minsize(900, 600)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.focus_set()
+
+        tk.Label(dialog, text="QONDAN MAZOK (MORFOLOGIYA) NATIJALARI",
+                 font=("Times New Roman", 13, "bold"), pady=6).pack()
+
+        # ── ASOSIY ikkita ustun ───────────────────────────────────────────────
+        main_pane = tk.Frame(dialog)
+        main_pane.pack(fill="both", expand=True, padx=6, pady=2)
+
+        # ══ SOL PANEL: CBC ma'lumotlari ══════════════════════════════════════
+        left_lf = tk.LabelFrame(main_pane, text="  CBC — Analizator ma'lumotlari (faqat ko'rish)  ",
+                                font=("Arial", 9, "bold"), padx=3, pady=3, width=260)
+        left_lf.pack(side="left", fill="y", padx=(0, 6))
+        left_lf.pack_propagate(False)
+
+        CBC_SHOW = [
+            ("WBC",    "Leykotsitlar",        "4.0-9.0",   "10⁹/л"),
+            ("LYM%",   "Limfotsitlar %",       "20-40",      "%"),
+            ("MID%",   "MID %",                "3-15",       "%"),
+            ("GRAN%",  "Granulotsitlar %",     "50-70",      "%"),
+            ("RBC",    "Eritrotsitlar",        "3.8-5.5",    "10¹²/л"),
+            ("HGB",    "Gemoglobin",           "120-160",    "g/L"),
+            ("HCT",    "Gematokrit",           "36-48",      "%"),
+            ("MCV",    "MCV (o'rtacha hajm)",  "80-100",     "fL"),
+            ("MCH",    "MCH (o'rtacha Hgb)",   "27-34",      "pg"),
+            ("MCHC",   "MCHC",                 "310-360",    "g/L"),
+            ("RDW-CV", "RDW-CV",               "11-16",      "%"),
+            ("PLT",    "Trombotsitlar",        "150-400",    "10⁹/л"),
+            ("MPV",    "MPV",                  "6.5-12.0",   "fL"),
+            ("NLR",    "NLR nisbati",          "1.0-3.0",    ""),
+        ]
+        # header
+        hdr_f = tk.Frame(left_lf, bg="#1a3a5c"); hdr_f.pack(fill="x")
+        for t, w in [("Kod", 7), ("Ko'rsatkich", 14), ("Natija", 8)]:
+            tk.Label(hdr_f, text=t, font=("Arial", 8, "bold"), bg="#1a3a5c", fg="white",
+                     width=w).pack(side="left", padx=1)
+        # cbc rows
+        cbc_frame = tk.Frame(left_lf); cbc_frame.pack(fill="both", expand=True)
+        cbc_cv = tk.Canvas(cbc_frame, width=248, borderwidth=0, highlightthickness=0)
+        cbc_cv.pack(fill="both", expand=True)
+        cbc_inner_f = tk.Frame(cbc_cv, bg="white")
+        cbc_cv.create_window((0, 0), window=cbc_inner_f, anchor="nw")
+        cbc_inner_f.bind("<Configure>", lambda e: cbc_cv.configure(scrollregion=cbc_cv.bbox("all")))
+
+        # Flag rengi
+        def _flag_color(kod, val_str):
+            try:
+                v = float(val_str)
+                norma_str = next((n for c, _, n, _ in CBC_SHOW if c == kod), None)
+                if norma_str and '-' in norma_str:
+                    lo, hi = norma_str.split('-', 1)
+                    if v < float(lo) or v > float(hi): return "#c0392b"
+            except: pass
+            return "#1a1a1a"
+
+        for i, (kod, label, norma, birlik) in enumerate(CBC_SHOW):
+            val = _cbc_val(kod)
+            bg = "white" if i % 2 == 0 else "#f0f4f8"
+            fg = _flag_color(kod, val) if val else "#888"
+            row_f = tk.Frame(cbc_inner_f, bg=bg); row_f.pack(fill="x")
+            tk.Label(row_f, text=kod, font=("Courier", 8), bg=bg, width=7,
+                     anchor="w").pack(side="left", padx=(2, 0))
+            tk.Label(row_f, text=label, font=("Arial", 8), bg=bg, width=14,
+                     anchor="w").pack(side="left")
+            tk.Label(row_f, text=val if val else "-", font=("Arial", 9, "bold"),
+                     bg=bg, fg=fg, width=8, anchor="center").pack(side="left")
+
+        # ══ O'NG PANEL: Morfologiya kiritish (scrollable) ════════════════════
+        right_f = tk.Frame(main_pane); right_f.pack(side="left", fill="both", expand=True)
+        rcanv = tk.Canvas(right_f, borderwidth=0, highlightthickness=0)
+        rsb = tk.Scrollbar(right_f, orient="vertical", command=rcanv.yview)
+        rinner = tk.Frame(rcanv)
+        rinner.bind("<Configure>", lambda e: rcanv.configure(scrollregion=rcanv.bbox("all")))
+        rcanv.create_window((0, 0), window=rinner, anchor="nw")
+        rcanv.configure(yscrollcommand=rsb.set)
+        rcanv.pack(side="left", fill="both", expand=True)
+        rsb.pack(side="right", fill="y")
+
+        def _on_mw(e): rcanv.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        rcanv.bind_all("<MouseWheel>", _on_mw)
+
+        entry_vars = {}
+
+        # ─── LEYKOGRAMMA JADVALI ────────────────────────────────────────────
+        tk.Label(rinner, text="Leykogramma",
+                 font=("Times New Roman", 11, "bold"), anchor="w"
+                 ).pack(fill="x", padx=4, pady=(4, 1))
+
+        tbl = tk.Frame(rinner, bd=1, relief=tk.RIDGE); tbl.pack(fill="x", padx=4)
+        hdr_bg = "#9DC3E6"
+        for ci, (txt, w) in enumerate([("Ko'rsatkich", 30), ("Natija", 12),
+                                        ("Me'yor", 13), ("Birlik", 8)]):
+            tk.Label(tbl, text=txt, font=("Times New Roman", 9, "bold"), bg=hdr_bg,
+                     relief=tk.RIDGE, width=w, pady=3
+                     ).grid(row=0, column=ci, sticky="nsew")
+
+        leuko_cfg = [
+            ("Leykotsitlar (WBC)",          "wbc",        "4.0 \u2013 9.0",   "10\u2079/\u043b",
+             _cbc_val('WBC')),
+            ("Mielositlar",                  "mielot",     "-",                 "%",      ""),
+            ("Metamielositlar",              "metamielot", "-",                 "%",      ""),
+            ("Tayoqcha yadroli neytrofil",   "tayoqcha",   "1 \u2013 6",        "%",      ""),
+            ("Segment yadroli neytrofil",    "segment",    "47 \u2013 72",      "%",
+             _cbc_val('GRAN%')),
+            ("Eozinofilllar",               "eozinofil",  "0,5 \u2013 5",      "%",      ""),
+            ("Bazofilllar",                  "bazofil",    "0 \u2013 1",        "%",      ""),
+            ("Monotsitlar",                  "monotsit",   "3 \u2013 11",       "%",
+             _cbc_val('MID%')),
+            ("Limfotsitlar",                 "limfotsit",  "19 \u2013 37",      "%",
+             _cbc_val('LYM%')),
+            ("Plazmatik hujayralar",         "plazmatsit", "-",                 "%",      ""),
+        ]
+        for ri, (label, key, meyor, birlik, cbc_def) in enumerate(leuko_cfg, start=1):
+            init_val = _fv(key) or cbc_def
+            bg = "#f5f5f5" if ri % 2 == 0 else "white"
+            tk.Label(tbl, text=label, font=("Times New Roman", 10), bg=bg,
+                     relief=tk.RIDGE, width=30, anchor="w", padx=3
+                     ).grid(row=ri, column=0, sticky="nsew")
+            var = tk.StringVar(value=init_val); entry_vars[key] = var
+            tk.Entry(tbl, textvariable=var, font=("Times New Roman", 10),
+                     width=12, justify="center"
+                     ).grid(row=ri, column=1, sticky="nsew", padx=2, pady=1)
+            tk.Label(tbl, text=meyor, font=("Times New Roman", 10), bg=bg,
+                     relief=tk.RIDGE, width=13, anchor="center"
+                     ).grid(row=ri, column=2, sticky="nsew")
+            tk.Label(tbl, text=birlik, font=("Times New Roman", 10), bg=bg,
+                     relief=tk.RIDGE, width=8, anchor="center"
+                     ).grid(row=ri, column=3, sticky="nsew")
+
+        # ─── ERITROTSITLAR MORFOLOGIYASI ────────────────────────────────────
+        tk.Label(rinner, text="Eritrotsitlar morfologiyasi",
+                 font=("Times New Roman", 11, "bold", "underline"), anchor="w"
+                 ).pack(fill="x", padx=4, pady=(10, 2))
+
+        ertr_scale_f = tk.Frame(rinner, padx=4); ertr_scale_f.pack(fill="x")
+        ERTR_SCALE = [
+            ("Anizositoz",   "anizositoz"),
+            ("Poikilositoz", "poykylositoz"),
+            ("Gipoxromiya",  "gipoxromiya"),
+            ("Mikrotsitoz",  "mikrotsitoz"),
+            ("Makrotsitoz",  "makrotsitoz"),
+        ]
+        SCALE_OPTS = ["yo'q", "+", "++", "+++"]
+        for label, key in ERTR_SCALE:
+            rf = tk.Frame(ertr_scale_f); rf.pack(fill="x", pady=1)
+            tk.Label(rf, text=label, font=("Times New Roman", 10),
+                     width=18, anchor="w").pack(side="left")
+            var = tk.StringVar(value=(_fv(key) or "yo'q")); entry_vars[key] = var
+            for opt in SCALE_OPTS:
+                tk.Radiobutton(rf, text=opt, variable=var, value=opt,
+                               font=("Times New Roman", 10), padx=6).pack(side="left")
+
+        # Eritrotsit shakllari — popup picker
+        ERTR_SHAPES = [
+            "Sferotsit", "Elliptotsit (ovalosit)", "Target cell (nishon)",
+            "Shizotsit (fragmentlar)", "Dakriotsit (ko'z yoshi)",
+            "Akantosit", "Stomatosit", "Ekinotsit (Burr cell)",
+            "Makrotsit", "Mikrotsit", "Megalosit",
+        ]
+        es_f = tk.Frame(rinner, padx=4); es_f.pack(fill="x", pady=2)
+        tk.Label(es_f, text="Eritrotsit shakllari:", font=("Times New Roman", 10),
+                 width=18, anchor="w").pack(side="left")
+        eritr_sh_var = tk.StringVar(value=_fv('eritr_shakllar'))
+        entry_vars['eritr_shakllar'] = eritr_sh_var
+        tk.Entry(es_f, textvariable=eritr_sh_var, font=("Times New Roman", 9),
+                 width=30).pack(side="left", padx=4)
+        tk.Button(es_f, text=" ▼ ", font=("Arial", 8), relief=tk.RAISED, bg="#dce8f5",
+                  cursor="hand2",
+                  command=lambda: _open_morfo_picker(
+                      dialog, "Eritrotsit shakllari", ERTR_SHAPES, eritr_sh_var)
+                  ).pack(side="left")
+
+        # Bazofil donadkor eritrotsitlar
+        baz_f = tk.Frame(rinner, padx=4); baz_f.pack(fill="x", pady=1)
+        tk.Label(baz_f, text="Bazofil donadkor er.:", font=("Times New Roman", 10),
+                 width=18, anchor="w").pack(side="left")
+        baz_var = tk.StringVar(value=(_fv('bazofil_don') or "yo'q"))
+        entry_vars['bazofil_don'] = baz_var
+        for opt in SCALE_OPTS:
+            tk.Radiobutton(baz_f, text=opt, variable=baz_var, value=opt,
+                           font=("Times New Roman", 10), padx=6).pack(side="left")
+
+        # ─── LEYKOTSITLAR MORFOLOGIYASI ─────────────────────────────────────
+        tk.Label(rinner, text="Leykotsitlar morfologiyasi",
+                 font=("Times New Roman", 11, "bold", "underline"), anchor="w"
+                 ).pack(fill="x", padx=4, pady=(10, 2))
+
+        LEYK_MORFO_ITEMS = [
+            "Toksogen donadorlik", "Vakuolizatsiya", "Döhle tanachasi",
+            "Gipersegmentatsiya", "Atipik (blast) hujayralar", "Erigranulotsitlar",
+        ]
+        lm_f = tk.Frame(rinner, padx=4); lm_f.pack(fill="x", pady=2)
+        tk.Label(lm_f, text="Morfologik o'zgarishlar:", font=("Times New Roman", 10),
+                 width=22, anchor="w").pack(side="left")
+        leyk_morfo_var = tk.StringVar(value=_fv('leyk_morfo'))
+        entry_vars['leyk_morfo'] = leyk_morfo_var
+        tk.Entry(lm_f, textvariable=leyk_morfo_var, font=("Times New Roman", 9),
+                 width=30).pack(side="left", padx=4)
+        tk.Button(lm_f, text=" ▼ ", font=("Arial", 8), relief=tk.RAISED, bg="#dce8f5",
+                  cursor="hand2",
+                  command=lambda: _open_morfo_picker(
+                      dialog, "Leykotsitlar morfologiyasi", LEYK_MORFO_ITEMS, leyk_morfo_var)
+                  ).pack(side="left")
+
+        # ─── TROMBOTSITLAR ───────────────────────────────────────────────────
+        tk.Label(rinner, text="Trombotsitlar",
+                 font=("Times New Roman", 11, "bold", "underline"), anchor="w"
+                 ).pack(fill="x", padx=4, pady=(10, 2))
+
+        plt_f = tk.Frame(rinner, padx=4); plt_f.pack(fill="x", pady=1)
+        tk.Label(plt_f, text="Miqdori:", font=("Times New Roman", 10),
+                 width=18, anchor="w").pack(side="left")
+        plt_miqdor_var = tk.StringVar(value=(_fv('plt_miqdor') or "Normal"))
+        entry_vars['plt_miqdor'] = plt_miqdor_var
+        for opt in ["Normal", "Kamaygan", "Ko'paygan"]:
+            tk.Radiobutton(plt_f, text=opt, variable=plt_miqdor_var, value=opt,
+                           font=("Times New Roman", 10), padx=8).pack(side="left")
+
+        PLT_MORFO_ITEMS = [
+            "Gigant trombotsitlar", "Agregatsiya", "Mikrotrombositlar",
+            "Gipogranular trombotsitlar",
+        ]
+        pm_f = tk.Frame(rinner, padx=4); pm_f.pack(fill="x", pady=2)
+        tk.Label(pm_f, text="Morfologiya:", font=("Times New Roman", 10),
+                 width=18, anchor="w").pack(side="left")
+        plt_morfo_var = tk.StringVar(value=_fv('plt_morfo'))
+        entry_vars['plt_morfo'] = plt_morfo_var
+        tk.Entry(pm_f, textvariable=plt_morfo_var, font=("Times New Roman", 9),
+                 width=30).pack(side="left", padx=4)
+        tk.Button(pm_f, text=" ▼ ", font=("Arial", 8), relief=tk.RAISED, bg="#dce8f5",
+                  cursor="hand2",
+                  command=lambda: _open_morfo_picker(
+                      dialog, "Trombotsit morfologiyasi", PLT_MORFO_ITEMS, plt_morfo_var)
+                  ).pack(side="left")
+
+        # ─── XULOSA ──────────────────────────────────────────────────────────
+        xulosa_lf = tk.LabelFrame(rinner,
+                                   text="  Xulosa (avtomatik yoki qo'lda yozing)  ",
+                                   font=("Arial", 9, "bold"), fg="#1a3a5c",
+                                   padx=4, pady=4)
+        xulosa_lf.pack(fill="x", padx=4, pady=(10, 4))
+
+        xulosa_text = tk.Text(xulosa_lf, font=("Times New Roman", 10),
+                               height=7, wrap="word", relief=tk.SOLID, bd=1)
+        xulosa_text.pack(fill="x")
+        xulosa_text.insert("1.0", _fv('xulosa'))
+
+        def _refresh_xulosa():
+            morph = {k: v.get() for k, v in entry_vars.items()}
+            morph['leyk_morfo'] = leyk_morfo_var.get()
+            morph['eritr_shakllar'] = eritr_sh_var.get()
+            morph['plt_morfo'] = plt_morfo_var.get()
+            xulosa_text.delete("1.0", "end")
+            xulosa_text.insert("1.0", _auto_xulosa(morph))
+
+        tk.Button(xulosa_lf, text="⟳  Xulosani avtomatik yangilash",
+                  command=_refresh_xulosa,
+                  bg="#2980b9", fg="white", font=("Arial", 9),
+                  padx=8, pady=2).pack(pady=(3, 0))
+
+        # Auto-fill xulosa on first open (if no existing xulosa and CBC data present)
+        if not _fv('xulosa') and cbc:
+            _refresh_xulosa()
+
+        # ─── TUGMALAR ────────────────────────────────────────────────────────
+        btn_frame = tk.Frame(dialog, pady=8)
+        btn_frame.pack(fill="x", side="bottom")
+
+        _DISCLAIMER_TXT = (
+            "Bu laborator xulosa bo'lib, yakuniy tashxis emas. "
+            "Natijani mutaxassis shifokor bilan muhokama qiling."
+        )
+
+        def saqlash():
+            data = {k: v.get().strip() for k, v in entry_vars.items()}
+            xul = xulosa_text.get("1.0", "end-1c").strip()
+            # Disclaimer yo'q bo'lsa avtomatik qo'shib qo'yamiz
+            if xul and _DISCLAIMER_TXT not in xul:
+                xul = xul.rstrip() + "\n\n" + _DISCLAIMER_TXT
+            data['xulosa'] = xul
+            result_json_out = json.dumps(data, ensure_ascii=False)
+            self.test_results[test_id] = result_json_out
+            rcanv.unbind_all("<MouseWheel>")
+            dialog.destroy()
+            self.load_tests()
+            self.status_var.set("Qondan mazok (morfologiya) natijasi saqlandi")
+
+        tk.Button(btn_frame, text="Saqlash", command=saqlash,
+                  bg="#28a745", fg="white", font=("Arial", 11, "bold"),
+                  width=15, pady=5).pack(side="left", padx=20)
+        tk.Button(btn_frame, text="Bekor",
+                  command=lambda: [rcanv.unbind_all("<MouseWheel>"), dialog.destroy()],
+                  bg="#dc3545", fg="white", font=("Arial", 11),
+                  width=12, pady=5).pack(side="left", padx=5)
+
+        dialog.bind('<Escape>',
+                    lambda e: [rcanv.unbind_all("<MouseWheel>"), dialog.destroy()])
+
+    def show_ginekologik_form(self, test_id, test_name, test_data):
+        """
+        Ginekologik surtma uchun maxsus jadval formasini ochish.
+        Word shabloni o'rniga to'liq Tkinter dialog.
+        Natija JSON ga saqlanadi.
+        """
+        import json
+        
+        # Eski natijani olish
+        old_result = {}
+        existing = self.test_results.get(test_id, '')
+        if existing and str(existing).strip().startswith('{'):
+            try:
+                old_result = json.loads(str(existing))
+            except:
+                old_result = {}
+        
+        # Dialog oynasi
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"Ginekologik Surtma — Natija Kiritish")
+        dialog.geometry("750x620")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.focus_set()
+        
+        # Sarlavha
+        title_label = tk.Label(dialog, text="GINEKOLOGIK SURTMA", 
+                               font=("Times New Roman", 14, "bold"), pady=10)
+        title_label.pack()
+        
+        # Jadval maydoni
+        table_frame = tk.Frame(dialog, padx=10, pady=5)
+        table_frame.pack(fill="both", expand=True)
+        
+        # Ustun sarlavhalari
+        headers = ["Ko'rsatkich", "Qin (V)", "Bachadon bo'yni (C)", "Siydik yo'li (U)"]
+        col_widths = [28, 15, 20, 15]
+        
+        for col, (header, width) in enumerate(zip(headers, col_widths)):
+            lbl = tk.Label(table_frame, text=header, font=("Arial", 9, "bold"),
+                          relief="groove", width=width, padx=3, pady=5,
+                          bg="#d0d0d0", anchor="center")
+            lbl.grid(row=0, column=col, sticky="nsew", padx=1, pady=1)
+        
+        # Jadval qatorlari: (ko'rsatkich_nomi, kalit, turdagi_variantlar)
+        rows_config = [
+            ("Leykotsitlar",                          "leykot",   "text"),
+            ("Yassi epiteliy",                        "yassi",    "text"),
+            ("Shilliq",                               "shilliq",  "shilliq"),
+            ("Gonokokklar",                           "gonok",    "manfiy"),
+            ("Trixomonada",                           "trixom",   "manfiy"),
+            ("Atipik (klyucheviy) xujayralar",        "atipik",   "manfiy"),
+            ("Laktobatsillalar (tayoqcha\nDoderleyna, gramm musbat tayoqcha)",
+                                                  "lakto",    "norma"),
+            ("Candida (Aitqi zamburug'i)",            "candida",  "manfiy"),
+            ("Anaerob bakteriyalar\n(gramm manfiy tayoqcha), kokklar",
+                                                  "anaerob",  "manfiy"),
+        ]
+        
+        # Variantlar lug'ati
+        options_map = {
+            "manfiy": ["Manfiy (-)", "Musbat (+)"],
+            "shilliq": ["+", "++", "+++", "-"],
+            "norma":   ["Norma", "Ko'p", "Kam", "Yo'q"],
+            "text":    None,  # Entry
+        }
+        
+        # Har bir ustun (V, C, U) uchun widget lar
+        entry_vars = {}
+        
+        columns = ["v", "c", "u"]  # 3 ta ustun kalitlari
+        
+        for row_idx, (ko_rsatkich, kalit, tur) in enumerate(rows_config, start=1):
+            # Ko'rsatkich ustuni
+            lbl = tk.Label(table_frame, text=ko_rsatkich, font=("Arial", 9),
+                          relief="groove", width=28, padx=3, pady=4,
+                          anchor="w", wraplength=200, justify="left")
+            lbl.grid(row=row_idx, column=0, sticky="nsew", padx=1, pady=1)
+            
+            entry_vars[kalit] = {}
+            
+            for col_idx, col_key in enumerate(columns, start=1):
+                key_full = f"{kalit}_{col_key}"
+                var = tk.StringVar(value=old_result.get(key_full, ''))
+                entry_vars[kalit][col_key] = var
+                
+                if tur == "text":
+                    # Raqam/matn kiritish uchun Entry
+                    widget = tk.Entry(table_frame, textvariable=var, 
+                                      font=("Arial", 10), width=14, justify="center")
+                else:
+                    # OptionMenu (dropdown)
+                    options = options_map[tur]
+                    if not var.get():
+                        var.set(options[0])
+                    widget = tk.OptionMenu(table_frame, var, *options)
+                    widget.config(font=("Arial", 9), width=11)
+                
+                widget.grid(row=row_idx, column=col_idx, sticky="nsew", padx=1, pady=1)
+        
+        # Pastki tugmalar
+        btn_frame = tk.Frame(dialog, pady=10)
+        btn_frame.pack(fill="x")
+        
+        _saved = [False]  # Ikki marta saqlanishning oldini olish
+
+        def saqlash():
+            if _saved[0]:
+                return
+            _saved[0] = True
+            # Tugmani darhol o'chirish (ikki marta bosilishning oldini olish)
+            try:
+                save_btn.config(state=tk.DISABLED)
+            except Exception:
+                pass
+
+            result_data = {}
+            for kalit, cols in entry_vars.items():
+                for col_key, var in cols.items():
+                    full_key = f"{kalit}_{col_key}"
+                    result_data[full_key] = var.get()
+
+            result_json = json.dumps(result_data, ensure_ascii=False)
+            self.test_results[test_id] = result_json
+
+            # UI da natijani ko'rsatish (birinchi ustun qiymatlari)
+            natija_str = f"v:{result_data.get('leykot_v','')}, c:{result_data.get('leykot_c','')}, u:{result_data.get('leykot_u','')}"
+
+            # Treeview da yangilash
+            for tree_item in self.tests_tree.get_children():
+                t_data = self.tests_tree.item(tree_item)
+                if t_data['tags'] and str(t_data['tags'][0]) == str(test_id):
+                    vals = list(t_data['values'])
+                    vals[3] = natija_str  # Natija ustuni (index 3)
+                    vals[2] = "[OK] Tayyor"  # Status
+                    self.tests_tree.item(tree_item, values=vals, tags=('tayyor',))
+                    break
+
+            dialog.destroy()
+            self.status_var.set(f"Ginekologik surtma natijasi saqlandi")
+
+        def bekor():
+            dialog.destroy()
+
+        save_btn = tk.Button(btn_frame, text="Saqlash", command=saqlash,
+                  bg="#28a745", fg="white", font=("Arial", 11, "bold"),
+                  width=15, pady=5, takefocus=False)
+        save_btn.pack(side="left", padx=20)
+
+        tk.Button(btn_frame, text="Bekor", command=bekor,
+                  bg="#dc3545", fg="white", font=("Arial", 11),
+                  width=12, pady=5, takefocus=False).pack(side="left", padx=5)
+
+        # Enter tugmasi
+        dialog.bind('<Return>', lambda e: saqlash())
+        dialog.bind('<Escape>', lambda e: bekor())
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    #  YORDAMCHI METOD: JSON natijani saqlash va treeview yangilash
+    # ─────────────────────────────────────────────────────────────────────────
+    def _save_test_result_to_tree(self, test_id, result_json, natija_str):
+        """JSON natijani test_results ga va treeview ga saqlash."""
+        self.test_results[test_id] = result_json
+        for tree_item in self.tests_tree.get_children():
+            t_data = self.tests_tree.item(tree_item)
+            if t_data['tags'] and str(t_data['tags'][0]) == str(test_id):
+                vals = list(t_data['values'])
+                vals[3] = natija_str
+                vals[2] = "[OK] Tayyor"
+                self.tests_tree.item(tree_item, values=vals, tags=('tayyor',))
+                break
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  UROLOGIK SURTMA (MUJSKOY MAZOK)
+    # ─────────────────────────────────────────────────────────────────────────
+    def show_urologik_form(self, test_id, test_name, test_data):
+        """Urologik surtma (Mujskoy mazok) uchun natija kiritish dialogi."""
+        import json
+        old_result = {}
+        existing = self.test_results.get(test_id, '')
+        if existing and str(existing).strip().startswith('{'):
+            try:
+                old_result = json.loads(str(existing))
+            except:
+                old_result = {}
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Urologik Surtma — Natija Kiritish")
+        dialog.geometry("560x540")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.focus_set()
+
+        tk.Label(dialog, text="UROLOGIK SURTMA (MUJSKOY MAZOK)",
+                 font=("Times New Roman", 13, "bold"), pady=8).pack()
+
+        table_frame = tk.Frame(dialog, padx=10, pady=5)
+        table_frame.pack(fill="both", expand=True)
+
+        for col, (text, w) in enumerate([("Ko'rsatkich", 34), ("Natija", 18), ("Norma", 16)]):
+            tk.Label(table_frame, text=text, font=("Arial", 9, "bold"),
+                     relief="groove", width=w, padx=3, pady=5,
+                     bg="#d0d0d0", anchor="center").grid(row=0, column=col, sticky="nsew", padx=1, pady=1)
+
+        rows_config = [
+            ("Leykotsitlar",                                                      "leykot",       "text",    "2-5"),
+            ("Eritrotsitlar",                                                     "eritr",        "text",    "1-2"),
+            ("Epiteliy",                                                          "epitel",       "text",    "1-10"),
+            ("Shilliq",                                                           "shilliq",      "manfiy",  "Manfiy (-)"),
+            ("Kokklar mikroflora",                                                "kokklar",      "kokklar", "O'rtacha (0-5)"),
+            ("Hujayra ichi gram manfiy diplakokklari\n(Gonokokklar)",             "gonok",        "manfiy",  "Manfiy (-)"),
+            ("Hujayradan tashqari gramm manfiy\npalochka va kokklar",             "gramm_manfiy", "manfiy",  "Manfiy (-)"),
+            ("Hujayradan tashqari gramm musbat kokklar",                          "gramm_musbat", "manfiy",  "Manfiy (-)"),
+            ("Trixomonada",                                                       "trixom",       "manfiy",  "Manfiy (-)"),
+            ("Xlamidiya",                                                         "xlamid",       "manfiy",  "Manfiy (-)"),
+            ("Ureaplazma",                                                        "ureaplaz",     "manfiy",  "Manfiy (-)"),
+            ("Zamburug'lar",                                                      "zamburuglar",  "manfiy",  "Manfiy (-)"),
+        ]
+
+        options_map = {
+            "manfiy":  ["Manfiy (-)", "Musbat (+)", "Musbat (++)", "Musbat (+++)"],
+            "kokklar": ["O'rtacha (0-5)", "Kam (0-2)", "Ko'p (>5)", "Manfiy (-)"],
+        }
+
+        entry_vars = {}
+        for row_idx, (ko_rsatkich, kalit, tur, norma) in enumerate(rows_config, start=1):
+            tk.Label(table_frame, text=ko_rsatkich, font=("Arial", 9),
+                     relief="groove", width=34, padx=3, pady=3,
+                     anchor="w", wraplength=235, justify="left").grid(
+                row=row_idx, column=0, sticky="nsew", padx=1, pady=1)
+            var = tk.StringVar(value=old_result.get(kalit, ''))
+            entry_vars[kalit] = var
+            if tur == "text":
+                widget = tk.Entry(table_frame, textvariable=var, font=("Arial", 10), width=16, justify="center")
+            else:
+                opts = options_map[tur]
+                if not var.get():
+                    var.set(opts[0])
+                widget = tk.OptionMenu(table_frame, var, *opts)
+                widget.config(font=("Arial", 9), width=13)
+            widget.grid(row=row_idx, column=1, sticky="nsew", padx=1, pady=1)
+            tk.Label(table_frame, text=norma, font=("Arial", 9), fg="#555",
+                     relief="groove", width=16, anchor="center").grid(
+                row=row_idx, column=2, sticky="nsew", padx=1, pady=1)
+
+        btn_frame = tk.Frame(dialog, pady=8)
+        btn_frame.pack(fill="x")
+
+        def saqlash():
+            data = {k: v.get() for k, v in entry_vars.items()}
+            result_json = json.dumps(data, ensure_ascii=False)
+            natija_str = f"Leyk:{data.get('leykot','')}, Gonok:{data.get('gonok','')}"
+            self._save_test_result_to_tree(test_id, result_json, natija_str)
+            dialog.destroy()
+            self.status_var.set("Urologik surtma natijasi saqlandi")
+
+        tk.Button(btn_frame, text="Saqlash", command=saqlash,
+                  bg="#28a745", fg="white", font=("Arial", 11, "bold"),
+                  width=15, pady=5).pack(side="left", padx=20)
+        tk.Button(btn_frame, text="Bekor", command=dialog.destroy,
+                  bg="#dc3545", fg="white", font=("Arial", 11),
+                  width=12, pady=5).pack(side="left")
+        dialog.bind('<Return>', lambda e: saqlash())
+        dialog.bind('<Escape>', lambda e: dialog.destroy())
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  BRUSELLYOZ (Reaksiya Xeddelsona + Rayta)
+    # ─────────────────────────────────────────────────────────────────────────
+    def show_brusellez_form(self, test_id, test_name, test_data):
+        """Brusellyoz (Reaksiya Xeddelsona + Rayta) uchun natija kiritish dialogi."""
+        import json
+        old_result = {}
+        existing = self.test_results.get(test_id, '')
+        if existing and str(existing).strip().startswith('{'):
+            try:
+                old_result = json.loads(str(existing))
+            except:
+                old_result = {}
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Brusellyozni Aniqlash — Natija Kiritish")
+        dialog.geometry("580x250")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.focus_set()
+
+        tk.Label(dialog, text="BRUSELLYOZNI ANIQLASH UCHUN",
+                 font=("Times New Roman", 13, "bold"), pady=10).pack()
+
+        table_frame = tk.Frame(dialog, padx=10, pady=5)
+        table_frame.pack(fill="both", expand=True)
+
+        for col, (text, w) in enumerate([("Ko'rsatgich", 28), ("Natija", 16), ("Titr", 14), ("Me'yor", 14)]):
+            tk.Label(table_frame, text=text, font=("Arial", 9, "bold"),
+                     relief="groove", width=w, pady=5,
+                     bg="#d0d0d0", anchor="center").grid(row=0, column=col, sticky="nsew", padx=1, pady=1)
+
+        rows_config = [
+            ("Reaksiya Xeddelsona", "xeddelson", "Manfiy (-)"),
+            ("Reaksiya Rayta",      "rayta",      "< 1:40"),
+        ]
+
+        natija_opts = ["Manfiy (-)", "Musbat (+)", "Musbat (++)", "Musbat (+++)"]
+        natija_vars = {}
+        titr_vars = {}
+
+        for row_idx, (ko_rsatkich, kalit, me_yor) in enumerate(rows_config, start=1):
+            tk.Label(table_frame, text=ko_rsatkich, font=("Arial", 9),
+                     relief="groove", width=28, pady=6, anchor="w", padx=5).grid(
+                row=row_idx, column=0, sticky="nsew", padx=1, pady=1)
+            n_var = tk.StringVar(value=old_result.get(f"{kalit}_natija", natija_opts[0]))
+            natija_vars[kalit] = n_var
+            n_menu = tk.OptionMenu(table_frame, n_var, *natija_opts)
+            n_menu.config(font=("Arial", 9), width=12)
+            n_menu.grid(row=row_idx, column=1, sticky="nsew", padx=1, pady=1)
+            t_var = tk.StringVar(value=old_result.get(f"{kalit}_titr", ''))
+            titr_vars[kalit] = t_var
+            tk.Entry(table_frame, textvariable=t_var, font=("Arial", 10),
+                     width=12, justify="center").grid(
+                row=row_idx, column=2, sticky="nsew", padx=1, pady=1)
+            tk.Label(table_frame, text=me_yor, font=("Arial", 9), fg="#555",
+                     relief="groove", width=14, anchor="center").grid(
+                row=row_idx, column=3, sticky="nsew", padx=1, pady=1)
+
+        btn_frame = tk.Frame(dialog, pady=10)
+        btn_frame.pack(fill="x")
+
+        def saqlash():
+            data = {}
+            for kalit in ['xeddelson', 'rayta']:
+                data[f"{kalit}_natija"] = natija_vars[kalit].get()
+                data[f"{kalit}_titr"]   = titr_vars[kalit].get()
+            result_json = json.dumps(data, ensure_ascii=False)
+            natija_str = f"Xeddelson:{data['xeddelson_natija']}, Rayta:{data['rayta_natija']}"
+            self._save_test_result_to_tree(test_id, result_json, natija_str)
+            dialog.destroy()
+            self.status_var.set("Brusellyoz natijasi saqlandi")
+
+        tk.Button(btn_frame, text="Saqlash", command=saqlash,
+                  bg="#28a745", fg="white", font=("Arial", 11, "bold"),
+                  width=15, pady=5).pack(side="left", padx=20)
+        tk.Button(btn_frame, text="Bekor", command=dialog.destroy,
+                  bg="#dc3545", fg="white", font=("Arial", 11),
+                  width=12, pady=5).pack(side="left")
+        dialog.bind('<Return>', lambda e: saqlash())
+        dialog.bind('<Escape>', lambda e: dialog.destroy())
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  NAJAS TAHLILI
+    # ─────────────────────────────────────────────────────────────────────────
+    def show_najas_form(self, test_id, test_name, test_data):
+        """Najas tahlili uchun natija kiritish dialogi."""
+        import json
+        old_result = {}
+        existing = self.test_results.get(test_id, '')
+        if existing and str(existing).strip().startswith('{'):
+            try:
+                old_result = json.loads(str(existing))
+            except:
+                old_result = {}
+
+        # ── Gijja va protozoa variantlari ─────────────────────────────────
+        PROTOZOA_OPTS = [
+            "Aniqlanmadi",
+            "Giardia lamblia sistasi — Ichak lambliyasi",
+            "Entamoeba histolytica — Dizenteriya amebasi",
+            "Blastocystis hominis — Blastotsista",
+            "Entamoeba coli — Ichak amebasi (patogen emas)",
+        ]
+        GIJJA_OPTS = [
+            "Aniqlanmadi",
+            "Enterobius vermicularis — Ostritsa (enterobioz)",
+            "Ascaris lumbricoides — Askarida",
+            "Hymenolepis nana — Pakana tasmasimon gijja",
+            "Taenia spp. — Cho'chqa/mol tasmasimon gijja",
+            "Trichocephalus trichiurus — Vlasoglav",
+            "Diphyllobothrium latum — Keng tasmasimon gijja",
+        ]
+        NORMAL_VAL = "Aniqlanmadi"
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Najas Tahlili — Natija Kiritish")
+        dialog.geometry("680x720")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.focus_set()
+
+        tk.Label(dialog, text="NAJAS TAHLILI",
+                 font=("Times New Roman", 13, "bold"), pady=8).pack()
+
+        outer = tk.Frame(dialog)
+        outer.pack(fill="both", expand=True)
+        canvas = tk.Canvas(outer, borderwidth=0)
+        vsb = tk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        table_frame = tk.Frame(canvas, padx=10, pady=5)
+        cw = canvas.create_window((0, 0), window=table_frame, anchor="nw")
+        table_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(cw, width=e.width))
+        dialog.bind("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
+
+        # Sarlavha qatori
+        HCOL = "#d0d0d0"
+        for col, (text, w) in enumerate([("Ko'rsatgich", 28), ("Natija", 24), ("Norma", 12)]):
+            tk.Label(table_frame, text=text, font=("Arial", 9, "bold"),
+                     relief="groove", width=w, pady=5, bg=HCOL, anchor="center").grid(
+                row=0, column=col, sticky="nsew", padx=1, pady=1)
+
+        # ── Asosiy qatorlar ──────────────────────────────────────────────
+        rows_config = [
+            ("Sutkalik miqdori",       "sutkalik_miqdori", "text", None,
+             "100-250 g"),
+            ("Namuna miqdori",         "namuna_miqdori",   "text", None, ""),
+            ("Konsistensiyasi",        "konsistensiya",    "opts",
+             ["Suyuq","Yarim suyuq","Qo'ng'iroqsimon","Qattiq","Normal"],
+             "Normal"),
+            ("Shakli",                 "shakli",           "opts",
+             ["Shakllangan (silindrsimon)",
+              "Shakllangan (yumshoq)",
+              "Shakllanmagan",
+              "Suyuq",
+              "Qattiq"],
+             "Shakllangan (silindrsimon)"),
+            ("Rangi",                  "rangi",            "opts",
+             ["Jigarrang","Sariq","Yashil","Qora","Qizil","Kulrang"],
+             "Jigarrang"),
+            ("Reaksiyasi (pH)",        "reaksiya",         "opts",
+             ["Neytral","Kislotali","Ishqoriy"],
+             "Neytral"),
+            ("O'simlik kletchatkasi",  "kletchatka",       "opts",
+             ["Yo'q","Oz miqdorda","Ko'p miqdorda"], "Yo'q"),
+            ("Kraxmal",                "kraxmal",          "opts",
+             ["Yo'q","Oz miqdorda","Ko'p miqdorda"], "Yo'q"),
+            ("Yodofil flora",          "yodofil",          "opts",
+             ["Yo'q","Oz miqdorda","Ko'p miqdorda"], "Yo'q"),
+            ("Shilliq, epiteliy",      "shilliq_epitel",   "opts",
+             ["Yo'q","Oz miqdorda","Ko'p miqdorda"], "Yo'q"),
+            ("Neytral yog'",           "neytral_yog",      "opts",
+             ["Yo'q","Oz miqdorda","Ko'p miqdorda"], "Yo'q"),
+            ("Shilliq (mikroskopiya)", "shilliq_mikro",    "opts",
+             ["Yo'q","Oz miqdorda","Ko'p miqdorda"], "Yo'q"),
+            ("Leykotsitlar",           "leykot",           "text", None, "0-1 k.d."),
+            ("Eritrotsitlar",          "eritr",            "opts",
+             ["Yo'q","Oz miqdorda","Ko'p miqdorda"], "Yo'q"),
+            ("Zamburug'lar",           "zamburuglar",      "opts",
+             ["Aniqlanmadi","Aniqlandi"], "Aniqlanmadi"),
+        ]
+
+        entry_vars  = {}
+        opt_widgets = {}   # kalit → OptionMenu widget (rang uchun)
+
+        for row_idx, row_cfg in enumerate(rows_config, start=1):
+            ko_rsatkich, kalit, tur, opts_list, norma = row_cfg
+            tk.Label(table_frame, text=ko_rsatkich, font=("Arial", 9),
+                     relief="groove", width=28, pady=3, anchor="w", padx=5,
+                     wraplength=195, justify="left").grid(
+                row=row_idx, column=0, sticky="nsew", padx=1, pady=1)
+            var = tk.StringVar(value=old_result.get(kalit, ''))
+            entry_vars[kalit] = var
+            if tur == "text":
+                widget = tk.Entry(table_frame, textvariable=var,
+                                  font=("Arial", 10), width=22, justify="center")
+            else:
+                if not var.get():
+                    var.set(opts_list[0])
+                widget = tk.OptionMenu(table_frame, var, *opts_list)
+                widget.config(font=("Arial", 9), width=20)
+                opt_widgets[kalit] = widget
+            widget.grid(row=row_idx, column=1, sticky="nsew", padx=1, pady=1)
+            tk.Label(table_frame, text=norma or "", font=("Arial", 9), fg="#555",
+                     relief="groove", width=12, anchor="center").grid(
+                row=row_idx, column=2, sticky="nsew", padx=1, pady=1)
+
+        # ── Sodda xayvonlar (Protozoa) — maxsus widget ───────────────────
+        protozoa_row = len(rows_config) + 1
+        tk.Label(table_frame, text="Sodda xayvonlar (Protozoa)",
+                 font=("Arial", 9, "bold"), relief="groove", width=28,
+                 pady=4, anchor="w", padx=5, bg="#fff8e1").grid(
+            row=protozoa_row, column=0, sticky="nsew", padx=1, pady=1)
+        protozoa_var = tk.StringVar(value=old_result.get('protozoa', PROTOZOA_OPTS[0]))
+        if not protozoa_var.get():
+            protozoa_var.set(PROTOZOA_OPTS[0])
+        entry_vars['protozoa'] = protozoa_var
+        protozoa_menu = tk.OptionMenu(table_frame, protozoa_var, *PROTOZOA_OPTS)
+        protozoa_menu.config(font=("Arial", 9), width=20)
+        protozoa_menu.grid(row=protozoa_row, column=1, sticky="nsew", padx=1, pady=1)
+        tk.Label(table_frame, text="Aniqlanmadi", font=("Arial", 9), fg="#555",
+                 relief="groove", width=12, anchor="center").grid(
+            row=protozoa_row, column=2, sticky="nsew", padx=1, pady=1)
+
+        # ── Gijja tuxumlari — maxsus widget ──────────────────────────────
+        gijja_row = protozoa_row + 1
+        tk.Label(table_frame, text="Gijja tuxumlari",
+                 font=("Arial", 9, "bold"), relief="groove", width=28,
+                 pady=4, anchor="w", padx=5, bg="#fff8e1").grid(
+            row=gijja_row, column=0, sticky="nsew", padx=1, pady=1)
+        gijja_var = tk.StringVar(value=old_result.get('gijja', GIJJA_OPTS[0]))
+        if not gijja_var.get():
+            gijja_var.set(GIJJA_OPTS[0])
+        entry_vars['gijja'] = gijja_var
+        gijja_menu = tk.OptionMenu(table_frame, gijja_var, *GIJJA_OPTS)
+        gijja_menu.config(font=("Arial", 9), width=20)
+        gijja_menu.grid(row=gijja_row, column=1, sticky="nsew", padx=1, pady=1)
+        tk.Label(table_frame, text="Aniqlanmadi", font=("Arial", 9), fg="#555",
+                 relief="groove", width=12, anchor="center").grid(
+            row=gijja_row, column=2, sticky="nsew", padx=1, pady=1)
+
+        # ── Real-time rang o'zgarishi ─────────────────────────────────────
+        def _update_patology_color(*_):
+            p_val = protozoa_var.get()
+            g_val = gijja_var.get()
+            p_color = "#cc0000" if p_val != NORMAL_VAL else "black"
+            g_color = "#cc0000" if g_val != NORMAL_VAL else "black"
+            protozoa_menu.config(fg=p_color, activeforeground=p_color)
+            gijja_menu.config(fg=g_color, activeforeground=g_color)
+
+        protozoa_var.trace_add('write', _update_patology_color)
+        gijja_var.trace_add('write', _update_patology_color)
+        _update_patology_color()   # boshlang'ich rang
+
+        # ── Tugmalar ─────────────────────────────────────────────────────
+        btn_frame = tk.Frame(dialog, pady=8)
+        btn_frame.pack(fill="x")
+
+        def saqlash():
+            data = {k: v.get() for k, v in entry_vars.items()}
+            result_json = json.dumps(data, ensure_ascii=False)
+            # Treeview uchun qisqacha natija
+            gijja_val   = data.get('gijja', GIJJA_OPTS[0])
+            protozoa_val = data.get('protozoa', PROTOZOA_OPTS[0])
+            patologik = []
+            if gijja_val != NORMAL_VAL:
+                patologik.append(gijja_val.split('—')[0].strip())
+            if protozoa_val != NORMAL_VAL:
+                patologik.append(protozoa_val.split('—')[0].strip())
+            if patologik:
+                natija_str = "Topildi: " + "; ".join(patologik)
+            else:
+                natija_str = f"Konsist:{data.get('konsistensiya','')}, {data.get('rangi','')}"
+            self._save_test_result_to_tree(test_id, result_json, natija_str)
+            dialog.destroy()
+            self.status_var.set("Najas tahlili natijasi saqlandi")
+
+        tk.Button(btn_frame, text="Saqlash", command=saqlash,
+                  bg="#28a745", fg="white", font=("Arial", 11, "bold"),
+                  width=15, pady=5).pack(side="left", padx=20)
+        tk.Button(btn_frame, text="Bekor", command=dialog.destroy,
+                  bg="#dc3545", fg="white", font=("Arial", 11),
+                  width=12, pady=5).pack(side="left")
+        dialog.bind('<Return>', lambda e: saqlash())
+        dialog.bind('<Escape>', lambda e: dialog.destroy())
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  PEPSINOGEN 1 VA 2
+    # ─────────────────────────────────────────────────────────────────────────
+    def show_pepsinogen_form(self, test_id, test_name, test_data):
+        """Pepsinogen 1 va Pepsinogen 2 uchun natija kiritish dialogi."""
+        import json
+
+        # Joriy orderdagi barcha pepsinogen test IDlarini yig'ish
+        peps_ids = [t['id'] for t in self.current_tests
+                    if 'pepsinogen' in (t.get('nomi') or '').lower()]
+
+        # Saqlangan natijani topish (istalgan pepsinogen testdan)
+        old_result = {}
+        for pid in peps_ids:
+            existing = self.test_results.get(pid, '')
+            if existing and str(existing).strip().startswith('{'):
+                try:
+                    old_result = json.loads(str(existing))
+                    break
+                except:
+                    pass
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Pepsinogen — Natija Kiritish")
+        dialog.geometry("520x260")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.focus_set()
+
+        tk.Label(dialog, text="PEPSINOGEN 1 VA PEPSINOGEN 2 (IFA USULIDA)",
+                 font=("Times New Roman", 12, "bold"), pady=8, wraplength=480).pack()
+
+        table_frame = tk.Frame(dialog, padx=10, pady=5)
+        table_frame.pack(fill="both", expand=True)
+
+        for col, (text, w) in enumerate([("Ko'rsatkich", 28), ("Natija", 18), ("Me'yor", 16)]):
+            tk.Label(table_frame, text=text, font=("Arial", 9, "bold"),
+                     relief="groove", width=w, pady=5, bg="#d0d0d0", anchor="center").grid(
+                row=0, column=col, sticky="nsew", padx=1, pady=1)
+
+        rows_config = [
+            ("Pepsinogen 1",          "pg1",      "30-130 mkg/l"),
+            ("Pepsinogen 2",          "pg2",      "4-22 mkg/l"),
+            ("PG I / PG II Nisbati",  "pg_ratio", "3-20"),
+        ]
+
+        entry_vars = {}
+        pg_ratio_var = tk.StringVar(value=old_result.get('pg_ratio', ''))
+
+        def _calc_ratio(*args):
+            """PG1 va PG2 kiritilganda nisbatni avtomatik hisoblash."""
+            try:
+                pg1_val = float(entry_vars['pg1'].get().replace(',', '.'))
+                pg2_val = float(entry_vars['pg2'].get().replace(',', '.'))
+                if pg2_val != 0:
+                    ratio = round(pg1_val / pg2_val, 2)
+                    pg_ratio_var.set(str(ratio))
+                else:
+                    pg_ratio_var.set('')
+            except (ValueError, KeyError):
+                pg_ratio_var.set('')
+
+        for row_idx, (ko_rsatkich, kalit, me_yor) in enumerate(rows_config, start=1):
+            tk.Label(table_frame, text=ko_rsatkich, font=("Arial", 9),
+                     relief="groove", width=28, pady=6, anchor="w", padx=5).grid(
+                row=row_idx, column=0, sticky="nsew", padx=1, pady=1)
+            if kalit == 'pg_ratio':
+                # Nisbat — faqat o'qish, avtomatik hisoblanadi
+                entry_vars[kalit] = pg_ratio_var
+                ratio_entry = tk.Entry(table_frame, textvariable=pg_ratio_var,
+                                       font=("Arial", 10, "bold"), width=16,
+                                       justify="center", state='readonly',
+                                       readonlybackground="#e8f5e9")
+                ratio_entry.grid(row=row_idx, column=1, sticky="nsew", padx=1, pady=1)
+            else:
+                var = tk.StringVar(value=old_result.get(kalit, ''))
+                entry_vars[kalit] = var
+                var.trace_add('write', _calc_ratio)
+                tk.Entry(table_frame, textvariable=var, font=("Arial", 10),
+                         width=16, justify="center").grid(
+                    row=row_idx, column=1, sticky="nsew", padx=1, pady=1)
+            tk.Label(table_frame, text=me_yor, font=("Arial", 9), fg="#555",
+                     relief="groove", width=16, anchor="center").grid(
+                row=row_idx, column=2, sticky="nsew", padx=1, pady=1)
+
+        # Mavjud qiymatlar bo'lsa nisbatni qayta hisoblash
+        if old_result.get('pg1') and old_result.get('pg2'):
+            _calc_ratio()
+
+        btn_frame = tk.Frame(dialog, pady=8)
+        btn_frame.pack(fill="x")
+
+        def saqlash():
+            data = {k: v.get() for k, v in entry_vars.items()}
+            # pg_ratio bo'sh bo'lsa qayta hisoblash
+            if not data.get('pg_ratio'):
+                _calc_ratio()
+                data['pg_ratio'] = pg_ratio_var.get()
+            result_json = json.dumps(data, ensure_ascii=False)
+            natija_str = f"PG1:{data.get('pg1','')}, PG2:{data.get('pg2','')}, Nisbat:{data.get('pg_ratio','')}"
+            # Barcha pepsinogen testlariga saqlash (PG1 va PG2 ikkalasiga)
+            for pid in peps_ids:
+                self._save_test_result_to_tree(pid, result_json, natija_str)
+            dialog.destroy()
+            self.status_var.set("Pepsinogen natijasi saqlandi")
+
+        tk.Button(btn_frame, text="Saqlash", command=saqlash,
+                  bg="#28a745", fg="white", font=("Arial", 11, "bold"),
+                  width=15, pady=5).pack(side="left", padx=20)
+        tk.Button(btn_frame, text="Bekor", command=dialog.destroy,
+                  bg="#dc3545", fg="white", font=("Arial", 11),
+                  width=12, pady=5).pack(side="left")
+        dialog.bind('<Return>', lambda e: saqlash())
+        dialog.bind('<Escape>', lambda e: dialog.destroy())
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  NECHIPORENKO TAHLILI
+    # ─────────────────────────────────────────────────────────────────────────
+    def show_nechiporenko_form(self, test_id, test_name, test_data):
+        """Siydikning Nechiporenko tahlili uchun natija kiritish dialogi."""
+        import json
+        old_result = {}
+        existing = self.test_results.get(test_id, '')
+        if existing and str(existing).strip().startswith('{'):
+            try:
+                old_result = json.loads(str(existing))
+            except:
+                old_result = {}
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Nechiporenko Tahlili — Natija Kiritish")
+        dialog.geometry("640x270")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.focus_set()
+
+        tk.Label(dialog, text="SIYDIKNING NECHIPORENKO TAHLILI",
+                 font=("Times New Roman", 13, "bold"), pady=8).pack()
+
+        table_frame = tk.Frame(dialog, padx=10, pady=5)
+        table_frame.pack(fill="both", expand=True)
+
+        headers = [("#", 4), ("Shaklli elementlar", 24), ("Natija", 16),
+                   ("Norma (Ayol)", 14), ("Norma (Erkak)", 14)]
+        for col, (text, w) in enumerate(headers):
+            tk.Label(table_frame, text=text, font=("Arial", 9, "bold"),
+                     relief="groove", width=w, pady=5, bg="#d0d0d0", anchor="center").grid(
+                row=0, column=col, sticky="nsew", padx=1, pady=1)
+
+        rows_config = [
+            ("Leykotsitlar",   "leykot",       "4000 gacha", "2000 gacha"),
+            ("Eritrotsitlar",  "eritr",         "1000 gacha", "1000 gacha"),
+            ("Silindirlar",    "silindirlar",   "20 gacha",   "20 gacha"),
+        ]
+
+        entry_vars = {}
+        for row_idx, (ko_rsatkich, kalit, norma_a, norma_e) in enumerate(rows_config, start=1):
+            tk.Label(table_frame, text=str(row_idx), font=("Arial", 9),
+                     relief="groove", width=4, anchor="center").grid(
+                row=row_idx, column=0, sticky="nsew", padx=1, pady=1)
+            tk.Label(table_frame, text=ko_rsatkich, font=("Arial", 9),
+                     relief="groove", width=24, pady=6, anchor="w", padx=5).grid(
+                row=row_idx, column=1, sticky="nsew", padx=1, pady=1)
+            var = tk.StringVar(value=old_result.get(kalit, ''))
+            entry_vars[kalit] = var
+            tk.Entry(table_frame, textvariable=var, font=("Arial", 10),
+                     width=14, justify="center").grid(
+                row=row_idx, column=2, sticky="nsew", padx=1, pady=1)
+            tk.Label(table_frame, text=norma_a, font=("Arial", 9), fg="#555",
+                     relief="groove", width=14, anchor="center").grid(
+                row=row_idx, column=3, sticky="nsew", padx=1, pady=1)
+            tk.Label(table_frame, text=norma_e, font=("Arial", 9), fg="#555",
+                     relief="groove", width=14, anchor="center").grid(
+                row=row_idx, column=4, sticky="nsew", padx=1, pady=1)
+
+        btn_frame = tk.Frame(dialog, pady=8)
+        btn_frame.pack(fill="x")
+
+        def saqlash():
+            data = {k: v.get() for k, v in entry_vars.items()}
+            result_json = json.dumps(data, ensure_ascii=False)
+            natija_str = f"Leyk:{data.get('leykot','')}, Eritr:{data.get('eritr','')}"
+            self._save_test_result_to_tree(test_id, result_json, natija_str)
+            dialog.destroy()
+            self.status_var.set("Nechiporenko tahlili natijasi saqlandi")
+
+        tk.Button(btn_frame, text="Saqlash", command=saqlash,
+                  bg="#28a745", fg="white", font=("Arial", 11, "bold"),
+                  width=15, pady=5).pack(side="left", padx=20)
+        tk.Button(btn_frame, text="Bekor", command=dialog.destroy,
+                  bg="#dc3545", fg="white", font=("Arial", 11),
+                  width=12, pady=5).pack(side="left")
+        dialog.bind('<Return>', lambda e: saqlash())
+        dialog.bind('<Escape>', lambda e: dialog.destroy())
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  ZIMNITSKIY TAHLILI
+    # ─────────────────────────────────────────────────────────────────────────
+    def show_zimnitskiy_form(self, test_id, test_name, test_data):
+        """Siydikning Zimnitskiy tahlili uchun natija kiritish dialogi."""
+        import json
+        old_result = {}
+        existing = self.test_results.get(test_id, '')
+        if existing and str(existing).strip().startswith('{'):
+            try:
+                old_result = json.loads(str(existing))
+            except:
+                old_result = {}
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Zimnitskiy Tahlili — Natija Kiritish")
+        dialog.geometry("620x520")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.focus_set()
+
+        tk.Label(dialog, text="SIYDIKNING ZIMNITSKIY TAHLILI",
+                 font=("Times New Roman", 13, "bold"), pady=8).pack()
+
+        table_frame = tk.Frame(dialog, padx=10, pady=5)
+        table_frame.pack(fill="both", expand=True)
+
+        headers = [("#", 4), ("Namuna olingan vaqt", 18),
+                   ("Siydik miqdori (ml)", 18), ("Solishtirma og'irligi", 18)]
+        for col, (text, w) in enumerate(headers):
+            tk.Label(table_frame, text=text, font=("Arial", 9, "bold"),
+                     relief="groove", width=w, pady=5, bg="#d0d0d0", anchor="center",
+                     wraplength=130).grid(row=0, column=col, sticky="nsew", padx=1, pady=1)
+
+        sample_times = ["9:00", "12:00", "15:00", "18:00", "21:00", "24:00", "3:00", "6:00"]
+        miqdor_vars = []
+        solishtirma_vars = []
+
+        for row_idx, vaqt in enumerate(sample_times, start=1):
+            # 1-4 qator kunduzgi (yashil), 5-8 qator tungi (qizil)
+            row_bg = "#e8f5e9" if row_idx <= 4 else "#fce4ec"
+            tk.Label(table_frame, text=str(row_idx), font=("Arial", 9),
+                     relief="groove", width=4, anchor="center", bg=row_bg).grid(
+                row=row_idx, column=0, sticky="nsew", padx=1, pady=1)
+            tk.Label(table_frame, text=vaqt, font=("Arial", 10),
+                     relief="groove", width=18, anchor="center", bg=row_bg).grid(
+                row=row_idx, column=1, sticky="nsew", padx=1, pady=1)
+            mq_var = tk.StringVar(value=old_result.get(f"miqdori_{row_idx}", ''))
+            miqdor_vars.append(mq_var)
+            tk.Entry(table_frame, textvariable=mq_var, font=("Arial", 10),
+                     width=16, justify="center", bg=row_bg).grid(
+                row=row_idx, column=2, sticky="nsew", padx=1, pady=1)
+            sq_var = tk.StringVar(value=old_result.get(f"solishtirma_{row_idx}", ''))
+            solishtirma_vars.append(sq_var)
+            tk.Entry(table_frame, textvariable=sq_var, font=("Arial", 10),
+                     width=16, justify="center", bg=row_bg).grid(
+                row=row_idx, column=3, sticky="nsew", padx=1, pady=1)
+
+        sep_row = len(sample_times) + 1
+        kunduzgi_var = tk.StringVar(value=old_result.get("kunduzgi_diurez", ''))
+        tungi_var    = tk.StringVar(value=old_result.get("tungi_diurez", ''))
+        jami_var     = tk.StringVar(value=old_result.get("jami_diurez", ''))
+
+        _calc_busy = [False]
+
+        def _auto_calc_totals(*args):
+            """miqdori_1-8 dan kunduzgi/tungi/jami avtomatik hisoblash."""
+            if _calc_busy[0]:
+                return
+            _calc_busy[0] = True
+            try:
+                k = sum(int(float(miqdor_vars[i].get().strip() or '0')) for i in range(4))
+                t = sum(int(float(miqdor_vars[i].get().strip() or '0')) for i in range(4, 8))
+                kunduzgi_var.set(str(k) if k > 0 else '')
+                tungi_var.set(str(t) if t > 0 else '')
+                jami_var.set(str(k + t) if (k + t) > 0 else '')
+            except Exception:
+                pass
+            finally:
+                _calc_busy[0] = False
+
+        def _auto_calc_jami(*args):
+            """Kunduzgi yoki tungi qo'lda o'zgartirilganda jami yangilash."""
+            if _calc_busy[0]:
+                return
+            _calc_busy[0] = True
+            try:
+                k = int(float(kunduzgi_var.get().strip() or '0'))
+                t = int(float(tungi_var.get().strip() or '0'))
+                jami_var.set(str(k + t) if (k + t) > 0 else '')
+            except Exception:
+                pass
+            finally:
+                _calc_busy[0] = False
+
+        for var in miqdor_vars:
+            var.trace_add('write', _auto_calc_totals)
+        kunduzgi_var.trace_add('write', _auto_calc_jami)
+        tungi_var.trace_add('write', _auto_calc_jami)
+
+        # Dastlabki avtohisob (eski ma'lumot bor bo'lsa)
+        _auto_calc_totals()
+
+        summary_styles = [
+            ("Kunduzgi diurez (ml)",      kunduzgi_var, "#e8f5e9"),
+            ("Tungi diurez (ml)",         tungi_var,    "#fce4ec"),
+            ("Jami sutkalik diurez (ml)", jami_var,     "#f5f5f5"),
+        ]
+        for offset, (label_text, var, lbl_bg) in enumerate(summary_styles):
+            tk.Label(table_frame, text=label_text, font=("Arial", 9, "bold"),
+                     relief="groove", pady=4, anchor="w", padx=5, bg=lbl_bg).grid(
+                row=sep_row + offset, column=0, columnspan=2, sticky="nsew", padx=1, pady=1)
+            tk.Entry(table_frame, textvariable=var, font=("Arial", 10),
+                     width=16, justify="center", bg=lbl_bg).grid(
+                row=sep_row + offset, column=2, sticky="nsew", padx=1, pady=1)
+
+        btn_frame = tk.Frame(dialog, pady=8)
+        btn_frame.pack(fill="x")
+
+        def saqlash():
+            data = {}
+            for i, (mq, sq) in enumerate(zip(miqdor_vars, solishtirma_vars), start=1):
+                data[f"miqdori_{i}"]     = mq.get()
+                data[f"solishtirma_{i}"] = sq.get()
+            data["kunduzgi_diurez"] = kunduzgi_var.get()
+            data["tungi_diurez"]    = tungi_var.get()
+            data["jami_diurez"]     = jami_var.get()
+            result_json = json.dumps(data, ensure_ascii=False)
+            natija_str = f"Jami diurez: {data.get('jami_diurez','')} ml"
+            self._save_test_result_to_tree(test_id, result_json, natija_str)
+            dialog.destroy()
+            self.status_var.set("Zimnitskiy tahlili natijasi saqlandi")
+
+        tk.Button(btn_frame, text="Saqlash", command=saqlash,
+                  bg="#28a745", fg="white", font=("Arial", 11, "bold"),
+                  width=15, pady=5).pack(side="left", padx=20)
+        tk.Button(btn_frame, text="Bekor", command=dialog.destroy,
+                  bg="#dc3545", fg="white", font=("Arial", 11),
+                  width=12, pady=5).pack(side="left")
+        dialog.bind('<Return>', lambda e: saqlash())
+        dialog.bind('<Escape>', lambda e: dialog.destroy())
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  GTT — GLYUKOZAGA TOLERANTLIK TESTI
+    # ─────────────────────────────────────────────────────────────────────────
+    def show_gtt_form(self, test_id, test_name, test_data):
+        """Glyukozaga tolerantlik testi uchun natija kiritish dialogi.
+        Jadval: Natoshchak / 1 soat / 2 soat + avtomatik xulosa.
+        """
+        import json
+        old_result = {}
+        existing = self.test_results.get(test_id, '')
+        if existing and str(existing).strip().startswith('{'):
+            try:
+                old_result = json.loads(str(existing))
+            except Exception:
+                old_result = {}
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("GTT \u2014 Glyukozaga Tolerantlik Testi")
+        dialog.geometry("580x480")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.focus_set()
+
+        tk.Label(dialog,
+                 text="GLYUKOZAGA TOLERANTLIK TESTI",
+                 font=("Times New Roman", 13, "bold"), fg="#27ae60", pady=6).pack()
+        tk.Label(dialog,
+                 text="(75 g glyukoza bilan)",
+                 font=("Times New Roman", 10, "italic"), pady=2).pack()
+
+        # ── Jadval ──
+        table_frame = tk.Frame(dialog, padx=15, pady=8)
+        table_frame.pack(fill="x")
+
+        # Sarlavha qatori
+        hdrs = [("#",    3), ("Bosqich",              24),
+                ("Natija\n(mmol/L)", 12), ("Norma",  10), ("Holat", 10)]
+        for col, (text, w) in enumerate(hdrs):
+            tk.Label(table_frame, text=text, font=("Arial", 9, "bold"),
+                     relief="groove", width=w, pady=4, bg="#b0c4de",
+                     anchor="center", wraplength=90).grid(
+                row=0, column=col, sticky="nsew", padx=1, pady=1)
+
+        # Ma'lumotlar qatorlari
+        GTT_ROWS = [
+            ("natoshchak", "Glyukoza \u2014 natoshchak\n(och qoringa)",
+             "#e8f5e9", "3,2\u20136,1",  3.2,  6.1),
+            ("bir_soat",   "Glyukoza \u2014 1 soat\no\u2018tgach",
+             "#fff9c4", "\u22649,4",      None, 9.4),
+            ("ikki_soat",  "Glyukoza \u2014 2 soat\no\u2018tgach",
+             "#fce4ec", "\u22647,8",      None, 7.8),
+        ]
+        entry_vars = {}
+        status_labels = {}
+
+        for row_idx, (key, label, bg, norma_txt, mn, mx) in enumerate(GTT_ROWS, start=1):
+            # #
+            tk.Label(table_frame, text=str(row_idx), font=("Arial", 9),
+                     relief="groove", width=3, anchor="center", bg=bg).grid(
+                row=row_idx, column=0, sticky="nsew", padx=1, pady=1)
+            # Bosqich
+            tk.Label(table_frame, text=label, font=("Arial", 10),
+                     relief="groove", width=24, anchor="w", padx=5, bg=bg,
+                     wraplength=180, justify="left").grid(
+                row=row_idx, column=1, sticky="nsew", padx=1, pady=1)
+            # Natija
+            var = tk.StringVar(value=str(old_result.get(key, '')))
+            entry_vars[key] = var
+            ent = tk.Entry(table_frame, textvariable=var, font=("Arial", 11, "bold"),
+                           width=10, justify="center", bg=bg)
+            ent.grid(row=row_idx, column=2, sticky="nsew", padx=1, pady=1)
+            # Norma
+            tk.Label(table_frame, text=norma_txt, font=("Arial", 10),
+                     relief="groove", width=10, anchor="center", bg=bg).grid(
+                row=row_idx, column=3, sticky="nsew", padx=1, pady=1)
+            # Holat (avtomatik)
+            st_lbl = tk.Label(table_frame, text="", font=("Arial", 9, "bold"),
+                              relief="groove", width=10, anchor="center", bg=bg)
+            st_lbl.grid(row=row_idx, column=4, sticky="nsew", padx=1, pady=1)
+            status_labels[key] = st_lbl
+
+        # ── Xulosa paneli ──
+        xulosa_frame = tk.LabelFrame(dialog, text="Xulosa (avtomatik)",
+                                      font=("Arial", 10, "bold"), padx=10, pady=5)
+        xulosa_frame.pack(fill="x", padx=15, pady=5)
+        xulosa_var = tk.StringVar(value=old_result.get('xulosa', ''))
+        xulosa_label = tk.Label(xulosa_frame, textvariable=xulosa_var,
+                                font=("Times New Roman", 11), fg="#333",
+                                wraplength=520, justify="left", anchor="w")
+        xulosa_label.pack(fill="x")
+
+        # ── Avtomatik xulosa hisoblash ──
+        def _update_xulosa(*args):
+            vals = {}
+            for key, var in entry_vars.items():
+                v = var.get().strip().replace(',', '.')
+                try:
+                    vals[key] = float(v)
+                except Exception:
+                    pass
+
+            # Holat labellarini yangilash
+            for key, (_, _, _, _, mn, mx) in zip(
+                    ['natoshchak', 'bir_soat', 'ikki_soat'], GTT_ROWS):
+                sl = status_labels[key]
+                if key not in vals:
+                    sl.config(text="", bg=GTT_ROWS[['natoshchak', 'bir_soat', 'ikki_soat'].index(key)][3 - 1])
+                    continue
+                v = vals[key]
+                if mx is not None and v > mx:
+                    sl.config(text="\u2191 Yuqori", fg="red",
+                              bg="#ffcdd2")
+                elif mn is not None and v < mn:
+                    sl.config(text="\u2193 Past", fg="blue",
+                              bg="#bbdefb")
+                else:
+                    sl.config(text="N \u2014 Norma", fg="green",
+                              bg=GTT_ROWS[['natoshchak', 'bir_soat', 'ikki_soat'].index(key)][3 - 1])
+
+            # Xulosa
+            natosh = vals.get('natoshchak')
+            bir    = vals.get('bir_soat')
+            ikki   = vals.get('ikki_soat')
+
+            if not vals:
+                xulosa_var.set("")
+                return
+
+            parts = []
+            diag = ""
+
+            # 1. Natoshchak baholash
+            if natosh is not None:
+                if natosh >= 7.0:
+                    parts.append(f"Natoshchak glyukoza: {natosh} mmol/L \u2014 QANDLI DIABET (>7.0)")
+                    diag = "diabet"
+                elif natosh >= 6.1:
+                    parts.append(f"Natoshchak glyukoza: {natosh} mmol/L \u2014 Natoshchak glikemiya buzilgan (6.1\u20137.0)")
+                    diag = "ngb"
+                else:
+                    parts.append(f"Natoshchak glyukoza: {natosh} mmol/L \u2014 norma (3.2\u20136.1)")
+
+            # 2. 1 soat baholash
+            if bir is not None:
+                if bir > 9.4:
+                    parts.append(f"1 soat: {bir} mmol/L \u2014 yuqori (norma \u22649.4)")
+                else:
+                    parts.append(f"1 soat: {bir} mmol/L \u2014 norma (\u22649.4)")
+
+            # 3. 2 soat baholash
+            if ikki is not None:
+                if ikki >= 11.1:
+                    parts.append(f"2 soat: {ikki} mmol/L \u2014 QANDLI DIABET (\u226511.1)")
+                    diag = "diabet"
+                elif ikki > 7.8:
+                    parts.append(f"2 soat: {ikki} mmol/L \u2014 Tolerantlik buzilgan (7.8\u201311.1)")
+                    if diag != "diabet":
+                        diag = "ntb"
+                else:
+                    parts.append(f"2 soat: {ikki} mmol/L \u2014 norma (\u22647.8)")
+
+            # Umumiy xulosa
+            parts.append("")
+            if diag == "diabet":
+                parts.append("\u26a0 XULOSA: Qandli diabet (diabetes mellitus) ehtimoli yuqori")
+                xulosa_label.config(fg="#c62828")
+            elif diag == "ntb":
+                parts.append("\u26a0 XULOSA: Glyukozaga tolerantlik buzilgan (NTB)")
+                xulosa_label.config(fg="#e65100")
+            elif diag == "ngb":
+                parts.append("\u26a0 XULOSA: Natoshchak glikemiya buzilgan (NGB)")
+                xulosa_label.config(fg="#e65100")
+            else:
+                parts.append("\u2714 XULOSA: Glyukozaga tolerantlik norma")
+                xulosa_label.config(fg="#2e7d32")
+
+            xulosa_var.set("\n".join(parts))
+
+        # Har bir entry o'zgarganda xulosa yangilansin
+        for var in entry_vars.values():
+            var.trace_add('write', _update_xulosa)
+
+        # Dastlabki xulosa
+        _update_xulosa()
+
+        # ── Tugmalar ──
+        btn_frame = tk.Frame(dialog, pady=8)
+        btn_frame.pack(fill="x")
+
+        def saqlash():
+            data = {}
+            for key, var in entry_vars.items():
+                v = var.get().strip().replace(',', '.')
+                if v:
+                    try:
+                        data[key] = round(float(v), 1)
+                    except ValueError:
+                        data[key] = v
+            if not data:
+                import tkinter.messagebox as _mb
+                _mb.showwarning("Diqqat", "Kamida bitta natija kiriting!", parent=dialog)
+                return
+            # Xulosani ham saqlaymiz
+            if xulosa_var.get().strip():
+                data['xulosa'] = xulosa_var.get().strip()
+            result_json = json.dumps(data, ensure_ascii=False)
+            natija_str = " | ".join(
+                f"{l}: {data[k]}" for k, l in
+                [("natoshchak", "Ach"), ("bir_soat", "1s"), ("ikki_soat", "2s")]
+                if k in data and k != 'xulosa')
+            self._save_test_result_to_tree(test_id, result_json, natija_str or "Kiritilgan")
+            dialog.destroy()
+            self.load_tests()
+            self.status_var.set("GTT natijasi saqlandi")
+
+        tk.Button(btn_frame, text="\u2714 Saqlash (Enter)", command=saqlash,
+                  bg="#28a745", fg="white", font=("Arial", 11, "bold"),
+                  width=16, pady=5).pack(side="left", padx=20)
+        tk.Button(btn_frame, text="Bekor (Esc)", command=dialog.destroy,
+                  bg="#dc3545", fg="white", font=("Arial", 11),
+                  width=14, pady=5).pack(side="left")
+
+        dialog.bind('<Return>', lambda e: saqlash())
+        dialog.bind('<Escape>', lambda e: dialog.destroy())
+
+        # Birinchi entry ga fokus
+        dialog.after(100, lambda: [
+            w for w in table_frame.winfo_children()
+            if isinstance(w, tk.Entry)
+        ][0].focus_set() if [
+            w for w in table_frame.winfo_children()
+            if isinstance(w, tk.Entry)
+        ] else None)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  SPERMOGRAMMA
+    # ─────────────────────────────────────────────────────────────────────────
+    def show_spermogramma_form(self, test_id, test_name, test_data):
+        """Spermogramma uchun natija kiritish dialogi (auto-hisoblash bilan)."""
+        import json
+        import tkinter.messagebox as mb
+        old_result = {}
+        existing = self.test_results.get(test_id, '')
+        if existing and str(existing).strip().startswith('{'):
+            try:
+                old_result = json.loads(str(existing))
+            except:
+                old_result = {}
+
+        # ── Avtomatik hisoblash uchun sozlamalar ────────────────────────────
+        AUTO_CALC = {'sperma_umumiy', 'harakat_xar', 'tirik'}
+        AUTO_BG   = "#e8f5e9"   # yashil fon — hisoblangan maydonlar
+        AUTO_FG   = "#1a5e20"   # to'q yashil matn
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Spermogramma — Natija Kiritish")
+        dialog.geometry("660x720")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.focus_set()
+
+        tk.Label(dialog, text="SPERMOGRAMMA",
+                 font=("Times New Roman", 14, "bold"), pady=8).pack()
+
+        outer = tk.Frame(dialog)
+        outer.pack(fill="both", expand=True)
+        canvas = tk.Canvas(outer, borderwidth=0)
+        vsb = tk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        table_frame = tk.Frame(canvas, padx=10, pady=5)
+        cw = canvas.create_window((0, 0), window=table_frame, anchor="nw")
+        table_frame.bind("<Configure>",
+                         lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(cw, width=e.width))
+        dialog.bind("<MouseWheel>",
+                    lambda e: canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
+
+        # Sarlavha ustunlari
+        for col, (text, w) in enumerate([("Ko'rsatkich", 36), ("Natija", 20), ("Me'yor", 16)]):
+            tk.Label(table_frame, text=text, font=("Arial", 9, "bold"),
+                     relief="groove", width=w, pady=5, bg="#d0d0d0",
+                     anchor="center").grid(row=0, column=col,
+                                           sticky="nsew", padx=1, pady=1)
+
+        rows_config = [
+            # (nomi, kalit, tur, opts_list, me'yor)
+            # tur: "text" | "opts" | "auto"
+            ("Saqlanish vaqti",                "saqlanish",    "text", None,
+             "3-5 sutka"),
+            ("Xajmi (ml)",                     "xajmi",        "text", None,
+             "2-6.4 ml"),
+            ("Rangi",                          "rangi",        "opts",
+             ["Qo'ng'ir sut", "Oq", "Sariq", "Boshqa"],        "Qo'ng'ir sut"),
+            ("Xidi",                           "xidi",         "opts",
+             ["Xom kashtan", "Boshqa"],                         "Xom kashtan"),
+            ("Suyulish vaqti (daq.)",          "suyulish",     "text", None,
+             "10-30 daq."),
+            ("rN (pH)",                        "rn",           "text", None,
+             "7.2-8.0"),
+            ("Ilashuvchanglik (mm)",            "ilashuv",      "text", None,
+             "0-20 mm"),
+            ("Spermatozoidlar 1 mlda",         "sperma_1ml",   "text", None,
+             ">=20 mln."),
+            # AUTO: xajmi x sperma_1ml
+            ("Spermatozoidlar umumiy xajmida *","sperma_umumiy","auto", None,
+             ">=40 mln."),
+            ("Harakati:  a) faol (%)",         "harakat_faol", "text", None,
+             "40-85%"),
+            ("Harakati:  b) sust (%)",         "harakat_sust", "text", None,
+             "4-30%"),
+            # AUTO: 100 - (a+b)
+            ("Harakati:  v) harakatsiz (%) *", "harakat_xar",  "auto", None,
+             "0-14%"),
+            # AUTO: a+b
+            ("Tirik spermatozoidlar (%) *",    "tirik",        "auto", None,
+             ">=50%"),
+            ("Patologik shakllar (%)",         "patologik",    "text", None,
+             "15-25%"),
+            ("Spermatogen epiteliy",           "epitel",       "text", None,
+             "2-10 k.d."),
+            ("Leykotsitlar",                   "leykot",       "text", None,
+             "1-8 k.d."),
+            ("Letsitin donachalar",            "letsitin",     "opts",
+             ["Ko'p miqdorda", "Oz miqdorda", "Yo'q"],          "Ko'p miqdorda"),
+            ("Agglyutinatsiya",                "agglyut",      "opts",
+             ["Yo'q", "Bor"],                                   "Yo'q"),
+            ("Fruktoza (mkmol/eyak.)",         "fruktoza",     "text", None,
+             ">=1.3"),
+            ("Limon kislotasi (mkmol/eyak.)", "limon",         "text", None,
+             ">=52"),
+        ]
+
+        entry_vars   = {}
+        auto_entries = {}   # kalit -> Entry widget (readonly)
+
+        for row_idx, row_cfg in enumerate(rows_config, start=1):
+            ko_rsatkich, kalit, tur, opts_list, me_yor = row_cfg
+
+            # Ko'rsatkich ustuni
+            lbl_kw = {"bg": AUTO_BG} if tur == "auto" else {}
+            tk.Label(table_frame, text=ko_rsatkich, font=("Arial", 9),
+                     relief="groove", width=36, pady=3, anchor="w", padx=5,
+                     wraplength=255, justify="left",
+                     **lbl_kw).grid(row=row_idx, column=0,
+                                    sticky="nsew", padx=1, pady=1)
+
+            var = tk.StringVar(value=old_result.get(kalit, ''))
+            entry_vars[kalit] = var
+
+            if tur == "auto":
+                # Read-only: faqat hisoblash orqali yangilanadi
+                widget = tk.Entry(table_frame, textvariable=var,
+                                  font=("Arial", 10, "bold"), width=18,
+                                  justify="center", state='readonly',
+                                  readonlybackground=AUTO_BG, fg=AUTO_FG)
+                auto_entries[kalit] = widget
+            elif tur == "text":
+                widget = tk.Entry(table_frame, textvariable=var,
+                                  font=("Arial", 10), width=18, justify="center")
+            else:   # opts
+                if not var.get():
+                    var.set(opts_list[0])
+                widget = tk.OptionMenu(table_frame, var, *opts_list)
+                widget.config(font=("Arial", 9), width=15)
+
+            widget.grid(row=row_idx, column=1, sticky="nsew", padx=1, pady=1)
+
+            # Me'yor ustuni
+            me_kw = {"bg": AUTO_BG} if tur == "auto" else {}
+            tk.Label(table_frame, text=me_yor, font=("Arial", 9), fg="#555",
+                     relief="groove", width=16, anchor="center",
+                     **me_kw).grid(row=row_idx, column=2,
+                                   sticky="nsew", padx=1, pady=1)
+
+        # Izoh satri
+        tk.Label(table_frame,
+                 text="* — avtomatik hisoblangan, o'zgartirib bo'lmaydi",
+                 font=("Arial", 8, "italic"), fg="#777",
+                 anchor="w").grid(row=len(rows_config)+1, column=0,
+                                  columnspan=3, sticky="w", padx=6, pady=(4, 2))
+
+        # ── Ogohlantirish paneli (scroll tashqarisida) ───────────────────────
+        warn_var   = tk.StringVar(value="")
+        warn_frame = tk.Frame(dialog, bg="#fff3cd", bd=1, relief="solid")
+        tk.Label(warn_frame, textvariable=warn_var,
+                 font=("Arial", 9, "bold"), fg="#7a4f00",
+                 bg="#fff3cd", anchor="center", pady=4).pack(fill="x")
+
+        # ── Tugmalar paneli (oldin placeholder) ─────────────────────────────
+        btn_frame = tk.Frame(dialog, pady=8)
+        btn_frame.pack(fill="x")
+
+        def _show_warn(msg):
+            """Ogohlantirish kadrini ko'rsat/yashir."""
+            if msg:
+                warn_var.set(msg)
+                warn_frame.pack(fill="x", before=btn_frame)
+            else:
+                warn_var.set("")
+                warn_frame.pack_forget()
+
+        # ── Auto-hisoblash yordamchi funksiyasi ──────────────────────────────
+        def _set_auto(kalit, value_str):
+            """Readonly Entry ga qiymat yozish."""
+            w = auto_entries[kalit]
+            w.config(state='normal')
+            entry_vars[kalit].set(value_str)
+            w.config(state='readonly')
+
+        # ── Hisoblash: umumiy son ────────────────────────────────────────────
+        def _calc_umumiy(*_):
+            """sperma_umumiy = xajmi (ml) * sperma_1ml"""
+            try:
+                hajm_s = entry_vars['xajmi'].get().strip().replace(',', '.')
+                mlda_s = entry_vars['sperma_1ml'].get().strip().replace(',', '.')
+                if not hajm_s or not mlda_s:
+                    _set_auto('sperma_umumiy', '')
+                    return
+                hajm = float(hajm_s)
+                mlda = float(mlda_s)
+                if hajm < 0 or mlda < 0:
+                    _set_auto('sperma_umumiy', '--')
+                    return
+                res = hajm * mlda
+                _set_auto('sperma_umumiy',
+                          f"{int(res)}" if res == int(res) else f"{res:.2f}")
+            except ValueError:
+                _set_auto('sperma_umumiy', '')
+
+        # ── Hisoblash: harakatchanlik va tirik ──────────────────────────────
+        def _calc_harakat(*_):
+            """harakat_xar = 100 - (a+b);  tirik = a+b"""
+            a_s = entry_vars['harakat_faol'].get().strip().replace(',', '.')
+            b_s = entry_vars['harakat_sust'].get().strip().replace(',', '.')
+            if not a_s and not b_s:
+                _set_auto('harakat_xar', '')
+                _set_auto('tirik', '')
+                _show_warn('')
+                return
+            try:
+                a = float(a_s) if a_s else 0.0
+                b = float(b_s) if b_s else 0.0
+            except ValueError:
+                _set_auto('harakat_xar', '')
+                _set_auto('tirik', '')
+                _show_warn('')
+                return
+            if a < 0 or b < 0:
+                _set_auto('harakat_xar', '--')
+                _set_auto('tirik', '--')
+                _show_warn('Manfiy qiymat kiritilmasin!')
+                return
+            summa = a + b
+            if summa > 100:
+                _set_auto('harakat_xar', '--')
+                _set_auto('tirik', '--')
+                _show_warn(
+                    f'a + b = {summa:.0f}%  →  100% dan oshib ketdi! Tekshiring.')
+                return
+            _show_warn('')
+            _set_auto('harakat_xar', f"{100.0 - summa:.0f}")
+            _set_auto('tirik',       f"{summa:.0f}")
+
+        # Trace qo'shish — real-time hisoblash
+        entry_vars['xajmi'].trace_add('write',        _calc_umumiy)
+        entry_vars['sperma_1ml'].trace_add('write',   _calc_umumiy)
+        entry_vars['harakat_faol'].trace_add('write', _calc_harakat)
+        entry_vars['harakat_sust'].trace_add('write', _calc_harakat)
+
+        # Yuklangan qiymatlar bilan boshlang'ich hisoblash
+        _calc_umumiy()
+        _calc_harakat()
+
+        # ── Saqlash (validatsiya bilan) ──────────────────────────────────────
+        def saqlash():
+            errors = []
+            # Xajm tekshiruvi
+            xajm_s = entry_vars['xajmi'].get().strip().replace(',', '.')
+            if xajm_s:
+                try:
+                    if float(xajm_s) <= 0:
+                        errors.append("Xajmi (ml) 0 dan katta bo'lishi kerak.")
+                except ValueError:
+                    errors.append("Xajmi (ml) — noto'g'ri raqam.")
+            # Harakat foizlari tekshiruvi
+            a_s = entry_vars['harakat_faol'].get().strip().replace(',', '.')
+            b_s = entry_vars['harakat_sust'].get().strip().replace(',', '.')
+            if a_s or b_s:
+                try:
+                    a = float(a_s) if a_s else 0.0
+                    b = float(b_s) if b_s else 0.0
+                    if a < 0 or b < 0:
+                        errors.append("Harakat foizlari manfiy bo'lmasin.")
+                    elif a + b > 100:
+                        errors.append(
+                            f"a + b = {a+b:.0f}% — 100% dan oshmasin.")
+                except ValueError:
+                    errors.append("Harakat foizlari — noto'g'ri raqam.")
+            if errors:
+                mb.showwarning(
+                    "Kiritish xatosi",
+                    "Quyidagi xatolarni to'g'rilang:\n\n" +
+                    "\n".join(f"  * {e}" for e in errors),
+                    parent=dialog)
+                return
+
+            data = {k: v.get() for k, v in entry_vars.items()}
+            result_json = json.dumps(data, ensure_ascii=False)
+            umumiy = data.get('sperma_umumiy', '')
+            a_foiz = data.get('harakat_faol', '')
+            natija_str = (f"Xajm:{data.get('xajmi','')}ml | "
+                          f"Jami:{umumiy} mln | "
+                          f"a-faol:{a_foiz}%")
+            self._save_test_result_to_tree(test_id, result_json, natija_str)
+            dialog.destroy()
+            self.status_var.set("Spermogramma natijasi saqlandi")
+
+        tk.Button(btn_frame, text="Saqlash", command=saqlash,
+                  bg="#28a745", fg="white", font=("Arial", 11, "bold"),
+                  width=15, pady=5).pack(side="left", padx=20)
+        tk.Button(btn_frame, text="Bekor", command=dialog.destroy,
+                  bg="#dc3545", fg="white", font=("Arial", 11),
+                  width=12, pady=5).pack(side="left")
+        dialog.bind('<Return>', lambda e: saqlash())
+        dialog.bind('<Escape>', lambda e: dialog.destroy())
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  TORCH INFEKSIYASI IgM VA IgG
+    # ─────────────────────────────────────────────────────────────────────────
+    def show_torch_form(self, test_id, test_name, test_data):
+        """TORCH infeksiyasi IgM va IgG uchun natija kiritish dialogi."""
+        import json
+        old_result = {}
+        existing = self.test_results.get(test_id, '')
+        if existing and str(existing).strip().startswith('{'):
+            try:
+                old_result = json.loads(str(existing))
+            except:
+                old_result = {}
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("TORCH Infeksiyasi — Natija Kiritish")
+        dialog.geometry("700x360")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.focus_set()
+
+        tk.Label(dialog, text="TORCH INFEKSIYASIGA IgM VA IgG",
+                 font=("Times New Roman", 13, "bold"), pady=8).pack()
+
+        table_frame = tk.Frame(dialog, padx=10, pady=5)
+        table_frame.pack(fill="both", expand=True)
+
+        for col, (text, w) in enumerate([("Ko'rsatkich", 36), ("IgG", 16), ("IgM", 16), ("Me'yor", 12)]):
+            tk.Label(table_frame, text=text, font=("Arial", 9, "bold"),
+                     relief="groove", width=w, pady=5, bg="#d0d0d0", anchor="center").grid(
+                row=0, column=col, sticky="nsew", padx=1, pady=1)
+
+        rows_config = [
+            ("Toxoplasma (TOKSOPLAZMOZ) Ekspress test",           "toxo"),
+            ("Rubella (QIZILCHA) Ekspress test",                  "rubella"),
+            ("Cytomegalovirus (SITOMYEGALOVIRUS) Ekspress test",  "cmv"),
+            ("Herpes 1 (ODDIY GERPYES 1 tipi) Ekspress test",    "herpes1"),
+            ("Herpes 2 (ODDIY GERPYES 2 tipi) Ekspress test",    "herpes2"),
+        ]
+
+        torch_opts = ["Manfiy (-)", "Musbat (+)", "Musbat (++)", "Musbat (+++)"]
+        igg_vars = {}
+        igm_vars = {}
+
+        for row_idx, (ko_rsatkich, kalit) in enumerate(rows_config, start=1):
+            tk.Label(table_frame, text=ko_rsatkich, font=("Arial", 9),
+                     relief="groove", width=36, pady=5, anchor="w", padx=5,
+                     wraplength=255, justify="left").grid(
+                row=row_idx, column=0, sticky="nsew", padx=1, pady=1)
+            igg_var = tk.StringVar(value=old_result.get(f"{kalit}_igg", torch_opts[0]))
+            igg_vars[kalit] = igg_var
+            igg_menu = tk.OptionMenu(table_frame, igg_var, *torch_opts)
+            igg_menu.config(font=("Arial", 9), width=13)
+            igg_menu.grid(row=row_idx, column=1, sticky="nsew", padx=1, pady=1)
+            igm_var = tk.StringVar(value=old_result.get(f"{kalit}_igm", torch_opts[0]))
+            igm_vars[kalit] = igm_var
+            igm_menu = tk.OptionMenu(table_frame, igm_var, *torch_opts)
+            igm_menu.config(font=("Arial", 9), width=13)
+            igm_menu.grid(row=row_idx, column=2, sticky="nsew", padx=1, pady=1)
+            tk.Label(table_frame, text="Manfiy (-)", font=("Arial", 9), fg="#555",
+                     relief="groove", width=12, anchor="center").grid(
+                row=row_idx, column=3, sticky="nsew", padx=1, pady=1)
+
+        btn_frame = tk.Frame(dialog, pady=8)
+        btn_frame.pack(fill="x")
+
+        def saqlash():
+            data = {}
+            for kalit in [r[1] for r in rows_config]:
+                data[f"{kalit}_igg"] = igg_vars[kalit].get()
+                data[f"{kalit}_igm"] = igm_vars[kalit].get()
+            result_json = json.dumps(data, ensure_ascii=False)
+            pos = [r[0].split()[0] for r in rows_config
+                   if igg_vars[r[1]].get() != "Manfiy (-)" or igm_vars[r[1]].get() != "Manfiy (-)"]
+            natija_str = ("Musbat: " + ", ".join(pos)) if pos else "Barchasi Manfiy (-)"
+            self._save_test_result_to_tree(test_id, result_json, natija_str)
+            dialog.destroy()
+            self.status_var.set("TORCH natijasi saqlandi")
+
+        tk.Button(btn_frame, text="Saqlash", command=saqlash,
+                  bg="#28a745", fg="white", font=("Arial", 11, "bold"),
+                  width=15, pady=5).pack(side="left", padx=20)
+        tk.Button(btn_frame, text="Bekor", command=dialog.destroy,
+                  bg="#dc3545", fg="white", font=("Arial", 11),
+                  width=12, pady=5).pack(side="left")
+        dialog.bind('<Return>', lambda e: saqlash())
+        dialog.bind('<Escape>', lambda e: dialog.destroy())
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def show_template_based_dialog(self, test_id, test_name, test_data, template):
+        """Template asosida natija kiritish dialogi (bilirubin kabi bir nechta komponentli tahlillar uchun)"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"Natija Kiriting: {test_name}")
+        # Komponentlar soniga qarab balandlikni dinamik hisoblash
+        _n_comp = len(template.get("components", [])) if template.get("type") == "multi_component" else 1
+        _dlg_h = min(850, max(420, 130 + _n_comp * 100))
+        dialog.geometry(f"620x{_dlg_h}")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        # Asosiy container (scrollable)
+        outer_frame = ttk.Frame(dialog)
+        outer_frame.pack(fill=tk.BOTH, expand=True)
+        canvas = tk.Canvas(outer_frame, borderwidth=0)
+        scrollbar = ttk.Scrollbar(outer_frame, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        main_container = ttk.Frame(canvas, padding="20")
+        canvas_window = canvas.create_window((0, 0), window=main_container, anchor="nw")
+        def _on_frame_configure(e):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+        def _on_canvas_configure(e):
+            canvas.itemconfig(canvas_window, width=e.width)
+        main_container.bind("<Configure>", _on_frame_configure)
+        canvas.bind("<Configure>", _on_canvas_configure)
+        def _on_mousewheel(e):
+            canvas.yview_scroll(int(-1*(e.delta/120)), "units")
+        dialog.bind("<MouseWheel>", _on_mousewheel)
+        
+        # Sarlavha
+        ttk.Label(main_container, text=test_name, font=("Arial", 14, "bold")).pack(pady=(0, 20))
+        
+        # Komponentlar uchun maydonlar
+        component_vars = {}
+        component_entries = {}
+        
+        if template.get("type") == "multi_component":
+            components = template.get("components", [])
+            
+            for component in components:
+                comp_key = component.get("key")
+                comp_name = component.get("name", comp_key)
+                comp_unit = component.get("unit", "")
+                is_readonly = component.get("readonly", False)
+                
+                # Frame yaratish
+                comp_frame = ttk.LabelFrame(main_container, text=comp_name, padding="10")
+                comp_frame.pack(fill=tk.X, pady=5, padx=10)
+                
+                # Entry yaratish
+                var = tk.StringVar()
+                component_vars[comp_key] = var
+                
+                entry_frame = ttk.Frame(comp_frame)
+                entry_frame.pack(fill=tk.X)
+
+                comp_options = component.get("options")
+                if comp_options and not is_readonly:
+                    # Tanlash variantlari bo'lsa — Combobox
+                    entry = ttk.Combobox(entry_frame, textvariable=var,
+                                        values=comp_options, state="readonly",
+                                        font=("Arial", 11))
+                    entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+                    if not var.get() and comp_options:
+                        var.set(comp_options[0])  # Standart: birinchi variant
+                else:
+                    entry = ttk.Entry(entry_frame, textvariable=var, font=("Arial", 11),
+                                      state="readonly" if is_readonly else "normal")
+                    entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+                component_entries[comp_key] = entry
+
+                if comp_unit:
+                    ttk.Label(entry_frame, text=comp_unit, font=("Arial", 10)).pack(side=tk.LEFT, padx=5)
+
+                # Norma ko'rsatish
+                comp_norma = component.get("norma", "")
+                if comp_norma:
+                    ttk.Label(comp_frame, text=f"Norma: {comp_norma}",
+                              font=("Arial", 8), foreground="gray").pack(anchor=tk.W, padx=5)
+                
+                # Eski natijani yuklash
+                old_result = self.test_results.get(test_id, "")
+                if old_result:
+                    try:
+                        import json
+                        old_data = json.loads(old_result)
+                        if comp_key in old_data:
+                            var.set(str(old_data[comp_key]))
+                    except:
+                        # Agar JSON emas bo'lsa, oddiy matn sifatida
+                        pass
+        
+        # Hisoblash funksiyasi
+        _calc_busy = [False]
+        def calculate_values():
+            if _calc_busy[0]:
+                return
+            _calc_busy[0] = True
+            try:
+                _calculate_values_inner()
+            finally:
+                _calc_busy[0] = False
+        def _calculate_values_inner():
+            if template.get("type") == "multi_component":
+                components = template.get("components", [])
+                for component in components:
+                    comp_key = component.get("key")
+                    formula = component.get("formula")
+
+                    if formula and component.get("readonly"):
+                        try:
+                            formula_clean = formula.strip()
+
+                            # Avval barcha komponent qiymatlarini olish
+                            var_values = {}
+                            for k, v in component_vars.items():
+                                val_str = v.get().strip()
+                                if val_str:
+                                    try:
+                                        var_values[k] = float(val_str.replace(",", "."))
+                                    except:
+                                        var_values[k] = None
+                                else:
+                                    var_values[k] = None
+
+                            # Umumiy azot miqdori maxsus hisoblash
+                            # Mochevina-N + Kreatinin-N + Siydik kislota-N (yo'q bo'lsa 0 ishlatiladi)
+                            if formula_clean == "umumiy_azot_calc":
+                                _m_v  = var_values.get("mochevina") or 0
+                                _kr_v = var_values.get("kreatinin") or 0
+                                _sk_v = var_values.get("siydik_kislota") or 0
+                                if _m_v or _kr_v or _sk_v:
+                                    _umaz_v = (_m_v * 28/60) + (_kr_v * 42/(113.12*1000)) + (_sk_v * 56/(168.11*1000))
+                                    component_vars[comp_key].set(f"{_umaz_v:.2f}")
+                                else:
+                                    component_vars[comp_key].set("")
+                                continue
+
+                            # GFR Cockcroft-Gault maxsus hisoblash
+                            if formula_clean == "gfr_cockcroft":
+                                cr = var_values.get("kreatinin")
+                                yosh_val = 40
+                                jins_val = 'E'
+                                try:
+                                    if hasattr(self, 'patient_age') and self.patient_age:
+                                        yosh_val = int(self.patient_age)
+                                except:
+                                    pass
+                                try:
+                                    if hasattr(self, 'patient_gender') and self.patient_gender:
+                                        jins_val = str(self.patient_gender).upper()
+                                except:
+                                    pass
+
+                                if cr and cr > 0:
+                                    cr_mg = cr / 88.4
+                                    gfr = (140 - yosh_val) * 70 / (72 * cr_mg)
+                                    if 'A' in jins_val or 'F' in jins_val:
+                                        gfr *= 0.85
+                                    component_vars[comp_key].set(f"{gfr:.1f}")
+                                else:
+                                    component_vars[comp_key].set("")
+                                continue
+
+                            # Umumiy formula hisoblash
+                            formula_eval = formula_clean
+                            all_have_values = True
+                            sorted_keys = sorted(var_values.keys(), key=len, reverse=True)
+                            for k in sorted_keys:
+                                if k in formula_eval:
+                                    if var_values[k] is None:
+                                        all_have_values = False
+                                        break
+                                    formula_eval = formula_eval.replace(k, str(var_values[k]))
+
+                            if all_have_values and formula_eval != formula_clean:
+                                safe_chars = set("0123456789.+-*/() ")
+                                if all(c in safe_chars for c in formula_eval):
+                                    result = eval(formula_eval)
+                                    component_vars[comp_key].set(f"{result:.2f}")
+                                else:
+                                    component_vars[comp_key].set("")
+                            else:
+                                component_vars[comp_key].set("")
+
+                        except ZeroDivisionError:
+                            component_vars[comp_key].set("—")
+                        except Exception as e:
+                            print(f"[OGOHLANTIRISH] Hisoblashda xato: {e}")
+                            component_vars[comp_key].set("")
+        
+        # Har bir maydon o'zgarganda hisoblash
+        for comp_key, var in component_vars.items():
+            var.trace_add("write", lambda *args, key=comp_key: calculate_values())
+        
+        # Eski natijani yuklash va hisoblash
+        # readonly formula maydonlar o'tkazib yuboriladi — calculate_values() yangi hisoblaydi
+        _formula_keys = {c["key"] for c in template.get("components", []) if c.get("readonly") and c.get("formula")}
+        old_result = self.test_results.get(test_id, "")
+        if old_result:
+            try:
+                import json
+                old_data = json.loads(old_result)
+                for comp_key, var in component_vars.items():
+                    if comp_key in _formula_keys:
+                        continue
+                    if comp_key in old_data:
+                        var.set(str(old_data[comp_key]))
+            except:
+                pass
+
+        # Birinchi marta hisoblash
+        calculate_values()
+        
+        def save_and_close():
+            # Kamida bitta maydon to'ldirilganligini tekshirish (hamma shart emas)
+            required_components = [c for c in template.get("components", []) if not c.get("readonly")]
+            if required_components and not any(
+                component_vars.get(c.get("key"), tk.StringVar()).get().strip()
+                for c in required_components
+            ):
+                messagebox.showwarning("Diqqat", "Kamida bitta maydonni to'ldiring!")
+                return
+
+            # Natijani JSON formatida saqlash
+            result_data = {}
+            for comp_key, var in component_vars.items():
+                value = var.get().strip()
+                if value:
+                    try:
+                        result_data[comp_key] = float(value.replace(",", "."))
+                    except:
+                        result_data[comp_key] = value
+
+            import json
+            result_json = json.dumps(result_data, ensure_ascii=False)
+            self.test_results[test_id] = result_json
+
+            # DB ga ham darhol saqlash (qayta tahrirlash imkonini berish uchun)
+            if self.current_order_id:
+                try:
+                    _test_type = 'numeric'
+                    if test_data:
+                        _tn_lower = (test_data.get('nomi') or test_name or '').lower()
+                        if 'revmoproba' in _tn_lower or 'revmo' in _tn_lower:
+                            _test_type = 'multi_component'
+                        elif 'bilirubin' in _tn_lower:
+                            _test_type = 'multi_component'
+                        elif 'koagulogramma' in _tn_lower or 'koagul' in _tn_lower:
+                            _test_type = 'multi_component'
+                    self.save_test_result(self.current_order_id, test_name, result_data, _test_type)
+                    self.is_saved = False  # qayta "Bazaga saqlash" imkonini berish
+                except Exception as _e:
+                    print(f"[OGOHLANTIRISH] Dialog dan DB ga saqlashda xato: {_e}")
+
+            self.load_tests()
+            dialog.destroy()
+            self.status_var.set(f"[OK] Natija saqlandi: {test_name}")
+        
+        # Tugmalar
+        btn_frame = ttk.Frame(main_container)
+        btn_frame.pack(pady=20)
+        
+        ttk.Button(btn_frame, text="[SAQLASH] Saqlash", command=save_and_close, width=20).pack(side=tk.LEFT, padx=10)
+        ttk.Button(btn_frame, text="[XATO] Bekor qilish", command=dialog.destroy, width=20).pack(side=tk.LEFT, padx=10)
+        
+        dialog.focus_set()
+    
+    def open_template_dialog(self, test_id, test_name, test_data, template_path, template_name):
+        """
+        Standart shablon ochish dialogi
+        Shablonni Word da ochadi va bemor ma'lumotlarini to'ldiradi
+        """
+        import tkinter.filedialog as filedialog
+        
+        # Bemor ma'lumotlarini olish
+        order_info = {}
+        if self.current_bemor_data:
+            order_info = {
+                'sample_id': self.current_bemor_data.get('sample_id', ''),
+                'order_id': self.current_order_id,
+                'fish': self.current_bemor_data.get('fish', ''),
+                'yosh': self.current_bemor_data.get('yosh', ''),
+                'jins': self.current_bemor_data.get('jins', ''),
+                'tugilgan_sana': self.current_bemor_data.get('tugilgan_sana', ''),
+                'telefon': self.current_bemor_data.get('telefon', ''),
+                'shifokor': self.current_bemor_data.get('shifokor', ''),
+                'manzil': self.current_bemor_data.get('manzil', ''),
+            }
+        
+        # Dialog oynasi
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"Shablon: {test_name}")
+        dialog.geometry("750x650")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # Asosiy container
+        main_frame = ttk.Frame(dialog, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Sarlavha
+        ttk.Label(main_frame, text=test_name, font=("Arial", 14, "bold")).pack(pady=(0, 10))
+        
+        # Shablon tanlash
+        template_frame = ttk.LabelFrame(main_frame, text="Shablon Tanlash", padding="10")
+        template_frame.pack(fill=tk.X, pady=10)
+        
+        self.current_template_path = template_path
+        self.current_template_name = template_name
+        
+        # Shablon fayl ko'rsatkich
+        template_label = ttk.Label(template_frame, text=f"Shablon: {template_name}", font=("Arial", 10))
+        template_label.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        
+        # Shablon tanlash tugmasi
+        def select_template():
+            file_path = filedialog.askopenfilename(
+                title="Shablon faylini tanlang",
+                filetypes=[("Word Documents", "*.docx"), ("All Files", "*.*")],
+                initialdir=os.path.dirname(template_path) if template_path else os.path.dirname(__file__)
+            )
+            if file_path:
+                self.current_template_path = file_path
+                self.current_template_name = os.path.basename(file_path)
+                template_label.config(text=f"Shablon: {self.current_template_name}")
+        
+        ttk.Button(template_frame, text="Faylni belgilash", command=select_template).pack(side=tk.LEFT, padx=5)
+        
+        # Bemor ma'lumotlari ko'rsatkich
+        if order_info.get('fish'):
+            patient_frame = ttk.LabelFrame(main_frame, text="Bemor Ma'lumotlari", padding="10")
+            patient_frame.pack(fill=tk.X, pady=10)
+            
+            patient_text = f"F.I.SH: {order_info.get('fish', '')}\n"
+            patient_text += f"Yosh: {order_info.get('yosh', '')} yosh\n"
+            patient_text += f"Jins: {order_info.get('jins', '')}\n"
+            patient_text += f"Sample ID: {order_info.get('sample_id', '')}"
+            
+            ttk.Label(patient_frame, text=patient_text, font=("Arial", 10)).pack(anchor=tk.W)
+        
+        # Ko'rsatmalar
+        info_label = ttk.Label(
+            main_frame,
+            text="Shablon Word da ochiladi. Bemor ma'lumotlari avtomatik to'ldiriladi.\n"
+                 "Natijalarni shablon ichida kiritib, 'Saqlash' tugmasini bosing.",
+            font=("Arial", 10),
+            foreground="gray",
+            wraplength=700
+        )
+        info_label.pack(pady=10)
+        
+        # Tugmalar
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(pady=20)
+        
+        temp_file_path = None
+        
+        def open_template():
+            """Shablonni ochish - jadvallarni ko'rsatish oynasini ochadi"""
+            nonlocal temp_file_path
+            if not self.current_template_path or not os.path.exists(self.current_template_path):
+                messagebox.showerror("Xatolik", "Shablon fayli topilmadi!")
+                return
+            
+            try:
+                # Avval jadvallarni ko'rsatish oynasini ochish
+                self.open_shablon_with_tables(self.current_template_path)
+                
+                # Status yangilash
+                self.status_var.set(f"Shablon ochildi: {self.current_template_name}")
+                
+            except Exception as e:
+                messagebox.showerror("Xatolik", f"Shablon ochishda xato: {str(e)}")
+                import traceback
+                traceback.print_exc()
+        
+        def save_template_result():
+            """Shablon natijalarini saqlash"""
+            # Shablon fayl yo'li sifatida saqlash
+            result_value = f"Shablon: {self.current_template_name}"
+            if temp_file_path:
+                result_value = f"Shablon: {self.current_template_name} ({temp_file_path})"
+            
+            self.test_results[test_id] = result_value
+            self.load_tests()
+            dialog.destroy()
+            self.status_var.set(f"Shablon natijasi saqlandi: {test_name}")
+        
+        ttk.Button(btn_frame, text="Shablonni ochish", command=open_template, width=25).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Saqlash", command=save_template_result, width=25).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Bekor qilish", command=dialog.destroy, width=25).pack(side=tk.LEFT, padx=5)
+        
+        dialog.focus_set()
+    
+    def on_result_entered(self, event):
+        """Natija kiritilganda"""
+        selection = self.tests_tree.selection()
+        if selection:
+            self.on_test_double_click(event)
+        else:
+            messagebox.showinfo("Diqqat", "Avval tahlilni tanlang (double-click)")
+    
+    def on_save_result(self):
+        """Natija saqlash"""
+        self.on_result_entered(None)
+    
+    def open_tahlil_kiritish(self):
+        """Tahlil kiritish oynasini ochish"""
+        try:
+            # Yangi oyna yaratish
+            window = tk.Toplevel(self.root)
+            
+            # TahlilKiritishOynasi klassini ishga tushirish (to'g'ridan-to'g'ri)
+            TahlilKiritishOynasi(window)
+            
+        except Exception as e:
+            messagebox.showerror("Xato", f"Oynani ochishda xato: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def open_result_input(self):
+        """Natija kiritish oynasini ochish"""
+        if not self.current_order_id:
+            messagebox.showwarning("Ogohlantirish", "Avval buyurtma tanlang!")
+            return
+        
+        result_window = tk.Toplevel(self.root)
+        NatijaKiritish(result_window, self.current_order_id)
+    
+    def open_blanka_settings(self):
+        """Blanka sozlamalari oynasini ochish"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Blanka Sozlamalari")
+        dialog.geometry("640x280")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        main_frame = ttk.Frame(dialog, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        ttk.Label(main_frame, text="Blanka Sozlamalari", font=("Arial", 12, "bold")).pack(pady=(0, 10))
+        
+        try:
+            config = load_blanka_config()
+        except:
+            config = {}
+
+        # ── 1. Shablon fayl ──────────────────────────────────────────
+        ttk.Label(main_frame, text="Blanka ustuni shablon (.docx):").pack(anchor=tk.W)
+        path_frame = ttk.Frame(main_frame)
+        path_frame.pack(fill=tk.X, pady=(2, 8))
+        
+        path_var = tk.StringVar(value=config.get('blanka_ustuni_path', r"G:\DASTUR\URIT 50\Standart shablonlar\blanka ustuni.docx"))
+        path_entry = ttk.Entry(path_frame, textvariable=path_var, width=55)
+        path_entry.pack(side=tk.LEFT, padx=(0, 5), fill=tk.X, expand=True)
+        
+        def browse_docx():
+            try:
+                fp = tk.filedialog.askopenfilename(
+                    title="Blanka ustuni shablonini tanlang",
+                    filetypes=[("Word Documents", "*.docx"), ("All Files", "*.*")],
+                )
+                if fp:
+                    path_var.set(fp)
+            except Exception as e:
+                messagebox.showerror("Xatolik", str(e))
+        ttk.Button(path_frame, text="Tanlash...", command=browse_docx).pack(side=tk.LEFT)
+
+        # ── 2. Logotib fayl ──────────────────────────────────────────
+        ttk.Label(main_frame, text="Logotib rasmi (.jpg / .png):").pack(anchor=tk.W)
+        logo_frame = ttk.Frame(main_frame)
+        logo_frame.pack(fill=tk.X, pady=(2, 8))
+        
+        logo_var = tk.StringVar(value=config.get('logo_path', LOGO_DEFAULT_PATH))
+        logo_entry = ttk.Entry(logo_frame, textvariable=logo_var, width=55)
+        logo_entry.pack(side=tk.LEFT, padx=(0, 5), fill=tk.X, expand=True)
+        
+        # Logo holati
+        logo_status = ttk.Label(logo_frame, text="")
+        
+        def check_logo(*args):
+            p = logo_var.get().strip()
+            if p and os.path.exists(p):
+                logo_status.config(text="✓ Topildi", foreground="green")
+            elif p:
+                logo_status.config(text="✗ Topilmadi", foreground="red")
+            else:
+                logo_status.config(text="")
+        logo_var.trace('w', check_logo)
+        
+        def browse_logo():
+            try:
+                fp = tk.filedialog.askopenfilename(
+                    title="Logotib rasmini tanlang",
+                    filetypes=[("Rasm fayllari", "*.jpg *.jpeg *.png *.bmp"), ("All Files", "*.*")],
+                )
+                if fp:
+                    logo_var.set(fp)
+            except Exception as e:
+                messagebox.showerror("Xatolik", str(e))
+        
+        ttk.Button(logo_frame, text="Tanlash...", command=browse_logo).pack(side=tk.LEFT, padx=5)
+        logo_status.pack(side=tk.LEFT, padx=5)
+        check_logo()
+
+        # ── Tugmalar ─────────────────────────────────────────────────
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(pady=10)
+        
+        def save_settings():
+            new_path   = path_var.get().strip()
+            new_logo   = logo_var.get().strip()
+            
+            if not new_path:
+                messagebox.showwarning("Diqqat", "Shablon manzilini kiriting!")
+                return
+            
+            if not os.path.exists(new_path):
+                result = messagebox.askyesno("Diqqat",
+                    f"Shablon fayl topilmadi:\n{new_path}\n\nYana ham saqlashni xohlaysizmi?")
+                if not result:
+                    return
+            
+            try:
+                save_blanka_config({"blanka_ustuni_path": new_path, "logo_path": new_logo})
+                messagebox.showinfo("Muvaffaqiyat", 
+                    "Sozlamalar saqlandi!\n\nLogotib va shablon yangilandi.")
+                dialog.destroy()
+            except Exception as e:
+                messagebox.showerror("Xatolik", str(e))
+        
+        ttk.Button(btn_frame, text="✔ Saqlash", command=save_settings, width=20).pack(side=tk.LEFT, padx=10)
+        ttk.Button(btn_frame, text="✘ Bekor qilish", command=dialog.destroy, width=20).pack(side=tk.LEFT, padx=10)
+        dialog.focus_set()
+    
+    def create_blanks(self):
+        """Blankalar yaratish - bitta bosilishda ishlaydi"""
+        if not self.current_order_id:
+            messagebox.showwarning("Diqqat", "Avval bemor ma'lumotlarini yuklang")
+            return
+        
+        # blanka_generator.py dan to'g'ridan-to'g'ri foydalanish (hech qanday pre-state kerak emas)
+        try:
+            
+            # Progress dialog
+            progress_win = tk.Toplevel(self.root)
+            progress_win.title("Blankalar yaratilmoqda...")
+            progress_win.geometry("450x180")
+            progress_win.transient(self.root)
+            progress_win.grab_set()
+            
+            ttk.Label(progress_win, text="Blankalar yaratilmoqda...", font=("Arial", 12, "bold")).pack(pady=20)
+            progress_var = tk.StringVar(value="Tayyorlanmoqda...")
+            progress_label = ttk.Label(progress_win, textvariable=progress_var, font=("Arial", 10))
+            progress_label.pack(pady=10)
+            
+            # Progress bar (oddiy)
+            progress_bar = ttk.Progressbar(progress_win, mode='indeterminate', length=300)
+            progress_bar.pack(pady=10)
+            progress_bar.start()
+            
+            progress_win.update()
+            
+            # Blankalar yaratish (bitta chaqiruvda barcha ishlar bajariladi)
+            try:
+                # Fayl mavjud bo'lsa, dialog ochish uchun callback funksiya
+                def file_exists_callback(file_path):
+                    """Fayl mavjud bo'lsa, yangilashni so'rash"""
+                    import os
+                    response = messagebox.askyesno(
+                        "Blanka mavjud",
+                        f"Blanka allaqachon mavjud:\n{os.path.basename(file_path)}\n\n"
+                        "Yangilaymi?",
+                        icon="question"
+                    )
+                    return response
+                
+                created = create_blanks_for_order(
+                    self.current_order_id, 
+                    self.test_results,
+                    file_exists_callback=file_exists_callback
+                )
+            except Exception as e:
+                progress_win.destroy()
+                error_msg = f"Blanka yaratishda xato:\n{str(e)}"
+                # Batafsil xatolik ma'lumotlari
+                import traceback
+                error_details = traceback.format_exc()
+                print(f"[XATO] Blanka yaratishda batafsil xato:\n{error_details}")
+                messagebox.showerror("Xatolik", error_msg)
+                return
+            
+            progress_win.destroy()
+            
+            # created - bu list yoki bitta string bo'lishi mumkin
+            if created:
+                # Agar list bo'lsa
+                if isinstance(created, list) and len(created) > 0:
+                    files_list = "\n".join([f"  • {os.path.basename(f)}" for f in created[:10]])
+                    if len(created) > 10:
+                        files_list += f"\n  ... va yana {len(created) - 10} ta"
+                    
+                    result = messagebox.askyesno(
+                        "Muvaffaqiyat", 
+                        f"[OK] {len(created)} ta blanka yaratildi!\n\n{files_list}\n\n"
+                        "Blankalarni ochishni xohlaysizmi?"
+                    )
+                    
+                    if result:
+                        # Blankalarni ochish
+                        for file_path in created[:5]:  # Faqat birinchi 5 tasini ochish
+                            try:
+                                os.startfile(file_path)
+                            except:
+                                pass
+
+                    self.status_var.set(f"[OK] {len(created)} ta blanka yaratildi")
+                    # PDF nusxasini OneDrive ga saqlash (Word ochilgandan keyin, fon threadda)
+                    try:
+                        import threading
+                        _ord_date = None
+                        _sv = (self.current_bemor_data or {}).get('sana_vaqt')
+                        if _sv:
+                            try:
+                                import datetime as _dt
+                                _d = str(_sv)[:10]  # "2026-03-16"
+                                _ord_date = _dt.datetime.strptime(_d, "%Y-%m-%d").strftime("%d.%m.%Y")
+                            except Exception:
+                                pass
+                        for _fp in created[:5]:
+                            threading.Thread(target=save_pdf_to_onedrive, args=(_fp, _ord_date), daemon=True).start()
+                    except Exception:
+                        pass
+                # Agar bitta fayl (string) bo'lsa
+                elif isinstance(created, str):
+                    result = messagebox.askyesno(
+                        "Muvaffaqiyat",
+                        f"[OK] Blanka yaratildi!\n\n{os.path.basename(created)}\n\n"
+                        "Blankani ochishni xohlaysizmi?"
+                    )
+
+                    if result:
+                        try:
+                            os.startfile(created)
+                        except:
+                            pass
+
+                    self.status_var.set(f"[OK] Blanka yaratildi")
+                    # PDF nusxasini OneDrive ga saqlash
+                    try:
+                        import threading
+                        _ord_date2 = None
+                        _sv2 = (self.current_bemor_data or {}).get('sana_vaqt')
+                        if _sv2:
+                            try:
+                                import datetime as _dt
+                                _d2 = str(_sv2)[:10]
+                                _ord_date2 = _dt.datetime.strptime(_d2, "%Y-%m-%d").strftime("%d.%m.%Y")
+                            except Exception:
+                                pass
+                        threading.Thread(target=save_pdf_to_onedrive, args=(created, _ord_date2), daemon=True).start()
+                    except Exception:
+                        pass
+            else:
+                # Batafsil xatolik xabari - shablonlar holatini tekshirish
+                error_details = []
+                if not self.current_order_id:
+                    error_details.append("• Buyurtma ID topilmadi")
+                if not self.current_tests:
+                    error_details.append("• Tahlillar topilmadi")
+                else:
+                    error_details.append(f"• {len(self.current_tests)} ta tahlil mavjud, lekin blankalar yaratilmadi")
+                    
+                    # Shablonlar holatini tekshirish
+                    templates_dir = os.path.join(os.path.dirname(__file__), "templates")
+                    if os.path.exists(templates_dir):
+                        template_files = os.listdir(templates_dir)
+                        if template_files:
+                            error_details.append(f"• Templates papkasida {len(template_files)} ta fayl mavjud")
+                        else:
+                            error_details.append("• Templates papkasi bo'sh")
+                    else:
+                        error_details.append("• Templates papkasi topilmadi")
+                    
+                    error_details.append("• Standart blankalar yaratilishi kerak edi")
+                
+                error_msg = "Blanka yaratilmadi.\n\n" + "\n".join(error_details)
+                messagebox.showwarning("Diqqat", error_msg)
+                self.status_var.set("[OGOHLANTIRISH] Blanka yaratilmadi")
+        
+        except ImportError as e:
+            messagebox.showerror("Xatolik", f"Modul topilmadi: {e}\n\nblanka_generator.py faylini tekshiring.")
+        except Exception as e:
+            messagebox.showerror("Xatolik", f"Blanka yaratishda xato: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def save_and_print(self):
+        """Bazaga saqlash va chop etish - bitta funksiya"""
+        if not self.current_order_id:
+            messagebox.showwarning("Diqqat", "Avval bemor ma'lumotlarini yuklang")
+            return
+        
+        if not self.test_results:
+            messagebox.showwarning("Diqqat", "Saqlash uchun natijalar yo'q")
+            return
+        
+        # Avval bazaga saqlash
+        if not self.save_to_db():
+            return  # Agar saqlash muvaffaqiyatsiz bo'lsa, chop etishni to'xtatamiz
+
+        # Keyin chop etish (avtomatik, Word oynasisiz)
+        self.print_results()
+
+        # Flag'larni o'rnatish
+        self.is_saved = True
+        self.is_printed = True
+        self.status_var.set(f"[OK] Saqlandi va chop etildi - {datetime.now().strftime('%H:%M:%S')}")
+    
+    def print_results(self):
+        """Natijalarni chop etish - yagona blanka yaratish va chop etish"""
+        if not self.current_order_id:
+            messagebox.showwarning("Diqqat", "Avval bemor ma'lumotlarini yuklang")
+            return
+        
+        # create_blanks_for_order orqali blanka yaratish (Blanka Yaratish tugmasi bilan bir xil format)
+        try:
+            created = create_blanks_for_order(self.current_order_id, self.test_results)
+
+            if not created:
+                messagebox.showwarning("Diqqat", "Blanka yaratishda xato!")
+                return
+
+            output_path = created[0] if isinstance(created, list) else created
+
+            # Blankani AVTOMATIK (oynasiz) chop etish - win32com orqali
+            abs_path = os.path.abspath(output_path)
+            printer_name = None
+            printed_ok = False
+
+            # 1-usul: win32com orqali Word ni ko'rinmas rejimda ishlatish (eng ishonchli)
+            try:
+                import win32com.client
+                import win32print
+                printer_name = win32print.GetDefaultPrinter()
+                word_app = win32com.client.DispatchEx("Word.Application")
+                word_app.Visible = False
+                word_app.DisplayAlerts = False
+                doc = word_app.Documents.Open(abs_path)
+                doc.PrintOut(Background=False)
+                doc.Close(SaveChanges=False)
+                word_app.Quit()
+                printed_ok = True
+                print(f"[OK] Blanka avtomatik chop etildi (COM): {printer_name}")
+            except ImportError:
+                pass  # win32com yo'q - 2-usulga o'tamiz
+            except Exception as com_err:
+                print(f"[OGOHLANTIRISH] COM chop etish amalga oshmadi: {com_err}")
+                # Word ilovasi qolgan bo'lsa, yopish
+                try:
+                    word_app.Quit()
+                except:
+                    pass
+
+            # 2-usul: win32api.ShellExecute (agar COM ishlamasa)
+            if not printed_ok:
+                try:
+                    import win32api
+                    import win32print
+                    printer_name = win32print.GetDefaultPrinter()
+                    win32api.ShellExecute(0, "print", abs_path, f'/d:"{printer_name}"', ".", 0)
+                    printed_ok = True
+                    print(f"[OK] Blanka chop etishga yuborildi (ShellExecute): {printer_name}")
+                except ImportError:
+                    pass
+                except Exception as se_err:
+                    print(f"[OGOHLANTIRISH] ShellExecute chop etish amalga oshmadi: {se_err}")
+
+            # 3-usul: os.startfile (so'nggi variant - Word oynasi ochiladi)
+            if not printed_ok:
+                os.startfile(abs_path, "print")
+                printer_name = "standart printer"
+                print(f"[OK] Blanka chop etishga yuborildi (startfile)")
+
+            self.status_var.set(f"[OK] Bazaga saqlandi va chop etildi: {printer_name or 'printer'}")
+            self.is_printed = True
+            # PDF nusxasini OneDrive ga saqlash (fon threadda, chop etgandan keyin)
+            try:
+                import threading
+                _ord_date3 = None
+                _sv3 = (self.current_bemor_data or {}).get('sana_vaqt')
+                if _sv3:
+                    try:
+                        import datetime as _dt
+                        _d3 = str(_sv3)[:10]
+                        _ord_date3 = _dt.datetime.strptime(_d3, "%Y-%m-%d").strftime("%d.%m.%Y")
+                    except Exception:
+                        pass
+                threading.Thread(target=save_pdf_to_onedrive, args=(output_path, _ord_date3), daemon=True).start()
+            except Exception:
+                pass
+
+        except Exception as e:
+            messagebox.showerror("Xatolik", f"Chop etishda xato: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _create_fresh_connection(self):
+        """Saqlash uchun butunlay yangi, mustaqil MySQL connection yaratish.
+        Global db_conn() dan foydalanmaymiz - u buzilgan bo'lishi mumkin.
+        """
+        import time
+        last_err = None
+        for attempt in range(3):
+            try:
+                if attempt > 0:
+                    print(f"[QAYTA URINISH] MySQL ulanish - {attempt + 1}-urinish...")
+                    time.sleep(1)  # 1 soniya kutish
+
+                config = DB_CONFIG.copy()
+                config.update({
+                    "connection_timeout": 15,
+                    "raise_on_warnings": False,
+                    "autocommit": False,
+                })
+                conn = mysql.connector.connect(**config)
+
+                # Ulanishni tekshirish
+                test_cur = conn.cursor()
+                test_cur.execute("SELECT 1")
+                test_cur.fetchall()
+                test_cur.close()
+
+                print(f"[OK] Yangi mustaqil ulanish yaratildi ({DB_CONFIG['host']})")
+                return conn
+            except Exception as e:
+                last_err = e
+                print(f"[XATO] Ulanish yaratishda xato (urinish {attempt + 1}): {e}")
+
+        print(f"[XATO] 3 ta urinishdan keyin ham ulanib bo'lmadi: {last_err}")
+        return None
+
+    def save_to_db(self):
+        """Natijalarni bazaga saqlash - mustaqil connection bilan
+        Returns: True if successful, False otherwise
+        """
+        if not self.current_order_id:
+            messagebox.showwarning("Diqqat", "Avval bemor ma'lumotlarini yuklang")
+            return False
+
+        if not self.test_results:
+            messagebox.showwarning("Diqqat", "Saqlash uchun natijalar yo'q")
+            return False
+
+        # Mustaqil (fresh) connection yaratish - global db_conn() dan foydalanmaymiz
+        conn = self._create_fresh_connection()
+        if not conn:
+            messagebox.showerror("Database Xatosi",
+                "MySQL serverga ulanib bo'lmadi!\n\n"
+                "Tekshirishlar:\n"
+                "1. MySQL server ishlayotganini tekshiring\n"
+                "2. Tarmoq ulanishini tekshiring\n"
+                "3. Qayta urinib ko'ring")
+            return False
+
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            import json
+
+            # Bazadagi ustunlarni kattalashtirish (bir marta) - qiymat va norma uchun
+            try:
+                cursor.execute("SELECT CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'result_items' AND COLUMN_NAME = 'qiymat'")
+                col_info = cursor.fetchone()
+                if col_info and col_info[0] and col_info[0] < 1000:
+                    print("[YANGILANMOQDA] result_items.qiymat ustunini TEXT ga o'zgartirish...")
+                    cursor.execute("ALTER TABLE result_items MODIFY COLUMN qiymat TEXT")
+                    print("[OK] result_items.qiymat -> TEXT")
+            except Exception as ae:
+                print(f"[OGOHLANTIRISH] ALTER TABLE amalga oshmadi (davom etamiz): {ae}")
+
+            try:
+                cursor.execute("SELECT CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'result_items' AND COLUMN_NAME = 'norma'")
+                col_info = cursor.fetchone()
+                if col_info and col_info[0] and col_info[0] < 1000:
+                    print("[YANGILANMOQDA] result_items.norma ustunini TEXT ga o'zgartirish...")
+                    cursor.execute("ALTER TABLE result_items MODIFY COLUMN norma TEXT")
+                    print("[OK] result_items.norma -> TEXT")
+            except Exception as ae:
+                print(f"[OGOHLANTIRISH] ALTER TABLE amalga oshmadi (davom etamiz): {ae}")
+
+            # tahlil_id ustunini qo'shish (agar yo'q bo'lsa)
+            try:
+                cursor.execute("""
+                    SELECT COUNT(*) FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                      AND TABLE_NAME = 'result_items'
+                      AND COLUMN_NAME = 'tahlil_id'
+                """)
+                _col_exists = cursor.fetchone()
+                if not _col_exists or _col_exists[0] == 0:
+                    print("[YANGILANMOQDA] result_items.tahlil_id ustunini qo'shish...")
+                    cursor.execute("""
+                        ALTER TABLE result_items
+                        ADD COLUMN tahlil_id INT NULL DEFAULT NULL
+                        AFTER result_id
+                    """)
+                    print("[OK] result_items.tahlil_id ustuni qo'shildi")
+            except Exception as ae:
+                print(f"[OGOHLANTIRISH] tahlil_id ustunini qo'shishda xato (davom etamiz): {ae}")
+
+            conn.commit()
+
+            test_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            # 1. Results jadvaliga saqlash
+            cursor.execute("""
+                SELECT id FROM results WHERE order_id = %s
+            """, (self.current_order_id,))
+
+            result_row = cursor.fetchone()
+            if result_row:
+                result_id = result_row[0]
+                cursor.execute("""
+                    UPDATE results
+                    SET status = 'ready', updated_at = %s
+                    WHERE id = %s
+                """, (test_time, result_id))
+            else:
+                cursor.execute("""
+                    INSERT INTO results (order_id, status, created_at, updated_at)
+                    VALUES (%s, 'ready', %s, %s)
+                """, (self.current_order_id, test_time, test_time))
+                result_id = cursor.lastrowid
+
+            # 2. Har bir natija uchun result_items va test_results ga saqlash
+            saved_count = 0
+            skipped_tests = []
+            print(f"[DEBUG] test_results da {len(self.test_results)} ta natija bor")
+            print(f"[DEBUG] current_tests da {len(self.current_tests)} ta test bor")
+            # Debug: test_results kalitlari
+            tr_keys = list(self.test_results.keys())
+            ct_ids = [t['id'] for t in self.current_tests]
+            ct_names = {t['id']: t.get('nomi','') for t in self.current_tests}
+            print(f"[DEBUG] test_results kalitlari (type={type(tr_keys[0]) if tr_keys else '?'}): {tr_keys}")
+            print(f"[DEBUG] current_tests id lari (type={type(ct_ids[0]) if ct_ids else '?'}): {ct_ids}")
+            print(f"[DEBUG] current_tests nomlari: {ct_names}")
+            # Mos kelmaydigan kalitlar
+            missing_ids = [k for k in tr_keys if k not in ct_ids]
+            if missing_ids:
+                print(f"[DEBUG] *** current_tests da TOPILMAGAN test_results kalitlari: {missing_ids}")
+                for mid in missing_ids:
+                    val = str(self.test_results.get(mid, ''))[:80]
+                    print(f"[DEBUG]   ID={mid} (type={type(mid).__name__}): {val}")
+            # Har bir saqlash natijasini ham chiqarish
+            print(f"[DEBUG] --- Saqlash boshlanmoqda ---")
+            for test_id, result_value in self.test_results.items():
+                test_data = None
+                for test in self.current_tests:
+                    if test['id'] == test_id:
+                        test_data = test
+                        break
+
+                if not test_data:
+                    val_preview = str(result_value)[:50] if result_value else '(bo\'sh)'
+                    skipped_tests.append(f"  ID={test_id}: test_data topilmadi, qiymat={val_preview}")
+                    continue
+                if not result_value:
+                    skipped_tests.append(f"  ID={test_id} ({test_data.get('nomi','')}): result_value bo'sh")
+                    continue
+
+                if test_data and result_value:
+                    test_name = test_data.get('nomi', '')
+
+                    # Norma ma'lumotlarini olish
+                    jins = self.current_bemor_data.get('jins', '')
+                    yosh_raw = self.current_bemor_data.get('yosh') or self.current_bemor_data.get('age')
+                    try:
+                        yosh_int = int(yosh_raw) if yosh_raw else None
+                    except Exception:
+                        yosh_int = None
+                    emizikli_flag = self.current_bemor_data.get('emizikli', 0) if self.current_bemor_data else 0
+                    cycle_note_val = (self.current_bemor_data.get('cycle_note', '') or '') if self.current_bemor_data else ''
+                    menopauza_flag = self.current_bemor_data.get('menopauza', 0) if self.current_bemor_data else 0
+                    homiladorlik_hafta_val = self.current_bemor_data.get('homiladorlik_hafta', None) if self.current_bemor_data else None
+                    norma_info = get_test_norma(test_name, jins, test_data.get('test_type', ''),
+                                                yosh_int, tahlil_id=test_data.get('tahlil_id'),
+                                                emizikli=emizikli_flag, cycle_note=cycle_note_val,
+                                                menopauza=menopauza_flag, homiladorlik_hafta=homiladorlik_hafta_val)
+                    norma_text = norma_info.get('norma', '')
+                    birlik = norma_info.get('unit', '')
+
+                    # Test turini aniqlash
+                    test_type = 'numeric'
+                    try:
+                        cursor.execute("""
+                            SELECT type FROM tahlillar_norma WHERE tahlil_nomi = %s LIMIT 1
+                        """, (test_name,))
+                        type_row = cursor.fetchone()
+                        if type_row:
+                            test_type = type_row[0] or 'numeric'
+                    except:
+                        pass
+
+                    # result_items ga saqlash
+                    # Qiymatni string ga o'tkazish (dict bo'lishi mumkin)
+                    qiymat_str = result_value
+                    if isinstance(result_value, dict):
+                        qiymat_str = json.dumps(result_value, ensure_ascii=False)
+                    elif not isinstance(result_value, str):
+                        qiymat_str = str(result_value)
+
+                    cursor.execute("""
+                        DELETE FROM result_items
+                        WHERE result_id = %s AND tahlil_nomi = %s
+                    """, (result_id, test_name))
+
+                    _ri_tahlil_id = test_data.get('tahlil_id') or None
+                    try:
+                        cursor.execute("""
+                            INSERT INTO result_items
+                            (result_id, tahlil_id, tahlil_nomi, qiymat, birlik, norma, note)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        """, (
+                            result_id,
+                            _ri_tahlil_id,
+                            test_name,
+                            qiymat_str,
+                            birlik,
+                            norma_text,
+                            f"Tahlil vaqti: {test_time}"
+                        ))
+                    except Exception as _ri_err:
+                        # Eski jadvalda tahlil_id ustuni bo'lmasa, ustunsiz saqlash
+                        if 'tahlil_id' in str(_ri_err).lower() or '1054' in str(_ri_err):
+                            cursor.execute("""
+                                INSERT INTO result_items
+                                (result_id, tahlil_nomi, qiymat, birlik, norma, note)
+                                VALUES (%s, %s, %s, %s, %s, %s)
+                            """, (result_id, test_name, qiymat_str, birlik, norma_text,
+                                  f"Tahlil vaqti: {test_time}"))
+                        else:
+                            raise
+
+                    # test_results jadvaliga ham saqlash
+                    result_data_json = result_value
+                    if isinstance(result_value, str) and not result_value.strip().startswith('{'):
+                        result_data_json = json.dumps({'result': result_value}, ensure_ascii=False)
+                    elif isinstance(result_value, dict):
+                        result_data_json = json.dumps(result_value, ensure_ascii=False)
+
+                    cursor.execute("""
+                        INSERT INTO test_results
+                        (order_id, test_name, test_type, result_data, status)
+                        VALUES (%s, %s, %s, %s, 'Saqlandi')
+                        ON DUPLICATE KEY UPDATE
+                        result_data = VALUES(result_data),
+                        status = 'Saqlandi',
+                        updated_at = CURRENT_TIMESTAMP
+                    """, (str(self.current_order_id), test_name, test_type, result_data_json))
+                    saved_count += 1
+
+            # 3. Orders jadvalida vaqtni yangilash
+            try:
+                cursor.execute("""
+                    UPDATE orders
+                    SET updated_at = %s
+                    WHERE id = %s
+                """, (test_time, self.current_order_id))
+            except:
+                pass
+
+            conn.commit()
+            print(f"[OK] Natijalar bazaga saqlandi: {saved_count} ta, vaqt: {test_time}")
+            if skipped_tests:
+                print(f"[OGOHLANTIRISH] {len(skipped_tests)} ta natija saqlanmadi:")
+                for s in skipped_tests:
+                    print(s)
+            self.status_var.set(f"[OK] Bazaga saqlandi ({saved_count} ta natija)")
+            self.is_saved = True
+
+            # ── VPS GA SINXRONLASH (alohida threadda — UI bloklanmaydi) ──
+            try:
+                from vps_sync import sync_from_db
+                _sid = getattr(self, 'current_bemor_data', {}).get('sample_id', '')
+                sync_from_db(conn, self.current_order_id, _sid)
+                print(f"[SYNC] VPS ga yuborilmoqda: {_sid}")
+            except ImportError:
+                pass
+            except Exception as sync_err:
+                print(f"[SYNC OGOHLANTIRISH] VPS sync: {sync_err}")
+
+            # Treeview ni yangilash (refresh_data() o'rniga - tez va DB so'rovisiz)
+            for _item in self.tests_tree.get_children():
+                _idata = self.tests_tree.item(_item)
+                _tags = list(_idata.get('tags', []))
+                _vals = list(_idata.get('values', []))
+                if not _tags or not _vals or len(_vals) < 3:
+                    continue
+                _tag0 = str(_tags[0]).split('_')[0]
+                try:
+                    _tid = int(_tag0)
+                except Exception:
+                    continue
+                if _tid in self.test_results and self.test_results[_tid]:
+                    _vals[2] = "Saqlandi"
+                    _new_tags = tuple('saqlandi' if t in ('tayyor', 'kutilmoqda') else t for t in _tags)
+                    self.tests_tree.item(_item, values=_vals, tags=_new_tags)
+            return True
+
+        except Exception as e:
+            print(f"[XATO] Saqlashda xato: {e}")
+            import traceback
+            traceback.print_exc()
+            try:
+                conn.rollback()
+            except:
+                pass
+            messagebox.showerror("Database Xatosi",
+                f"Bazaga saqlashda xato:\n{e}\n\n"
+                "Qayta urinib ko'ring.")
+            return False
+        finally:
+            if cursor is not None:
+                try:
+                    cursor.close()
+                except:
+                    pass
+            # Mustaqil connection ni yopamiz (bu global emas, shu funksiya uchun yaratilgan)
+            try:
+                conn.close()
+            except:
+                pass
+    
+    def refresh_data(self):
+        """Ma'lumotlarni yangilash"""
+        if self.current_order_id:
+            # Qayta yuklash
+            order_data = self.find_order_by_barcode(
+                self.current_bemor_data.get('sample_id', '') or 
+                str(self.current_order_id)
+            )
+            if order_data:
+                self.load_order_data(order_data)
+                self.status_var.set("[OK] Ma'lumotlar yangilandi")
+    
+    # ===== ANALIZATOR RAW MA'LUMOTLARI OYNALARI =====
+    # Bu oynalar database bilan ishlamaydi, faqat diskdagi fayllarni o'qiydi
+    
+    def _bring_window_to_front(self, win):
+        """Oynani oldinga chiqarish va fokus berish"""
+        if win is None:
+            return
+        try:
+            win.deiconify()
+            win.attributes('-topmost', True)
+            win.lift()
+            win.focus_force()
+            win.update()
+            # 300ms dan keyin topmost ni olib tashlash (boshqa oynalar ustida qolmasin)
+            win.after(300, lambda: win.attributes('-topmost', False))
+        except Exception:
+            pass
+
+    def open_hematology_raw(self):
+        """Gematologiya (BC-20S) RAW ma'lumotlar oynasini ochish.
+        Agar joriy bemor tanlangan bo'lsa, 'Natijani qo'shish' tugmasi aktiv bo'ladi."""
+        try:
+            if HEMATOLOGY_AVAILABLE and open_hematology_window:
+                # Callback faqat bemor tanlangan bo'lsa uzatiladi
+                callback = self.on_hematology_import if self.current_order_id else None
+                win = open_hematology_window(self.root, on_import_callback=callback)
+                self._bring_window_to_front(win)
+            else:
+                messagebox.showwarning(
+                    "Modul topilmadi",
+                    "Gematologiya moduli topilmadi.\n\n"
+                    "hematology_window.py faylini tekshiring."
+                )
+        except Exception as e:
+            messagebox.showerror("Xato", f"Gematologiya oynasini ochishda xato:\n{e}")
+            print(f"[XATO] Gematologiya oynasini ochishda xato: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def on_hematology_import(self, sample_id, patient_info):
+        """BC-20S natijalarini asosiy oynaga import qilish (bazaga saqlamasdan).
+        Qaytaradi: o'tkazilgan natijalar soni (int).
+        """
+        import json
+        tests = patient_info.get('tests', {})
+        if not tests:
+            return 0
+
+        # test_id → treeview item xaritasi
+        item_map = {}
+        for tr_item in self.tests_tree.get_children():
+            td  = self.tests_tree.item(tr_item)
+            tag = td['tags'][0] if td['tags'] else None
+            if tag:
+                try:
+                    tid = int(str(tag).split('_')[0])
+                    item_map[tid] = tr_item
+                except Exception:
+                    pass
+
+        # Test nomlarini kesh (katta-kichik harfdan mustaqil qidirish uchun)
+        # {nomi.upper(): test_dict}
+        name_to_test = {t.get('nomi', '').strip().upper(): t
+                        for t in self.current_tests if t.get('nomi')}
+
+        # Natijani ko'rsatish uchun Sample ID (barkod yo'q bo'lsa ham ishlaydi)
+        display_id = sample_id if sample_id and not sample_id.startswith('NOBC_') else ''
+
+        count = 0
+        for param_key, tdata in tests.items():
+            value = (tdata.get('value') or '').strip()
+            if not value:
+                continue
+
+            # HL7 kodi → DB tahlil nomi
+            db_name = _HEMA_HL7_MAP.get(param_key, param_key)
+
+            # current_tests dan mos test_id topish
+            matched = (name_to_test.get(db_name.upper()) or
+                       name_to_test.get(param_key.upper()))
+            if not matched:
+                continue
+            test_id = matched['id']
+
+            # Natijani UI da saqlash: type='hematology', result=Sample ID (display uchun)
+            result_json = json.dumps({
+                'result':       display_id,
+                'type':         'hematology',
+                'actual_value': value,
+                'param_key':    param_key,
+                'db_name':      db_name,
+                'unit':         tdata.get('unit', ''),
+                'flag':         tdata.get('flag', ''),
+                'source':       'BC-20S',
+                'sid':          sample_id,
+            }, ensure_ascii=False)
+            self.test_results[test_id] = result_json
+
+            # TreeView qatorini yangilash
+            if test_id in item_map:
+                self.refresh_single_test_display(item_map[test_id], test_id)
+            count += 1
+
+        # Umumiy qon tahlili — FAQAT to'liq nom yoki aniq kalit (boshqa qon testlariga tushmaslik)
+        CBC_EXACT_NAMES = ('qonning umumiy tahlili', 'umumiy qon tahlili', 'umumiy qon')
+        CBC_EXCLUDE = ('qon guruhi', 'qon guruh', 'rezus', 'ivish', 'qib', 'echt')
+        all_vals = {}
+        for pk, td in tests.items():
+            v = (td.get('value') or '').strip()
+            if v:
+                db_nm = _HEMA_HL7_MAP.get(pk, pk)
+                all_vals[db_nm] = v
+
+        for test in self.current_tests:
+            tname_low = test.get('nomi', '').lower()
+            is_cbc = (any(exact in tname_low for exact in CBC_EXACT_NAMES)
+                      and not any(ex in tname_low for ex in CBC_EXCLUDE))
+            if is_cbc and test['id'] not in self.test_results:
+                if all_vals:
+                    cbc_data = {'result': display_id, 'type': 'hematology_cbc',
+                                'source': 'BC-20S', 'sid': sample_id,
+                                'patient_age': patient_info.get('age', ''),
+                                'patient_gender': patient_info.get('gender', ''),
+                                **all_vals}
+                    self.test_results[test['id']] = json.dumps(
+                        cbc_data, ensure_ascii=False
+                    )
+                    if test['id'] in item_map:
+                        self.refresh_single_test_display(item_map[test['id']], test['id'])
+
+        if count > 0:
+            self.status_var.set(
+                f"✅ Gematologiya: {count} ta natija o'tkazildi "
+                f"({patient_info.get('name', sample_id)})"
+            )
+        else:
+            self.status_var.set(
+                f"⚠ Gematologiya: mos test topilmadi. "
+                f"Buyurtmada WBC/HGB/PLT kabi testlar mavjudligini tekshiring."
+            )
+        return count
+
+    def open_biochemistry_raw(self):
+        """Bioximiya RAW ma'lumotlar oynasini ochish.
+        Agar joriy bemor tanlangan bo'lsa, 'Natijani qo'shish' tugmasi aktiv bo'ladi."""
+        try:
+            if BIOCHEMISTRY_AVAILABLE and open_biochemistry_window:
+                callback = self.on_biochemistry_import if self.current_order_id else None
+                win = open_biochemistry_window(self.root, on_import_callback=callback)
+                self._bring_window_to_front(win)
+            else:
+                messagebox.showwarning(
+                    "Modul topilmadi",
+                    "Bioximiya moduli topilmadi.\n\n"
+                    "biochemistry_window.py faylini tekshiring."
+                )
+        except Exception as e:
+            messagebox.showerror("Xato", f"Bioximiya oynasini ochishda xato:\n{e}")
+            print(f"[XATO] Bioximiya oynasini ochishda xato: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def on_biochemistry_import(self, sample_id, patient_info):
+        """BK-280 natijalarini asosiy oynaga import qilish (bazaga saqlamasdan).
+        Qaytaradi: o'tkazilgan natijalar soni (int).
+        """
+        import json
+        tests = patient_info.get('tests', {})
+        if not tests:
+            return 0
+
+        # === Multi-komponent testlar: Bilirubin va Revmoproba avtomat ===
+        # Bu LIS code larni asosiy loopda o'tkazib yuborish
+        handled_keys = set()
+        need_full_reload = False
+        count = 0
+
+        def _f(s):
+            """Xavfsiz float konversiya"""
+            try:
+                return float(str(s).replace(',', '.'))
+            except Exception:
+                return None
+
+        # ── Bilirubin: LIS 320 (umumiy) + LIS 321 (bog'langan) ──────────
+        bili_entry_u = tests.get('320')
+        bili_entry_b = tests.get('321')
+        bili_val_u = (bili_entry_u.get('value') or '').strip() if bili_entry_u else ''
+        bili_val_b = (bili_entry_b.get('value') or '').strip() if bili_entry_b else ''
+        if bili_val_u or bili_val_b:
+            bili_parent = None
+            for t in self.current_tests:
+                tn = (t.get('nomi') or '').lower()
+                if 'bilirubin' in tn or 'билирубин' in tn:
+                    bili_parent = t
+                    break
+            if bili_parent:
+                rd = {}
+                u_f = _f(bili_val_u)
+                b_f = _f(bili_val_b)
+                if u_f is not None:
+                    rd['umumiy'] = u_f
+                if b_f is not None:
+                    rd['bog_langan'] = b_f
+                if u_f is not None and b_f is not None:
+                    rd['erkin'] = round(u_f - b_f, 3)
+                if rd:
+                    self.test_results[bili_parent['id']] = json.dumps(rd, ensure_ascii=False)
+                    count += 1
+                    need_full_reload = True
+                    print(f"[BIO-IMPORT] Bilirubin multi-komponent: {rd}")
+            if bili_val_u:
+                handled_keys.add('320')
+            if bili_val_b:
+                handled_keys.add('321')
+
+        # ── Revmoproba avtomat: LIS 305 (RF) + 271/322 (CRP) + 245 (ASLO) ──
+        revmo_entry_rf   = tests.get('305')
+        revmo_entry_crp  = tests.get('271') or tests.get('322')
+        revmo_entry_aslo = tests.get('245')
+        revmo_val_rf   = (revmo_entry_rf.get('value')   or '').strip() if revmo_entry_rf   else ''
+        revmo_val_crp  = (revmo_entry_crp.get('value')  or '').strip() if revmo_entry_crp  else ''
+        revmo_val_aslo = (revmo_entry_aslo.get('value') or '').strip() if revmo_entry_aslo else ''
+        if revmo_val_rf or revmo_val_crp or revmo_val_aslo:
+            revmo_parent = None
+            for t in self.current_tests:
+                tn = (t.get('nomi') or '').lower()
+                if 'revmoproba' in tn and 'avtomat' in tn:
+                    revmo_parent = t
+                    break
+            if revmo_parent:
+                rd = {}
+                if revmo_val_rf:
+                    rf_f = _f(revmo_val_rf)
+                    rd['rf']   = rf_f if rf_f is not None else revmo_val_rf
+                if revmo_val_crp:
+                    crp_f = _f(revmo_val_crp)
+                    rd['crp']  = crp_f if crp_f is not None else revmo_val_crp
+                if revmo_val_aslo:
+                    aslo_f = _f(revmo_val_aslo)
+                    rd['aslo'] = aslo_f if aslo_f is not None else revmo_val_aslo
+                if rd:
+                    self.test_results[revmo_parent['id']] = json.dumps(rd, ensure_ascii=False)
+                    count += 1
+                    need_full_reload = True
+                    print(f"[BIO-IMPORT] Revmoproba avtomat multi-komponent: {rd}")
+            else:
+                # To'liq revmoproba yo'q — yakka RF/CRP/ASLO avtomat testlar uchun natijani to'g'ridan saqlash
+                for t in self.current_tests:
+                    tn = (t.get('nomi') or '').lower()
+                    if revmo_val_rf and ('rf ' in tn or 'revmatoid' in tn) and 'avtomat' in tn:
+                        rf_f = _f(revmo_val_rf)
+                        self.test_results[t['id']] = str(rf_f if rf_f is not None else revmo_val_rf)
+                        count += 1
+                        need_full_reload = True
+                        print(f"[BIO-IMPORT] RF avtomat yakka: {revmo_val_rf} → test_id={t['id']}")
+                    elif revmo_val_crp and ('crp' in tn or 's-reaktiv' in tn) and 'avtomat' in tn:
+                        crp_f = _f(revmo_val_crp)
+                        self.test_results[t['id']] = str(crp_f if crp_f is not None else revmo_val_crp)
+                        count += 1
+                        need_full_reload = True
+                        print(f"[BIO-IMPORT] CRP avtomat yakka: {revmo_val_crp} → test_id={t['id']}")
+                    elif revmo_val_aslo and ('aslo' in tn or 'antistreptolizin' in tn) and 'avtomat' in tn:
+                        aslo_f = _f(revmo_val_aslo)
+                        self.test_results[t['id']] = str(aslo_f if aslo_f is not None else revmo_val_aslo)
+                        count += 1
+                        need_full_reload = True
+                        print(f"[BIO-IMPORT] ASLO avtomat yakka: {revmo_val_aslo} → test_id={t['id']}")
+            if revmo_val_rf:
+                handled_keys.add('305')
+            if revmo_val_crp:
+                if tests.get('271'):
+                    handled_keys.add('271')
+                if tests.get('322'):
+                    handled_keys.add('322')
+            if revmo_val_aslo:
+                handled_keys.add('245')
+
+        # ── BUYRAK PANELI: LIS 323 (Kreatinin) + 313 (Mochevina) + 310/316 (Siydik kislotasi) + 233 (Albumin) ──
+        buyrak_kreat  = tests.get('323')
+        buyrak_mochev = tests.get('313')
+        buyrak_siydik = tests.get('310') or tests.get('316')
+        buyrak_albumin = tests.get('233')
+        bk_val_kreat  = (buyrak_kreat.get('value')   or '').strip() if buyrak_kreat  else ''
+        bk_val_mochev = (buyrak_mochev.get('value')  or '').strip() if buyrak_mochev else ''
+        bk_val_siydik = (buyrak_siydik.get('value')  or '').strip() if buyrak_siydik else ''
+        bk_val_albumin = (buyrak_albumin.get('value') or '').strip() if buyrak_albumin else ''
+        if bk_val_kreat or bk_val_mochev or bk_val_siydik:
+            buyrak_parent = None
+            for t in self.current_tests:
+                tn = (t.get('nomi') or '').lower()
+                if 'buyrak paneli' in tn or 'buyrak panel' in tn:
+                    buyrak_parent = t
+                    break
+            if buyrak_parent:
+                rd = {}
+                if bk_val_kreat:
+                    kr_f = _f(bk_val_kreat)
+                    if kr_f is not None: rd['kreatinin'] = kr_f
+                if bk_val_mochev:
+                    mo_f = _f(bk_val_mochev)
+                    if mo_f is not None: rd['mochevina'] = mo_f
+                if bk_val_siydik:
+                    sk_f = _f(bk_val_siydik)
+                    if sk_f is not None: rd['siydik_kislota'] = sk_f
+                if bk_val_albumin:
+                    al_f = _f(bk_val_albumin)
+                    if al_f is not None: rd['albumin'] = al_f
+
+                # BUN va Kreatinin/Mochevina nisbati hisoblash
+                if rd.get('mochevina') and rd.get('kreatinin'):
+                    bun = round(rd['mochevina'] * 28.02 / 60.06, 2)
+                    rd['bun'] = bun
+                    _moch_v2 = float(rd['mochevina'])
+                    if _moch_v2 > 0:
+                        rd['bun_cr'] = round(float(rd['kreatinin']) / _moch_v2, 1)
+                # Umumiy azot miqdori hisoblash
+                _m_i = float(rd.get('mochevina') or 0)
+                _kr_i = float(rd.get('kreatinin') or 0)
+                _sk_i = float(rd.get('siydik_kislota') or 0)
+                if _m_i or _kr_i or _sk_i:
+                    rd['umumiy_azot'] = round(_m_i * 28/60 + _kr_i * 42/(113.12*1000) + _sk_i * 56/(168.11*1000), 2)
+
+                # GFR CKD-EPI formulasi avtomatik hisoblash (yosh + jins + kreatinin)
+                if rd.get('kreatinin') and self.current_bemor_data:
+                    import math as _math
+                    try:
+                        yosh_raw = self.current_bemor_data.get('yosh')
+                        jins_raw = (self.current_bemor_data.get('jins') or '').lower()
+                        vazn_raw = self.current_bemor_data.get('vazn_buyrak')  # kg, agar kiritilgan bo'lsa
+                        yosh_int = int(yosh_raw) if yosh_raw else None
+                        kr_f2 = rd['kreatinin']  # µmol/L
+                        if yosh_int and yosh_int >= 18 and kr_f2 > 0:
+                            is_female = 'ayol' in jins_raw or jins_raw in ('f', 'w', 'female')
+                            # CKD-EPI 2021 (race-free) formulasi
+                            if is_female:
+                                kappa, alpha, mult = 61.9, -0.241, 142
+                            else:
+                                kappa, alpha, mult = 79.6, -0.302, 142
+                            ratio = kr_f2 / kappa
+                            if ratio <= 1.0:
+                                gfr_val = mult * _math.pow(ratio, alpha) * _math.pow(0.9938, yosh_int)
+                            else:
+                                gfr_val = mult * _math.pow(ratio, -1.200) * _math.pow(0.9938, yosh_int)
+                            if is_female:
+                                gfr_val *= 1.012
+                            rd['gfr'] = round(gfr_val, 1)
+                            # Vazn ma'lumotini saqlash (kelajakda Cockcroft-Gault uchun)
+                            if vazn_raw:
+                                try:
+                                    rd['vazn_kg'] = float(vazn_raw)
+                                except Exception:
+                                    pass
+                            print(f"[BIO-IMPORT] GFR CKD-EPI 2021: {rd['gfr']} ml/min "
+                                  f"(yosh={yosh_int}, jins={jins_raw}, Kr={kr_f2} µmol/L"
+                                  + (f", vazn={vazn_raw} kg" if vazn_raw else "") + ")")
+                    except Exception as gfr_err:
+                        print(f"[BIO-IMPORT] GFR hisoblashda xato: {gfr_err}")
+
+                if rd:
+                    self.test_results[buyrak_parent['id']] = json.dumps(rd, ensure_ascii=False)
+                    count += 1
+                    need_full_reload = True
+                    print(f"[BIO-IMPORT] BUYRAK PANELI multi-komponent: {rd}")
+                if bk_val_kreat: handled_keys.add('323')
+                if bk_val_mochev: handled_keys.add('313')
+                if bk_val_siydik:
+                    if tests.get('310'): handled_keys.add('310')
+                    if tests.get('316'): handled_keys.add('316')
+                if bk_val_albumin: handled_keys.add('233')
+            # Agar BUYRAK PANELI topilmasa — yakka testlar sifatida umumiy loop orqali o'tkaziladi
+
+        # ── LIPID SPEKTRI: LIS 254 (TC/Xolesterol) + 277 (HDL) + 289 (LDL) + 308 (TG) ──
+        lipid_tc  = tests.get('254')
+        lipid_hdl = tests.get('277')
+        lipid_ldl = tests.get('289')
+        lipid_tg  = tests.get('308')
+        lipid_val_tc  = (lipid_tc.get('value')  or '').strip() if lipid_tc  else ''
+        lipid_val_hdl = (lipid_hdl.get('value') or '').strip() if lipid_hdl else ''
+        lipid_val_ldl = (lipid_ldl.get('value') or '').strip() if lipid_ldl else ''
+        lipid_val_tg  = (lipid_tg.get('value')  or '').strip() if lipid_tg  else ''
+        if lipid_val_tc or lipid_val_hdl or lipid_val_ldl or lipid_val_tg:
+            lipid_parent = None
+            for t in self.current_tests:
+                tn = (t.get('nomi') or '').lower()
+                if _is_lipid_spektri_test(t.get('nomi', '')):
+                    lipid_parent = t
+                    break
+            if lipid_parent:
+                rd = {}
+                tc_f  = _f(lipid_val_tc)
+                hdl_f = _f(lipid_val_hdl)
+                ldl_f = _f(lipid_val_ldl)
+                tg_f  = _f(lipid_val_tg)
+                if tc_f  is not None: rd['tc']  = tc_f
+                if hdl_f is not None: rd['hdl'] = hdl_f
+                if ldl_f is not None: rd['ldl'] = ldl_f
+                if tg_f  is not None: rd['tg']  = tg_f
+                # Avtomatik hisoblashlar
+                if tg_f is not None:
+                    rd['vldl'] = round(tg_f / 2.2, 2)
+                if tc_f is not None and hdl_f is not None:
+                    rd['non_hdl'] = round(tc_f - hdl_f, 2)
+                    ka = (tc_f - hdl_f) / hdl_f if hdl_f > 0 else None
+                    if ka is not None:
+                        rd['ka'] = round(ka, 2)
+                    rd['tc_hdl'] = round(tc_f / hdl_f, 2) if hdl_f > 0 else None
+                if ldl_f is not None and hdl_f is not None and hdl_f > 0:
+                    rd['ldl_hdl'] = round(ldl_f / hdl_f, 2)
+                if tg_f is not None and hdl_f is not None and hdl_f > 0:
+                    rd['tg_hdl'] = round(tg_f / hdl_f, 2)
+                # None qiymatlarni tozalash
+                rd = {k: v for k, v in rd.items() if v is not None}
+                if rd:
+                    self.test_results[lipid_parent['id']] = json.dumps(rd, ensure_ascii=False)
+                    count += 1
+                    need_full_reload = True
+                    print(f"[BIO-IMPORT] LIPID SPEKTRI multi-komponent: {rd}")
+                if lipid_val_tc:  handled_keys.add('254')
+                if lipid_val_hdl: handled_keys.add('277')
+                if lipid_val_ldl: handled_keys.add('289')
+                if lipid_val_tg:  handled_keys.add('308')
+            # Agar LIPID SPEKTRI paneli buyurtmada yo'q — yakka testlar sifatida o'tkazamiz (handled_keys ga qo'shmaymiz)
+
+        # === Oddiy testlar uchun item_map va nom kesh ===
+        # test_id → treeview item xaritasi
+        item_map = {}
+        for tr_item in self.tests_tree.get_children():
+            td  = self.tests_tree.item(tr_item)
+            tag = td['tags'][0] if td['tags'] else None
+            if tag:
+                try:
+                    tid = int(str(tag).split('_')[0])
+                    item_map[tid] = tr_item
+                except Exception:
+                    pass
+
+        # Test nomlarini kesh (katta-kichik harfdan mustaqil)
+        name_to_test = {t.get('nomi', '').strip().upper(): t
+                        for t in self.current_tests if t.get('nomi')}
+
+        # Moslik uchun yordamchi: belgisiz taqqoslash
+        def _normalize(s):
+            return s.upper().replace('-', '').replace(' ', '').replace("'", '').replace('(', '').replace(')', '')
+
+        # Belgisiz kesh ham saqlaymiz
+        norm_to_test = {_normalize(nm): t for nm, t in name_to_test.items()}
+
+        for code, tdata in tests.items():
+            # Multi-komponent sifatida qayta ishlangan LIS kodlarini o'tkazib yuborish
+            if code in handled_keys:
+                continue
+
+            value = (tdata.get('value') or '').strip()
+            if not value:
+                continue
+
+            # Allaqachon to'liq nomlangan DB nomi (get_db_name orqali)
+            db_name = tdata.get('name', code)
+            db_upper = db_name.upper()
+            db_norm  = _normalize(db_name)
+
+            # 1) To'liq moslik
+            matched = name_to_test.get(db_upper)
+
+            # 2) Belgisiz to'liq moslik (apostropf, defis, bo'shliq e'tiborga olinmaydi)
+            if not matched:
+                matched = norm_to_test.get(db_norm)
+
+            # 3) Qisman moslik (uzun nomlar uchun: kamida 4 belgi)
+            if not matched and len(db_upper) >= 4:
+                for nm, test in name_to_test.items():
+                    if db_upper in nm or nm in db_upper:
+                        matched = test
+                        break
+
+            # 4) Belgisiz qisman moslik (ASO/ASLO, RF/Revmatoid kabi)
+            if not matched and len(db_norm) >= 3:
+                for nm_norm, test in norm_to_test.items():
+                    if db_norm in nm_norm or nm_norm in db_norm:
+                        matched = test
+                        break
+
+            # 5) Birinchi segment moslik: "HDL-xolesterin" → "HDL" → "HDL-Yuqori zichlikli lipoprotein"
+            # Bu HDL, LDL va boshqa qisqartmali testlar uchun (to'liq nom farqidan qat'iy nazar)
+            if not matched:
+                import re as _re5
+                parts5 = _re5.split(r'[-\s/]', db_upper)
+                first_seg = parts5[0].strip() if parts5 else ''
+                if len(first_seg) >= 2:
+                    for nm, test in name_to_test.items():
+                        nm_parts = _re5.split(r'[-\s/]', nm)
+                        nm_first = nm_parts[0].strip() if nm_parts else ''
+                        if first_seg == nm_first:
+                            matched = test
+                            print(f"[BIO-IMPORT] 1-segment moslik: '{db_name}' → '{test.get('nomi','')}'")
+                            break
+
+            if not matched:
+                print(f"[BIO-IMPORT] Mos topilmadi: '{db_name}' (LIS:{tdata.get('lis_code','')})")
+                continue
+
+            test_id = matched['id']
+            result_json = json.dumps({
+                'result':       value,
+                'unit':         tdata.get('unit', ''),
+                'analyzer_ref': tdata.get('ref', ''),
+                'flag':         tdata.get('flag', ''),
+                'source':       'BK-280',
+                'lis_code':     tdata.get('lis_code', code),
+                'sid':          sample_id
+            }, ensure_ascii=False)
+            self.test_results[test_id] = result_json
+
+            if test_id in item_map:
+                self.refresh_single_test_display(item_map[test_id], test_id)
+            count += 1
+
+        # Multi-komponent testlar bo'lsa — to'liq treeview yangilash
+        if need_full_reload:
+            self.load_tests()
+
+        if count > 0:
+            self.status_var.set(
+                f"✅ Bioximiya: {count} ta natija o'tkazildi "
+                f"({patient_info.get('name', sample_id)})"
+            )
+        else:
+            self.status_var.set(
+                "⚠ Bioximiya: mos test topilmadi. "
+                "Buyurtmada BIO testlar mavjudligini tekshiring."
+            )
+        return count
+
+    def open_urine_raw(self):
+        """Siydik (URIT-50) RAW ma'lumotlar oynasini ochish.
+        Agar joriy bemor tanlangan bo'lsa, 'Natijani qo'shish' tugmasi aktiv bo'ladi."""
+        try:
+            if URINE_WINDOW_AVAILABLE and open_urine_window:
+                callback = self.on_urine_import if self.current_order_id else None
+                win = open_urine_window(self.root, on_import_callback=callback)
+                self._bring_window_to_front(win)
+            else:
+                messagebox.showwarning(
+                    "Modul topilmadi",
+                    "Siydik moduli topilmadi.\n\n"
+                    "urine_window.py faylini tekshiring."
+                )
+        except Exception as e:
+            messagebox.showerror("Xato", f"Siydik oynasini ochishda xato:\n{e}")
+            print(f"[XATO] Siydik oynasini ochishda xato: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def on_urine_import(self, sample_id, patient_info):
+        """URIT-50 natijalarini asosiy oynaga import qilish (bazaga saqlamasdan).
+        Qaytaradi: o'tkazilgan natijalar soni (int).
+        MUHIM: faqat test_type='URINE' yoki nomi 'siydik' so'zini o'z ichiga olgan
+        testlarga yoziladi - boshqa testlarga (kreatinin, qon tahlili) tegmaydi.
+        """
+        import json
+        tests = patient_info.get('tests', {})
+        if not tests:
+            return 0
+
+        # Natijani ko'rsatish uchun Sample ID yoki Sample NO
+        sno = patient_info.get('sample_no', '')
+        display_id = sample_id if sample_id else sno   # Natija ustunida ko'rinadigan ID
+
+        # Barcha analitlarning qiymatlarini yig'ish (popup uchun)
+        all_analytes = {code: tdata.get('value', '') for code, tdata in tests.items()
+                        if (tdata.get('value') or '').strip()}
+
+        # test_id → treeview item xaritasi
+        item_map = {}
+        for tr_item in self.tests_tree.get_children():
+            td  = self.tests_tree.item(tr_item)
+            tag = td['tags'][0] if td['tags'] else None
+            if tag:
+                try:
+                    tid = int(str(tag).split('_')[0])
+                    item_map[tid] = tr_item
+                except Exception:
+                    pass
+
+        # FAQAT Siydikning umumiy tahlili — to'liq nom (Siydik kislota emas!)
+        URINE_EXACT = ('SIYDIKNING UMUMIY TAHLILI', 'UMUMIY SIYDIK TAHLILI', 'UMUMIY SIYDIK')
+        urine_tests = []
+        for t in self.current_tests:
+            tt = (t.get('test_type') or '').strip().upper()
+            nm = (t.get('nomi') or '').strip().upper()
+            is_umumiy_siydik = any(ex in nm for ex in URINE_EXACT)
+            if (tt == 'URINE' and is_umumiy_siydik) or is_umumiy_siydik:
+                urine_tests.append(t)
+
+        if not urine_tests:
+            self.status_var.set(
+                "⚠ Siydik: mos test topilmadi. "
+                "Buyurtmada siydik testlari mavjudligini tekshiring."
+            )
+            return 0
+
+        # Topilgan BARCHA siydik testlariga (odatda 1 ta) barcha analitlarni yozish.
+        # Har bir analizatordan kelgan qiymatlar all_analytes deb saqlanadi,
+        # popup da to'liq ro'yxat ko'rsatiladi.
+        count = 0
+        for matched in urine_tests:
+            test_id = matched['id']
+            result_json = json.dumps({
+                'result':       display_id,
+                'type':         'urine',
+                'sid':          sample_id,
+                'sno':          sno,
+                'source':       'URIT-50',
+                'all_analytes': all_analytes,
+                'abnormal_params': patient_info.get('abnormal_params', []),
+            }, ensure_ascii=False)
+            self.test_results[test_id] = result_json
+
+            if test_id in item_map:
+                self.refresh_single_test_display(item_map[test_id], test_id)
+            count += 1
+
+        if count > 0:
+            self.status_var.set(
+                f"✅ Siydik: natijalar {count} ta testga o'tkazildi "
+                f"({patient_info.get('name', display_id)})"
+            )
+        return count
+
+
+# ============================================================================
+# NATIJA KIRITISH CLASSI
+# ============================================================================
+
+class NatijaKiritish:
+    """Test natijalarini kiritish oynasi"""
+    
+    def __init__(self, root, order_id):
+        self.root = root
+        self.order_id = order_id
+        self.root.title(f"Natija Kiritish - Order #{order_id}")
+        self.root.geometry("1200x800")
+        
+        # Database ulanish
+        self.conn = db_conn()
+        if not self.conn:
+            messagebox.showerror("Xato", "Database ga ulanib bo'lmadi!")
+            self.root.destroy()
+            return
+        
+        # Jadvalni yaratish (agar yo'q bo'lsa)
+        self.create_test_results_table()
+        
+        # Order ma'lumotlari
+        self.order_info = self.get_order_info()
+        if not self.order_info:
+            messagebox.showerror("Xato", f"Order #{order_id} topilmadi!")
+            self.root.destroy()
+            return
+        
+        self.tests = self.get_order_tests()
+        
+        # UI
+        self.create_ui()
+    
+    def create_test_results_table(self):
+        """test_results jadvalini yaratish"""
+        try:
+            cursor = self.conn.cursor()
+            query = """
+            CREATE TABLE IF NOT EXISTS test_results (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                order_id VARCHAR(50) NOT NULL,
+                test_name VARCHAR(255) NOT NULL,
+                test_type VARCHAR(50) NOT NULL,
+                result_data TEXT,
+                filled_template_path VARCHAR(500),
+                status VARCHAR(50) DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX idx_order_id (order_id),
+                INDEX idx_test_name (test_name),
+                UNIQUE KEY unique_order_test (order_id, test_name)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+            cursor.execute(query)
+            self.conn.commit()
+            cursor.close()
+        except Exception as e:
+            print(f"[OGOHLANTIRISH] Jadval yaratishda xato: {e}")
+    
+    def get_order_info(self):
+        """Order va bemor ma'lumotlarini olish"""
+        try:
+            cursor = self.conn.cursor(dictionary=True)
+            cursor.execute("""
+                SELECT o.id as order_id,
+                       o.bemor_id,
+                       o.sana_vaqt,
+                       o.sample_id,
+                       b.fish as patient_name,
+                       b.yosh as age,
+                       b.jins as gender,
+                       b.tugilgan_sana,
+                       b.telefon,
+                       b.shifokor
+                FROM orders o
+                LEFT JOIN bemorlar b ON o.bemor_id = b.id
+                WHERE o.id = %s OR o.sample_id = %s
+                LIMIT 1
+            """, (self.order_id, self.order_id))
+            result = cursor.fetchone()
+            cursor.close()
+            return result
+        except Exception as e:
+            print(f"Xato: {e}")
+            return None
+    
+    def get_order_tests(self):
+        """Order bo'yicha testlarni olish"""
+        try:
+            cursor = self.conn.cursor(dictionary=True)
+            cursor.execute("""
+                SELECT oi.id,
+                       oi.order_id,
+                       oi.tahlil_id,
+                       oi.nomi as test_name,
+                       tn.type as test_type,
+                       tn.standard_blank_path,
+                       IFNULL(tr.result_data, '{}') as saved_result,
+                       IFNULL(tr.status, 'pending') as result_status,
+                       IFNULL(tr.filled_template_path, '') as filled_template_path
+                FROM order_items oi
+                LEFT JOIN tahlillar_norma tn ON oi.nomi = tn.tahlil_nomi
+                LEFT JOIN test_results tr ON tr.order_id = %s AND tr.test_name = oi.nomi
+                WHERE oi.order_id = %s
+                ORDER BY oi.nomi
+            """, (str(self.order_id), self.order_id))
+            tests = cursor.fetchall()
+            cursor.close()
+            return tests
+        except Exception as e:
+            print(f"Xato: {e}")
+            return []
+    
+    def create_ui(self):
+        """UI yaratish"""
+        # Top: Bemor ma'lumotlari
+        info_frame = ttk.LabelFrame(self.root, text="Bemor Ma'lumotlari", padding=10)
+        info_frame.pack(fill="x", padx=10, pady=5)
+        
+        order_id_text = f"Order ID: {self.order_id}"
+        if self.order_info.get('sample_id'):
+            order_id_text += f" | Sample ID: {self.order_info.get('sample_id')}"
+        ttk.Label(info_frame, text=order_id_text, font=("Arial", 12, "bold")).pack(anchor="w")
+        ttk.Label(info_frame, text=f"F.I.SH: {self.order_info.get('patient_name', 'N/A')}").pack(anchor="w")
+        
+        age_text = f"Yosh: {self.order_info.get('age', 'N/A')}"
+        if self.order_info.get('gender'):
+            age_text += f"  |  Jins: {self.order_info.get('gender', 'N/A')}"
+        ttk.Label(info_frame, text=age_text).pack(anchor="w")
+        
+        # Main: 2 ta panel (chap - testlar, o'ng - natija kiritish)
+        main_frame = ttk.Frame(self.root)
+        main_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        # Chap: Testlar ro'yxati
+        left_frame = ttk.Frame(main_frame)
+        left_frame.pack(side="left", fill="both", expand=True)
+        
+        ttk.Label(left_frame, text="Testlar Ro'yxati", font=("Arial", 10, "bold")).pack(anchor="w")
+        
+        self.tests_tree = ttk.Treeview(left_frame, columns=("test", "status"), show="headings", height=25)
+        self.tests_tree.heading("test", text="Test")
+        self.tests_tree.heading("status", text="Holat")
+        self.tests_tree.column("test", width=300)
+        self.tests_tree.column("status", width=100)
+        
+        for test in self.tests:
+            status = "✓ Bajarildi" if test.get('saved_result', '{}') != '{}' else "○ Kutilmoqda"
+            self.tests_tree.insert("", "end", values=(test['test_name'], status), tags=(test['test_name'],))
+        
+        scrollbar = ttk.Scrollbar(left_frame, orient="vertical", command=self.tests_tree.yview)
+        self.tests_tree.configure(yscrollcommand=scrollbar.set)
+        
+        self.tests_tree.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        self.tests_tree.bind("<<TreeviewSelect>>", self.show_input_form)
+        
+        # O'ng: Natija kiritish paneli
+        self.right_frame = ttk.Frame(main_frame)
+        self.right_frame.pack(side="right", fill="both", expand=True, padx=(10,0))
+        
+        ttk.Label(self.right_frame, text="Natija Kiritish", font=("Arial", 12, "bold")).pack(anchor="w")
+        
+        self.input_frame = ttk.Frame(self.right_frame)
+        self.input_frame.pack(fill="both", expand=True, pady=10)
+        
+        # Bottom: Tugmalar
+        buttons_frame = ttk.Frame(self.root)
+        buttons_frame.pack(fill="x", padx=10, pady=10)
+        
+        ttk.Button(buttons_frame, text="Yagona Blanka Yaratish (F2)", 
+                  command=self.create_blank).pack(side="left", padx=5)
+        ttk.Button(buttons_frame, text="Saqlash va Chop Etish (F3)", 
+                  command=self.save_and_print).pack(side="left", padx=5)
+        ttk.Button(buttons_frame, text="Yopish", 
+                  command=self.root.destroy).pack(side="right", padx=5)
+        
+        self.root.bind("<F2>", lambda e: self.create_blank())
+        self.root.bind("<F3>", lambda e: self.save_and_print())
+    
+    def show_input_form(self, event):
+        """Tanlangan test uchun natija kiritish formasini ko'rsatish"""
+        selection = self.tests_tree.selection()
+        if not selection:
+            return
+        
+        test_name = self.tests_tree.item(selection[0])['values'][0]
+        test = next((t for t in self.tests if t['test_name'] == test_name), None)
+        if not test:
+            return
+        
+        # Eski formani o'chirish
+        for widget in self.input_frame.winfo_children():
+            widget.destroy()
+        
+        # Test turiga qarab forma ko'rsatish
+        test_type = test.get('test_type', 'numeric')
+        if test_type == 'express':
+            test_type = 'positive_negative'
+        
+        if test_type == 'positive_negative':
+            self.show_positive_negative_form(test)
+        elif test_type == 'blood_group':
+            self.show_blood_group_form(test)
+        elif test_type == 'standard_template':
+            self.show_template_form(test)
+        else:
+            ttk.Label(self.input_frame, text="Bu test turi qo'llab-quvvatlanmaydi").pack()
+    
+    def show_positive_negative_form(self, test):
+        """Manfiy/Musbat forma"""
+        import json
+        
+        ttk.Label(self.input_frame, text=test['test_name'], font=("Arial", 11, "bold")).pack(anchor="w", pady=5)
+        
+        saved = json.loads(test['saved_result']) if test.get('saved_result', '{}') != '{}' else {}
+        
+        result_var = tk.StringVar(value=saved.get('result', ''))
+        
+        ttk.Radiobutton(self.input_frame, text="Manfiy", variable=result_var, value="Manfiy").pack(anchor="w", pady=5)
+        ttk.Radiobutton(self.input_frame, text="Musbat", variable=result_var, value="Musbat").pack(anchor="w", pady=5)
+        
+        ttk.Button(self.input_frame, text="Saqlash", 
+                  command=lambda: self.save_result(test, {'result': result_var.get()})).pack(pady=10)
+    
+    def show_blood_group_form(self, test):
+        """Qon guruhi forma"""
+        import json
+        
+        ttk.Label(self.input_frame, text=test['test_name'], font=("Arial", 11, "bold")).pack(anchor="w", pady=5)
+        
+        saved = json.loads(test['saved_result']) if test.get('saved_result', '{}') != '{}' else {}
+        
+        ttk.Label(self.input_frame, text="Qon Guruhi:").pack(anchor="w", pady=(10,2))
+        qon_var = tk.StringVar(value=saved.get('qon_guruhi', ''))
+        qon_combo = ttk.Combobox(self.input_frame, textvariable=qon_var, 
+                                values=["I(0)", "II(A)", "III(B)", "IV(AB)"], state="readonly", width=30)
+        qon_combo.pack(anchor="w", pady=2)
+        
+        ttk.Label(self.input_frame, text="Rezus Omil:").pack(anchor="w", pady=(10,2))
+        rezus_var = tk.StringVar(value=saved.get('rezus_omil', ''))
+        ttk.Radiobutton(self.input_frame, text="Rh+ (Rezus Musbat)", variable=rezus_var, value="Rh+ (Rezus Musbat)").pack(anchor="w", pady=2)
+        ttk.Radiobutton(self.input_frame, text="Rh- (Rezus Manfiy)", variable=rezus_var, value="Rh- (Rezus Manfiy)").pack(anchor="w", pady=2)
+        
+        ttk.Button(self.input_frame, text="Saqlash",
+                  command=lambda: self.save_result(test, {
+                      'qon_guruhi': qon_var.get(),
+                      'rezus_omil': rezus_var.get()
+                  })).pack(pady=10)
+    
+    def show_template_form(self, test):
+        """Standart shablon forma"""
+        import json
+        import shutil
+        
+        ttk.Label(self.input_frame, text=test['test_name'], font=("Arial", 11, "bold")).pack(anchor="w", pady=5)
+        
+        template_path = test.get('standard_blank_path', '')
+        if not template_path or not os.path.exists(template_path):
+            # Standart shablonlar papkasidan qidirish
+            standart_dir = r"G:\DASTUR\Standart shablaonlar"
+            test_name_lower = test['test_name'].lower()
+            
+            if os.path.exists(standart_dir):
+                for filename in os.listdir(standart_dir):
+                    if filename.endswith('.docx'):
+                        if test_name_lower in filename.lower() or filename.lower() in test_name_lower:
+                            template_path = os.path.join(standart_dir, filename)
+                            break
+            
+            if not template_path or not os.path.exists(template_path):
+                ttk.Label(self.input_frame, text="[OGOHLANTIRISH] Shablon topilmadi!", foreground="red").pack(anchor="w")
+                return
+        
+        saved = json.loads(test['saved_result']) if test.get('saved_result', '{}') != '{}' else {}
+        filled_path = saved.get('filled_template_path', '') or test.get('filled_template_path', '')
+        
+        ttk.Label(self.input_frame, text=f"Shablon: {os.path.basename(template_path)}").pack(anchor="w", pady=5)
+        
+        def open_template():
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filled_dir = os.path.join(os.path.dirname(template_path), "filled_templates")
+            os.makedirs(filled_dir, exist_ok=True)
+            
+            # Fayl nomi: TestNomi_OrderID_Vaqt.docx
+            safe_name = test['test_name'].replace(' ', '_').replace('/', '_').replace('\\', '_')
+            new_path = os.path.join(filled_dir, f"{safe_name}_{self.order_id}_{timestamp}.docx")
+            
+            # Asl shablonni nusxalash
+            shutil.copy2(template_path, new_path)
+            
+            # Yo'lni darhol bazaga saqlash (foydalanuvchi to'ldirishdan oldin)
+            # Bu keyin generate_unified_blank() tomonidan ishlatiladi
+            self.save_result(
+                test,
+                result_data={'filled_template_path': new_path, 'status': 'in_progress'},
+                filled_template_path=new_path
+            )
+            self.temp_filled_path = new_path
+            
+            # Faylni Word da ochish
+            os.startfile(new_path)
+            
+            # UI ni yangilash — "Ochildi" ko'rsatish
+            for widget in self.input_frame.winfo_children():
+                widget.destroy()
+            
+            ttk.Label(
+                self.input_frame,
+                text=f"[OK] Shablon Word da ochildi:\n{os.path.basename(new_path)}",
+                foreground="green",
+                font=("Arial", 10)
+            ).pack(anchor="w", pady=5)
+            
+            ttk.Label(
+                self.input_frame,
+                text="Word da natijalarni kiriting, saqlang va yoping.\nBlanka yaratishda natijalar avtomatik olinadi.",
+                foreground="gray"
+            ).pack(anchor="w", pady=5)
+            
+            ttk.Button(
+                self.input_frame,
+                text="Faylni Qayta Ochish",
+                command=lambda: os.startfile(new_path)
+            ).pack(pady=5, fill="x")
+        
+        def upload_filled():
+            path = tk.filedialog.askopenfilename(filetypes=[("Word", "*.docx")])
+            if path:
+                self.save_result(test, {'filled_template_path': path}, filled_template_path=path)
+        
+        ttk.Button(self.input_frame, text="Shablonni Ochish va To'ldirish", command=open_template).pack(pady=5, fill="x")
+        ttk.Label(self.input_frame, text="yoki").pack(pady=5)
+        ttk.Button(self.input_frame, text="To'ldirilgan Faylni Yuklash", command=upload_filled).pack(pady=5, fill="x")
+        
+        if filled_path and os.path.exists(filled_path):
+            ttk.Label(self.input_frame, text="✓ To'ldirilgan fayl saqlangan", foreground="green").pack(pady=5)
+            ttk.Button(self.input_frame, text="Faylni Ko'rish", 
+                      command=lambda: os.startfile(filled_path)).pack(pady=5)
+        
+        self.temp_filled_path = None
+    
+    def save_result(self, test, result_data, filled_template_path=None):
+        """Natijani saqlash"""
+        import json
+        
+        try:
+            cursor = self.conn.cursor()
+            
+            result_json = json.dumps(result_data, ensure_ascii=False)
+            
+            test_type = test.get('test_type', 'numeric')
+            if test_type == 'express':
+                test_type = 'positive_negative'
+            
+            filled_path = filled_template_path or result_data.get('filled_template_path', '')
+            
+            cursor.execute("""
+                INSERT INTO test_results 
+                (order_id, test_name, test_type, result_data, filled_template_path, status)
+                VALUES (%s, %s, %s, %s, %s, 'completed')
+                ON DUPLICATE KEY UPDATE
+                result_data = VALUES(result_data),
+                filled_template_path = VALUES(filled_template_path),
+                status = 'completed',
+                updated_at = CURRENT_TIMESTAMP
+            """, (str(self.order_id), test['test_name'], test_type, result_json, filled_path))
+            
+            self.conn.commit()
+            cursor.close()
+            messagebox.showinfo("Muvaffaqiyat", "Natija saqlandi!")
+            
+            # Ro'yxatni yangilash
+            self.tests = self.get_order_tests()
+            for item in self.tests_tree.get_children():
+                self.tests_tree.delete(item)
+            for test in self.tests:
+                status = "✓ Bajarildi" if test.get('saved_result', '{}') != '{}' else "○ Kutilmoqda"
+                self.tests_tree.insert("", "end", values=(test['test_name'], status))
+                
+        except Exception as e:
+            messagebox.showerror("Xato", f"Saqlashda xato: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def create_blank(self):
+        """Yagona blanka yaratish"""
+        try:
+            output_path = generate_unified_blank(self.order_id)
+            if output_path:
+                messagebox.showinfo("Muvaffaqiyat", f"Blanka yaratildi!\n{output_path}")
+                os.startfile(output_path)
+            else:
+                messagebox.showerror("Xato", "Blanka yaratishda xato!")
+        except Exception as e:
+            messagebox.showerror("Xato", f"Xato: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def save_and_print(self):
+        """Saqlash va chop etish"""
+        try:
+            output_path = generate_unified_blank(self.order_id)
+            if output_path:
+                try:
+                    import win32api
+                    import win32print
+                    printer = win32print.GetDefaultPrinter()
+                    win32api.ShellExecute(0, "print", output_path, f'/d:"{printer}"', ".", 0)
+                    messagebox.showinfo("Muvaffaqiyat", f"Chop etilmoqda...\n{printer}")
+                except ImportError:
+                    os.startfile(output_path)
+                    messagebox.showinfo("Ma'lumot", "Blanka ochildi. Qo'lda chop eting.")
+                except Exception as e:
+                    os.startfile(output_path)
+                    messagebox.showinfo("Ma'lumot", f"Blanka ochildi. Qo'lda chop eting.\n\nXato: {e}")
+        except Exception as e:
+            messagebox.showerror("Xato", f"Chop etishda xato: {e}")
+            import traceback
+            traceback.print_exc()
+
+
+def main():
+    try:
+        print("=" * 60)
+        print("Monoblok Dastur ishga tushmoqda...")
+        print("=" * 60)
+        
+        # Tkinter import tekshirish
+        try:
+            root = tk.Tk()
+            print("[OK] Tkinter oynasi yaratildi")
+        except Exception as e:
+            print(f"[XATO] Tkinter oynasi yaratishda xato: {e}")
+            import traceback
+            traceback.print_exc()
+            input("Dasturni yopish uchun Enter bosing...")
+            return
+        
+        # Oynani ko'rinadigan qilish (avval)
+        root.deiconify()
+        root.lift()
+        root.attributes('-topmost', True)
+        root.update()  # Oynani darhol ko'rsatish
+        
+        try:
+            print("   MonoblokApp yaratilmoqda...")
+            app = MonoblokApp(root)
+            print("[OK] MonoblokApp yaratildi")
+        except Exception as e:
+            print(f"[XATO] MonoblokApp yaratishda xato: {e}")
+            import traceback
+            traceback.print_exc()
+            # Oddiy oyna ko'rsatish
+            root.title("AzizMedLine LIMS - Xatolik")
+            root.geometry("600x400")
+            
+            error_frame = tk.Frame(root)
+            error_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+            
+            error_label = tk.Label(error_frame, 
+                                 text=f"Xatolik yuz berdi:\n\n{str(e)}\n\nConsole da batafsil ma'lumot ko'rsatilgan.", 
+                                 font=("Arial", 12), fg="red", justify=tk.LEFT, wraplength=550)
+            error_label.pack(fill=tk.BOTH, expand=True)
+            
+            close_btn = tk.Button(error_frame, text="Yopish", command=root.quit, font=("Arial", 12))
+            close_btn.pack(pady=10)
+            
+            # Oynani ko'rsatish
+            root.lift()
+            root.focus_force()
+            root.update()
+        
+        # Oynani yana oldinga olib kelish
+        root.attributes('-topmost', False)
+        root.lift()
+        root.focus_force()
+        root.update()
+        
+        print("[OK] mainloop() ishga tushmoqda...")
+        print("=" * 60)
+        print("Oyna ochilishi kerak. Agar ko'rinmasa, Alt+Tab bilan toping.")
+        print("=" * 60)
+        
+        root.mainloop()
+        
+        print("[OK] Dastur to'xtatildi")
+    except KeyboardInterrupt:
+        print("\n[OGOHLANTIRISH] Dastur to'xtatildi (Ctrl+C)")
+    except Exception as e:
+        print(f"[XATO] Dastur ishga tushishda xato: {e}")
+        import traceback
+        traceback.print_exc()
+        input("\nDasturni yopish uchun Enter bosing...")
+
+if __name__ == "__main__":
+    main()
+ 

@@ -1,0 +1,35 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Monoblok Asosiy Dastur",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["monoblok_dastur.py"],
+      "port": 0
+    },
+    {
+      "name": "BK280 Listener (port 8087)",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["bk280_listener.py"],
+      "port": 8087
+    },
+    {
+      "name": "ASUS LIS Server (port 8088)",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["BK280/asus_lis_server.py"],
+      "port": 8088
+    },
+    {
+      "name": "Mindray LIS Bridge - BC-20s (port 5100)",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["BC-20s/mindray_lis_bridge.py"],
+      "port": 5100
+    },
+    {
+      "name": "Mindray Integration - BC-20s (port 5100)",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["BC-20s/mindray_integration.py"],
+      "port": 5100
+    }
+  ]
+}
