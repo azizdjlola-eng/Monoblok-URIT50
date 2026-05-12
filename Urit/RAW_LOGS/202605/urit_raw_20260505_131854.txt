@@ -1,0 +1,25 @@
+  
+ID:260505003608
+NO.000020 2000-01-01
+            05:16:47
+
+*LEU +1     70 CELL/uL
+ KET -        0 mmol/L
+ NIT -   
+*URO +1      33 umol/L
+*BIL +1     8.6 umol/L
+ GLU -        0 mmol/L
+*PRO +1        0.3 g/L
+ SG         1.030     
+ pH         5.5       
+*BLD +2     80 CELL/uL
+ Vc  -        0 mmol/L
+*MA         >=150 mg/L
+ Ca         5.0 mmol/L
+*CR       >=26.4mmol/L
+*ACR   3.4-33.9mg/mmol
+ 
+
+
+
+

@@ -251,16 +251,28 @@ def load_blanka_config() -> dict:
     default_config = {
         "blanka_ustuni_path": default_path,
         "logo_path": LOGO_DEFAULT_PATH,
+        "header_type": "shablon",
+        "klinika_nomi": "AZIZ MEDLINE",
+        "klinika_sub": "xususiy laboratoriyasi",
+        "klinika_manzil": "Surxondaryo vil., Sherobod tumani, Qo'rg'on MFY,\nY. Oxunboboev ko'chasi, 57E-uy",
+        "klinika_tel": "Tel.: (998) 99-673-13-42",
+        "logo_width": 3.2,
+        "logo_height": 3.2,
+        "chap_panel": "barcode",
+        "ong_panel": "logo",
+        "header_bg_color": "2E75B6",
+        "klinika_rang": "1E9943",
+        "bemor_row_color": "E6E6E6",
+        "qr_link_template": "",
     }
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                 config = json.load(f)
                 if isinstance(config, dict):
-                    if 'blanka_ustuni_path' not in config:
-                        config['blanka_ustuni_path'] = default_path
-                    if 'logo_path' not in config:
-                        config['logo_path'] = LOGO_DEFAULT_PATH
+                    for key, val in default_config.items():
+                        if key not in config:
+                            config[key] = val
                     return config
                 return default_config
         except Exception as e:
@@ -271,9 +283,10 @@ def load_blanka_config() -> dict:
 def save_blanka_config(config: dict = None):
     if config is None:
         config = {}
-    default_path = r"G:\DASTUR\URIT 50\Standart shablonlar\blanka ustuni.docx"
-    if 'blanka_ustuni_path' not in config:
-        config['blanka_ustuni_path'] = default_path
+    defaults = load_blanka_config()
+    for key, val in defaults.items():
+        if key not in config:
+            config[key] = val
     try:
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(config, f, ensure_ascii=False, indent=2)
@@ -1238,17 +1251,16 @@ def extract_tables_from_docx(source_path: str, target_doc: Document,
             tugilgan_sana = order_info.get('tugilgan_sana') or ''
             dt_str = datetime.now().strftime("%d.%m.%Y %H:%M")
             
-            if yosh:
+            _tf = _fmt_tug_sana(tugilgan_sana)
+            if _tf and yosh:
+                tugilgan_text = f"{_tf} ({yosh} yosh)"
+            elif _tf:
+                tugilgan_text = _tf
+            elif yosh:
                 tugilgan_text = f"{yosh} yosh"
-            elif tugilgan_sana:
-                try:
-                    parts = str(tugilgan_sana).split('-')
-                    tugilgan_text = f"{parts[2]}.{parts[1]}.{parts[0]}" if len(parts) == 3 else str(tugilgan_sana)
-                except:
-                    tugilgan_text = str(tugilgan_sana)
             else:
                 tugilgan_text = ''
-            
+
             nomeratsiya = '00'
             sid = str(order_info.get('sample_id') or order_info.get('order_id') or '')
             if len(sid) >= 2:
@@ -2067,17 +2079,13 @@ def append_template_to_doc(doc: Document, template_path: str, order_info: dict):
         dt_str = datetime.now().strftime("%d.%m.%Y %H:%M")
         
         # Tug'ilgan sana formatlash
-        if yosh:
+        _tf2 = _fmt_tug_sana(tugilgan_sana)
+        if _tf2 and yosh:
+            tugilgan_text = f"{_tf2} ({yosh} yosh)"
+        elif _tf2:
+            tugilgan_text = _tf2
+        elif yosh:
             tugilgan_text = f"{yosh} yosh"
-        elif tugilgan_sana:
-            try:
-                parts = str(tugilgan_sana).split('-')
-                if len(parts) == 3:
-                    tugilgan_text = f"{parts[2]}.{parts[1]}.{parts[0]}"
-                else:
-                    tugilgan_text = str(tugilgan_sana)
-            except:
-                tugilgan_text = str(tugilgan_sana)
         else:
             tugilgan_text = ''
         
@@ -2955,13 +2963,19 @@ def _apply_table_widths(table, widths_cm):
                 tcW.set(qn('w:w'), str(int(w * 567)))
                 tcW.set(qn('w:type'), 'dxa')
 
-# ─── KLINIKA MA'LUMOTLARI (o'zgartirish uchun shu yerda) ────────────────────
-KLINIKA_NOMI       = "AZIZ MEDLINE"
-KLINIKA_SUB        = "xususiy laboratoriyasi"
-KLINIKA_MANZIL     = "Surxondaryo vil., Sherobod tumani, Qo'rg'on MFY,\nY. Oxunboboev ko'chasi, 57E-uy"
-KLINIKA_TEL        = "Tel.: (998) 99-673-13-42"
+# ─── KLINIKA MA'LUMOTLARI (blanka_config.json dan o'qiladi) ────────────────────
 KLINIKA_GREEN      = RGBColor(0x1e, 0x99, 0x43)   # #1E9943 — premium klinik yashil
 KLINIKA_LIGHT_G    = "D6EAD6"                      # bemor bloki fon — och yashil
+
+def _get_klinika_info():
+    """Config dan klinika ma'lumotlarini qaytaradi."""
+    config = load_blanka_config()
+    return {
+        'nomi':   config.get('klinika_nomi', 'LABORATORIYA'),
+        'sub':    config.get('klinika_sub', ''),
+        'manzil': config.get('klinika_manzil', ''),
+        'tel':    config.get('klinika_tel', ''),
+    }
 KLINIKA_HEADER_G   = "1A7A40"                      # sarlavha fon — o'rta yashil
 # ────────────────────────────────────────────────────────────────────────────
 
@@ -3036,6 +3050,24 @@ def _generate_barcode_bytes(data: str, module_w: int = 2, bar_height: int = 55) 
         return None
 
 
+def _generate_qrcode_bytes(data: str, box_size: int = 4, border: int = 2) -> 'io.BytesIO':
+    try:
+        import qrcode
+        import io as _io
+        qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_M,
+                           box_size=box_size, border=border)
+        qr.add_data(data)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        buf = _io.BytesIO()
+        img.save(buf, format='PNG')
+        buf.seek(0)
+        return buf
+    except Exception as e:
+        print(f"   [OGOHLANTIRISH] QR kod yaratishda xato: {e}")
+        return None
+
+
 def _parse_date_from_sample_id(sample_id) -> str:
     """
     sample_id dan buyurtma sanasini chiqaradi.
@@ -3056,59 +3088,295 @@ def _parse_date_from_sample_id(sample_id) -> str:
     return None
 
 
-def insert_premium_header(doc: Document, order_info: dict):
+def _fmt_tug_sana(val) -> str:
     """
-    Professional 3-ustunli header.
-    Layout (2-rasm uslubida):
-    ┌──────────────────────┬──────────────────────────────┬──────────────────┐
-    │  "Buyurtma №"        │   AZIZ MEDLINE (katta yashil)│   [LOGO IMAGE]   │
-    │  [BARCODE IMAGE]     │   xususiy laboratoriyasi      │   (agar mavjud)  │
-    │  260217000706        │   Manzil                      │                  │
-    │  01.03.2026          │   Tel.: ...                   │                  │
-    └──────────────────────┴──────────────────────────────┴──────────────────┘
-    ─────────────────── (yashil separator) ──────────────────────────────────
-    ┌─────────────────────────┬──────────────────────┬────────────────────────┐
-    │ F.I.SH. (sarlavha)     │ Tug'ilgan sana        │ Jins                   │
-    │ [qiymat]               │ [qiymat]              │ [qiymat]               │
-    └─────────────────────────┴──────────────────────┴────────────────────────┘
+    Tug'ilgan sanani DD.MM.YYYY formatga o'tkazadi.
+    val: str ('1993-05-04' yoki '04.05.1993'), datetime.date, yoki None
     """
+    if not val:
+        return ''
+    import datetime as _dt
+    if isinstance(val, (_dt.date, _dt.datetime)):
+        return val.strftime("%d.%m.%Y")
+    s = str(val).strip()
+    # YYYY-MM-DD yoki YYYY.MM.DD → DD.MM.YYYY
+    import re as _re
+    m = _re.match(r'^(\d{4})[-.](\d{1,2})[-.](\d{1,2})$', s)
+    if m:
+        return f"{int(m.group(3)):02d}.{int(m.group(2)):02d}.{m.group(1)}"
+    # DD.MM.YYYY — allaqachon to'g'ri
+    if _re.match(r'^\d{1,2}\.\d{1,2}\.\d{4}$', s):
+        return s
+    return s
+
+
+def _extract_birth_year_smart(val):
+    """
+    Tug'ilgan sana/yildan yilni ajratib oladi.
+    Qo'llab-quvvatlangan formatlar:
+      datetime.date/datetime  → .year
+      '1993-05-04', '04.05.1993' → 1993
+      '04051993', '01011993' (DDMMYYYY) → 1993
+      '19930504' (YYYYMMDD) → 1993
+      '1993' → 1993
+    """
+    if not val:
+        return None
+    import datetime as _dt, re as _re
+    if isinstance(val, (_dt.date, _dt.datetime)):
+        return val.year
+    s = str(val).strip().replace(' ', '')
+    # YYYY-MM-DD yoki YYYY.MM.DD
+    m = _re.match(r'^(\d{4})[-./]', s)
+    if m:
+        y = int(m.group(1))
+        if 1900 <= y <= 2030:
+            return y
+    # DD.MM.YYYY
+    m = _re.match(r'^\d{1,2}\.\d{1,2}\.(\d{4})$', s)
+    if m:
+        y = int(m.group(1))
+        if 1900 <= y <= 2030:
+            return y
+    # 8 raqam: DDMMYYYY
+    m = _re.match(r'^(\d{2})(\d{2})(\d{4})$', s)
+    if m:
+        y = int(m.group(3))
+        if 1900 <= y <= 2030:
+            return y
+    # 8 raqam: YYYYMMDD
+    m = _re.match(r'^(\d{4})(\d{2})(\d{2})$', s)
+    if m:
+        y = int(m.group(1))
+        if 1900 <= y <= 2030:
+            return y
+    # Faqat yil
+    m = _re.match(r'^(\d{4})$', s)
+    if m:
+        y = int(m.group(1))
+        if 1900 <= y <= 2030:
+            return y
+    return None
+
+
+def _fuzzy_name_score(name1, name2):
+    """
+    Ikkita ism o'rtasidagi o'xshashlikni 0-100 da qaytaradi.
+    SequenceMatcher asosida, katta/kichik harfni hisobga olmaydi.
+    """
+    from difflib import SequenceMatcher
+    n1 = name1.lower().strip()
+    n2 = name2.lower().strip()
+    if not n1 or not n2:
+        return 0
+    ratio = SequenceMatcher(None, n1, n2).ratio()
+    return int(round(ratio * 100))
+
+
+def _fuzzy_search_bemorlar(ref_fish, ref_year, ref_jins=None, min_score=90):
+    """
+    'ref_fish' ga o'xshash bemorlarni DB dan qidiradi.
+    Qoidalar (qattiq filtr):
+      - Tug'ilgan YIL mos bo'lishi SHART (agar ref_year ma'lum bo'lsa)
+      - Jins mos bo'lishi SHART (agar ref_jins ma'lum bo'lsa)
+      - FAQAT familiya (1-so'z) bo'yicha LIKE qidiruv — ism bo'yicha EMAS
+        (aks holda "Axmedov Faxriddin" ham chiqib qoladi)
+      - Python-da SequenceMatcher >= min_score (90%)
+    Qaytaradi: [{id, fish, yosh, jins, telefon, tugilgan_sana, manzil, _score}]
+    sorted by _score DESC
+    """
+    import re as _re
+    words = _re.split(r'\s+', ref_fish.strip())
+    surname = words[0] if words else ''
+    if len(surname) < 2:
+        return []
+
+    # Familiya (1-so'z) dastlabki 4 harfi bilan LIKE
+    like_sql = "b.fish LIKE %s"
+    like_param = f"{surname[:4]}%"   # prefix LIKE — faqat bosh qismdan qidirish
+
+    params = [like_param]
+    extra_where = []
+
+    # Tug'ilgan yil — SQL da filtr
+    if ref_year:
+        extra_where.append("YEAR(b.tugilgan_sana) = %s")
+        params.append(ref_year)
+
+    # Jins — SQL da filtr
+    if ref_jins:
+        extra_where.append("b.jins = %s")
+        params.append(ref_jins)
+
+    where_sql = like_sql
+    if extra_where:
+        where_sql += " AND " + " AND ".join(extra_where)
+
+    conn = db_conn()
+    if not conn:
+        return []
+    try:
+        cursor = conn.cursor(dictionary=True)
+        sql = f"""
+            SELECT b.id, b.fish, b.yosh, b.jins,
+                   b.telefon, b.tugilgan_sana,
+                   COALESCE(b.manzil, '') AS manzil,
+                   (SELECT MAX(o.sana_vaqt) FROM orders o
+                    WHERE o.bemor_id = b.id) AS oxirgi_tashrif
+            FROM bemorlar b
+            WHERE {where_sql}
+            ORDER BY b.fish
+            LIMIT 300
+        """
+        cursor.execute(sql, params)
+        rows = cursor.fetchall()
+    except Exception as _e:
+        print(f"[fuzzy_search] xato: {_e}")
+        rows = []
+    finally:
+        try: cursor.close()
+        except: pass
+        try: conn.close()
+        except: pass
+
+    results = []
+    for row in rows:
+        # To'liq ism o'xshashlik foizi
+        score = _fuzzy_name_score(ref_fish, row.get('fish') or '')
+        # Tug'ilgan yil Python darajasida ham tekshirish (SQL kafolat bermasa)
+        if ref_year:
+            row_year = _extract_birth_year_smart(row.get('tugilgan_sana'))
+            if row_year and row_year != ref_year:
+                continue   # yil mos kelmasa — o'tkazib yuboriladi
+        # Jins Python darajasida ham tekshirish
+        if ref_jins:
+            row_jins = (row.get('jins') or '').strip()
+            if row_jins and row_jins != ref_jins:
+                continue   # jins mos kelmasa — o'tkazib yuboriladi
+        if score >= min_score:
+            row['_score'] = score
+            results.append(row)
+
+    results.sort(key=lambda r: r['_score'], reverse=True)
+    return results[:80]
+
+
+def _fill_panel_cell(cell, panel_type, sample_id, date_only, config, kl, qr_link_override=None):
+    """Universal panel to'ldiruvchi — barcode, qrcode, logo yoki bo'sh."""
+    _no_border = {'val': 'none', 'sz': 0, 'color': 'auto'}
+    _set_cell_border(cell, top=_no_border, bottom=_no_border, left=_no_border, right=_no_border)
+    _set_cell_margins(cell, top=0, bottom=0, left=0, right=0)
+
+    logo_path = config.get('logo_path', LOGO_DEFAULT_PATH)
+    logo_w = float(config.get('logo_width', 3.2))
+    logo_h = float(config.get('logo_height', 3.2))
+    kl_rang_hex = config.get('klinika_rang', '1E9943')
+    kl_color = RGBColor(int(kl_rang_hex[0:2], 16), int(kl_rang_hex[2:4], 16), int(kl_rang_hex[4:6], 16))
+
+    p0 = cell.paragraphs[0]
+    p0.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(p0, 0, 0)
+
+    if panel_type == 'barcode':
+        _add_run_tnr(p0, "Buyurtma №", 13)
+        barcode_buf = _generate_barcode_bytes(sample_id or '000000', module_w=2, bar_height=45)
+        p_bc = cell.add_paragraph()
+        p_bc.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(p_bc, 0, 0)
+        if barcode_buf:
+            try:
+                p_bc.add_run().add_picture(barcode_buf, width=Cm(3.8))
+            except Exception:
+                _add_run_tnr(p_bc, sample_id, 13, bold=True, color_rgb=kl_color)
+        else:
+            _add_run_tnr(p_bc, sample_id, 13, bold=True, color_rgb=kl_color)
+        p_id = cell.add_paragraph()
+        p_id.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(p_id, 0, 0)
+        _add_run_tnr(p_id, sample_id or '', 13)
+        p_dt = cell.add_paragraph()
+        p_dt.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(p_dt, 0, 0)
+        _add_run_tnr(p_dt, date_only, 13)
+
+    elif panel_type == 'qrcode':
+        qr_template = config.get('qr_link_template', '').strip()
+        if qr_link_override:
+            qr_data = qr_link_override
+        elif qr_template:
+            qr_data = qr_template.replace('{{SAMPLE}}', sample_id or '').replace('{{DATE}}', date_only)
+        else:
+            qr_data = sample_id or '000000'
+        qr_buf = _generate_qrcode_bytes(qr_data, box_size=4, border=2)
+        if qr_buf:
+            try:
+                p0.add_run().add_picture(qr_buf, width=Cm(3.0), height=Cm(3.0))
+            except Exception:
+                _add_run_tnr(p0, sample_id, 13, bold=True, color_rgb=kl_color)
+        else:
+            _add_run_tnr(p0, sample_id, 13, bold=True, color_rgb=kl_color)
+        p_id = cell.add_paragraph()
+        p_id.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(p_id, 0, 0)
+        _add_run_tnr(p_id, sample_id or '', 10)
+
+    elif panel_type == 'logo':
+        if logo_path and os.path.exists(logo_path):
+            try:
+                p0.add_run().add_picture(logo_path, width=Cm(logo_w), height=Cm(logo_h))
+            except Exception:
+                _add_run_tnr(p0, kl['nomi'][:3].upper(), 22, bold=True, color_rgb=kl_color)
+        else:
+            _add_run_tnr(p0, kl['nomi'][:3].upper(), 22, bold=True, color_rgb=kl_color)
+            p2 = cell.add_paragraph()
+            p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _set_para_spacing(p2, 0, 0)
+            _add_run_tnr(p2, "Logotip", 7, color_rgb=RGBColor(0xAA, 0xAA, 0xAA))
+    # panel_type == 'bosh' → hech narsa qo'shilmaydi
+
+
+def _hex_to_rgb(hex_str: str) -> RGBColor:
+    hex_str = hex_str.strip().lstrip('#')
+    if len(hex_str) != 6:
+        hex_str = '2E75B6'
+    return RGBColor(int(hex_str[0:2], 16), int(hex_str[2:4], 16), int(hex_str[4:6], 16))
+
+
+def insert_premium_header(doc: Document, order_info: dict, qr_link_override=None):
+    """Universal 3-ustunli header — chap/o'ng panel, ranglar, logo o'lchami sozlanadi."""
     import io as _io
 
     config = load_blanka_config()
-    logo_path = config.get('logo_path', LOGO_DEFAULT_PATH)
+    kl = _get_klinika_info()
 
-    # ── Margin ──────────────────────────────────────────────────────
+    chap_panel = config.get('chap_panel', 'barcode')
+    ong_panel  = config.get('ong_panel', 'logo')
+    kl_rang_hex   = config.get('klinika_rang', '1E9943')
+    hdr_bg_hex    = config.get('header_bg_color', '2E75B6')
+    bemor_row_hex = config.get('bemor_row_color', 'E6E6E6')
+
+    kl_color = _hex_to_rgb(kl_rang_hex)
+
     for section in doc.sections:
-        section.page_width    = Cm(21.0)  # A4 eni
-        section.page_height   = Cm(29.7)  # A4 bo'yi
-        section.top_margin    = Cm(1.0)   # tepadan 1sm
-        section.bottom_margin = Cm(1.0)   # pastdan 1sm
-        section.left_margin   = Cm(1.0)   # chapdan 1sm  → 21-1-1=19sm ishlatiladi
-        section.right_margin  = Cm(1.0)   # o'ngdan 1sm
-        section.header_distance = Cm(0.5) # kolontitul: sahifa chetidan 0.5sm
-        section.footer_distance = Cm(0.5) # pastki kolontitul: sahifa chetidan 0.5sm
+        section.page_width    = Cm(21.0)
+        section.page_height   = Cm(29.7)
+        section.top_margin    = Cm(1.0)
+        section.bottom_margin = Cm(1.0)
+        section.left_margin   = Cm(1.0)
+        section.right_margin  = Cm(1.0)
+        section.header_distance = Cm(0.5)
+        section.footer_distance = Cm(0.5)
 
-    # ── Ma'lumotlarni olish ─────────────────────────────────────────
     fish       = (order_info.get('fish') or '').strip()
     yosh       = str(order_info.get('yosh') or '')
     jins       = (order_info.get('jins') or '')
     sample_id  = str(order_info.get('sample_id') or order_info.get('order_id') or '')
-    # Tahlil kuni: sample_id ning dastlabki 6 xonasidan (YYMMDD) olinadi
-    date_only = _parse_date_from_sample_id(sample_id) or datetime.now().strftime("%d.%m.%Y")
+    date_only  = _parse_date_from_sample_id(sample_id) or datetime.now().strftime("%d.%m.%Y")
 
-    # Tug'ilgan sana formatlash
     tug_sana = order_info.get('tugilgan_sana', '')
-    if tug_sana:
-        try:
-            if isinstance(tug_sana, str) and '-' in tug_sana:
-                p = tug_sana.split('-')
-                tug_text = f"{p[2]}.{p[1]}.{p[0]}" if len(p) == 3 else tug_sana
-            else:
-                tug_text = str(tug_sana)
-        except Exception:
-            tug_text = str(tug_sana)
-        if yosh:
-            tug_text = f"{tug_text} ({yosh} yosh)"
+    _tug_fmt = _fmt_tug_sana(tug_sana)
+    if _tug_fmt:
+        tug_text = f"{_tug_fmt} ({yosh} yosh)" if yosh else _tug_fmt
     elif yosh:
         tug_text = f"{yosh} yosh"
     else:
@@ -3121,103 +3389,181 @@ def insert_premium_header(doc: Document, order_info: dict):
     else:
         jins_text = jins or "—"
 
-    # ═══════════════════════════════════════════════════════════════
-    # 1-BLOK: 3-ustunli header jadvali (barcode | klinika | logo)
-    # ═══════════════════════════════════════════════════════════════
+    # ═══ 1-BLOK: 3-ustunli header (chap_panel | klinika | ong_panel) ═══
     top_table = doc.add_table(rows=1, cols=3)
     top_table.alignment = WD_TABLE_ALIGNMENT.CENTER
     _set_table_no_border(top_table)
-    # Ustun kengliklari: chap=4.0, markaz=11.0, o'ng=4.0  (jami=19sm)
     _apply_table_widths(top_table, [4.0, 11.0, 4.0])
 
-    # Qator balandligi: kamida 3.5sm (matn ko'p bo'lsa jadval o'sadi)
     hdr_row = top_table.rows[0]
     hdr_row.height = Cm(3.2)
     hdr_row.height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
 
-    # ── CHAP: Barcode ─────────────────────────────────────────────
-    left_cell = top_table.rows[0].cells[0]
-    _set_cell_border(left_cell,
-        top    = {'val': 'none', 'sz': 0, 'color': 'auto'},
-        bottom = {'val': 'none', 'sz': 0, 'color': 'auto'},
-        left   = {'val': 'none', 'sz': 0, 'color': 'auto'},
-        right  = {'val': 'none', 'sz': 0, 'color': 'auto'},
-    )
-    _set_cell_margins(left_cell, top=0, bottom=0, left=0, right=0)
+    # ── CHAP PANEL ────────────────────────────────────────────────
+    _fill_panel_cell(top_table.rows[0].cells[0], chap_panel, sample_id, date_only, config, kl, qr_link_override=qr_link_override)
 
-    # "Buyurtma №" label
-    p_label = left_cell.paragraphs[0]
-    p_label.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _set_para_spacing(p_label, 0, 0)
-    r_label = _add_run_tnr(p_label, "Buyurtma №", 13)
-    r_label.font.color.rgb = RGBColor(0x00, 0x00, 0x00)   # qora rang
-
-    # Barcode image
-    barcode_buf = _generate_barcode_bytes(sample_id or '000000', module_w=2, bar_height=45)
-    if barcode_buf:
-        p_bc = left_cell.add_paragraph()
-        p_bc.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        _set_para_spacing(p_bc, 0, 0)
-        try:
-            p_bc.add_run().add_picture(barcode_buf, width=Cm(3.8))
-        except Exception as e:
-            print(f"   [OGOHLANTIRISH] Barcode rasmi qo'shishda xato: {e}")
-            _add_run_tnr(p_bc, sample_id, 13, bold=True, color_rgb=KLINIKA_GREEN)
-    else:
-        p_bc = left_cell.add_paragraph()
-        p_bc.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        _set_para_spacing(p_bc, 0, 0)
-        _add_run_tnr(p_bc, sample_id, 13, bold=True, color_rgb=KLINIKA_GREEN)
-
-    # ID raqam (sananing tepasida, alohida Word matni)
-    p_id = left_cell.add_paragraph()
-    p_id.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _set_para_spacing(p_id, 0, 0)
-    _add_run_tnr(p_id, sample_id or '', 13)
-
-    # Sana
-    p_dt = left_cell.add_paragraph()
-    p_dt.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _set_para_spacing(p_dt, 0, 0)
-    _add_run_tnr(p_dt, date_only, 13)
-
-    # ── MARKAZ: Klinika ma'lumotlari ────────────────────────────────
+    # ── MARKAZ: Klinika ma'lumotlari ──────────────────────────────
     mid_cell = top_table.rows[0].cells[1]
-    _set_cell_border(mid_cell,
-        top    = {'val': 'none','sz':0,'color':'auto'},
-        bottom = {'val': 'none','sz':0,'color':'auto'},
-        left   = {'val': 'none','sz':0,'color':'auto'},
-        right  = {'val': 'none','sz':0,'color':'auto'},
-    )
+    _no_border = {'val': 'none', 'sz': 0, 'color': 'auto'}
+    _set_cell_border(mid_cell, top=_no_border, bottom=_no_border, left=_no_border, right=_no_border)
 
     pm = mid_cell.paragraphs[0]
     pm.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _set_para_spacing(pm, 0, 0, line_spacing=1)
-    _add_run_tnr(pm, KLINIKA_NOMI, 20, bold=True, color_rgb=KLINIKA_GREEN)
+    _add_run_tnr(pm, kl['nomi'], 20, bold=True, color_rgb=kl_color)
 
-    pm2 = mid_cell.add_paragraph()
-    pm2.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _set_para_spacing(pm2, 0, 0, line_spacing=1)
-    _add_run_tnr(pm2, KLINIKA_SUB, 16, bold=True)
+    if kl['sub']:
+        pm2 = mid_cell.add_paragraph()
+        pm2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(pm2, 0, 0, line_spacing=1)
+        _add_run_tnr(pm2, kl['sub'], 16, bold=True)
 
-    pm3 = mid_cell.add_paragraph()
-    pm3.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _set_para_spacing(pm3, 0, 0, line_spacing=1)
-    _add_run_tnr(pm3, KLINIKA_MANZIL, 13)
+    if kl['manzil']:
+        pm3 = mid_cell.add_paragraph()
+        pm3.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(pm3, 0, 0, line_spacing=1)
+        _add_run_tnr(pm3, kl['manzil'], 13)
 
-    pm4 = mid_cell.add_paragraph()
-    pm4.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _set_para_spacing(pm4, 0, 0, line_spacing=1)
-    _add_run_tnr(pm4, KLINIKA_TEL, 13, bold=True, color_rgb=KLINIKA_GREEN)
+    if kl['tel']:
+        pm4 = mid_cell.add_paragraph()
+        pm4.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(pm4, 0, 0, line_spacing=1)
+        _add_run_tnr(pm4, kl['tel'], 13, bold=True, color_rgb=kl_color)
 
-    # ── O'NG: Logo ──────────────────────────────────────────────────
-    right_cell = top_table.rows[0].cells[2]
-    _set_cell_border(right_cell,
-        top    = {'val': 'none', 'sz': 0, 'color': 'auto'},
-        bottom = {'val': 'none', 'sz': 0, 'color': 'auto'},
-        left   = {'val': 'none', 'sz': 0, 'color': 'auto'},
-        right  = {'val': 'none', 'sz': 0, 'color': 'auto'},
-    )
+    # ── O'NG PANEL ────────────────────────────────────────────────
+    _fill_panel_cell(top_table.rows[0].cells[2], ong_panel, sample_id, date_only, config, kl, qr_link_override=qr_link_override)
+
+    # ═══ 2-BLOK: Bemor ma'lumotlari ══════════════════════════════
+    pat_table = doc.add_table(rows=2, cols=3)
+    pat_table.style = 'Table Grid'
+    pat_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _apply_table_widths(pat_table, [6.5, 6.5, 6.0])
+
+    for ci, hdr in enumerate(["F.I.SH.", "Tug'ilgan sana", "Jins"]):
+        c = pat_table.rows[0].cells[ci]
+        _set_cell_shading(c, hdr_bg_hex)
+        _set_cell_border(c,
+            top    = {'val':'single','sz':4,'color': hdr_bg_hex},
+            bottom = {'val':'single','sz':4,'color': hdr_bg_hex},
+            left   = {'val':'single','sz':4,'color': hdr_bg_hex},
+            right  = {'val':'single','sz':4,'color': hdr_bg_hex},
+        )
+        ph = c.paragraphs[0]
+        ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(ph, 0, 0)
+        r = _add_run_tnr(ph, hdr, 12, bold=True)
+        r.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+
+    for ci, val in enumerate([fish or "—", tug_text, jins_text]):
+        c = pat_table.rows[1].cells[ci]
+        _set_cell_shading(c, bemor_row_hex)
+        _set_cell_border(c,
+            top    = {'val':'single','sz':2,'color': hdr_bg_hex},
+            bottom = {'val':'single','sz':6,'color': hdr_bg_hex},
+            left   = {'val':'single','sz':4,'color': hdr_bg_hex},
+            right  = {'val':'single','sz':4,'color': hdr_bg_hex},
+        )
+        pv = c.paragraphs[0]
+        pv.alignment = WD_ALIGN_PARAGRAPH.CENTER if ci > 0 else WD_ALIGN_PARAGRAPH.LEFT
+        _set_para_spacing(pv, 0, 0)
+        _add_run_tnr(pv, val, 12, bold=(ci == 0))
+
+
+def insert_simple_header(doc: Document, order_info: dict, qr_link_override=None):
+    """Eski oddiy header — endi insert_premium_header ga yo'naltiradi"""
+    insert_premium_header(doc, order_info, qr_link_override=qr_link_override)
+
+def insert_oddiy_header(doc: Document, order_info: dict):
+    """Oddiy 2-ustunli header — klinika + logo, sozlanadigan ranglar."""
+    config = load_blanka_config()
+    logo_path = config.get('logo_path', LOGO_DEFAULT_PATH)
+    logo_w = float(config.get('logo_width', 3.2))
+    logo_h = float(config.get('logo_height', 3.2))
+    kl = _get_klinika_info()
+
+    kl_rang_hex   = config.get('klinika_rang', '1E9943')
+    hdr_bg_hex    = config.get('header_bg_color', '2E75B6')
+    bemor_row_hex = config.get('bemor_row_color', 'E6E6E6')
+    kl_color = _hex_to_rgb(kl_rang_hex)
+
+    for section in doc.sections:
+        section.page_width    = Cm(21.0)
+        section.page_height   = Cm(29.7)
+        section.top_margin    = Cm(1.0)
+        section.bottom_margin = Cm(1.0)
+        section.left_margin   = Cm(1.0)
+        section.right_margin  = Cm(1.0)
+        section.header_distance = Cm(0.5)
+        section.footer_distance = Cm(0.5)
+
+    fish       = (order_info.get('fish') or '').strip()
+    yosh       = str(order_info.get('yosh') or '')
+    jins       = (order_info.get('jins') or '')
+    sample_id  = str(order_info.get('sample_id') or order_info.get('order_id') or '')
+    date_only  = _parse_date_from_sample_id(sample_id) or datetime.now().strftime("%d.%m.%Y")
+
+    tug_sana = order_info.get('tugilgan_sana', '')
+    _tug_fmt = _fmt_tug_sana(tug_sana)
+    if _tug_fmt:
+        tug_text = f"{_tug_fmt} ({yosh} yosh)" if yosh else _tug_fmt
+    elif yosh:
+        tug_text = f"{yosh} yosh"
+    else:
+        tug_text = "—"
+
+    if jins in ('Erkak', 'E', 'M', 'erkak', 'm', 'male', 'Мужчина'):
+        jins_text = "Erkak"
+    elif jins in ('Ayol', 'A', 'F', 'ayol', 'f', 'female', 'Женщина'):
+        jins_text = "Ayol"
+    else:
+        jins_text = jins or "—"
+
+    # ═══ 1-BLOK: 2-ustunli header (klinika | logo) ═══════════════
+    top_table = doc.add_table(rows=1, cols=2)
+    top_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _set_table_no_border(top_table)
+    _apply_table_widths(top_table, [15.0, 4.0])
+
+    hdr_row = top_table.rows[0]
+    hdr_row.height = Cm(3.0)
+    hdr_row.height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
+
+    _no_border = {'val': 'none', 'sz': 0, 'color': 'auto'}
+
+    left_cell = top_table.rows[0].cells[0]
+    _set_cell_border(left_cell, top=_no_border, bottom=_no_border, left=_no_border, right=_no_border)
+    _set_cell_margins(left_cell, top=0, bottom=0, left=0, right=0)
+
+    pm = left_cell.paragraphs[0]
+    pm.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(pm, 0, 0, line_spacing=1)
+    _add_run_tnr(pm, kl['nomi'], 20, bold=True, color_rgb=kl_color)
+
+    if kl['sub']:
+        pm2 = left_cell.add_paragraph()
+        pm2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(pm2, 0, 0, line_spacing=1)
+        _add_run_tnr(pm2, kl['sub'], 16, bold=True)
+
+    if kl['manzil']:
+        pm3 = left_cell.add_paragraph()
+        pm3.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(pm3, 0, 0, line_spacing=1)
+        _add_run_tnr(pm3, kl['manzil'], 13)
+
+    if kl['tel']:
+        pm4 = left_cell.add_paragraph()
+        pm4.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(pm4, 0, 0, line_spacing=1)
+        _add_run_tnr(pm4, kl['tel'], 13, bold=True, color_rgb=kl_color)
+
+    p_info = left_cell.add_paragraph()
+    p_info.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(p_info, 4, 0, line_spacing=1)
+    _add_run_tnr(p_info, f"Sana: {date_only}   |   ID: {sample_id}", 11)
+
+    right_cell = top_table.rows[0].cells[1]
+    _set_cell_border(right_cell, top=_no_border, bottom=_no_border, left=_no_border, right=_no_border)
     _set_cell_margins(right_cell, top=0, bottom=0, left=0, right=0)
 
     pr = right_cell.paragraphs[0]
@@ -3226,76 +3572,63 @@ def insert_premium_header(doc: Document, order_info: dict):
 
     if logo_path and os.path.exists(logo_path):
         try:
-            pr.add_run().add_picture(logo_path, width=Cm(3.2), height=Cm(3.2))
-            print(f"   [OK] Logo qo'shildi: {logo_path}")
-        except Exception as e:
-            print(f"   [OGOHLANTIRISH] Logo qo'shishda xato: {e}")
-            _add_run_tnr(pr, "🔬", 24)
+            pr.add_run().add_picture(logo_path, width=Cm(logo_w), height=Cm(logo_h))
+        except Exception:
+            _add_run_tnr(pr, kl['nomi'][:3].upper(), 22, bold=True, color_rgb=kl_color)
     else:
-        # Logo yo'q: placeholder (klinika initials)
-        _add_run_tnr(pr, "AML", 22, bold=True, color_rgb=KLINIKA_GREEN)
-        pr2 = right_cell.add_paragraph()
-        pr2.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        _set_para_spacing(pr2, 0, 0)
-        _add_run_tnr(pr2, "Logotip", 7, color_rgb=RGBColor(0xAA, 0xAA, 0xAA))
-        if logo_path:
-            pr3 = right_cell.add_paragraph()
-            pr3.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            _set_para_spacing(pr3, 0, 0)
-            _add_run_tnr(pr3, f"({os.path.basename(logo_path)})", 6, color_rgb=RGBColor(0xCC, 0xCC, 0xCC), italic=True)
+        _add_run_tnr(pr, kl['nomi'][:3].upper(), 22, bold=True, color_rgb=kl_color)
 
-    # ═══════════════════════════════════════════════════════════════
-    # 3-BLOK: Bemor ma'lumotlari (F.I.SH | Tug'ilgan sana | Jins)
-    # ═══════════════════════════════════════════════════════════════
+    # ═══ Separator chiziq ═════════════════════════════════════════
+    sep = doc.add_paragraph()
+    _set_para_spacing(sep, 2, 2)
+    sep_border = OxmlElement('w:pBdr')
+    btm = OxmlElement('w:bottom')
+    btm.set(qn('w:val'), 'single')
+    btm.set(qn('w:sz'), '6')
+    btm.set(qn('w:space'), '1')
+    btm.set(qn('w:color'), kl_rang_hex)
+    sep_border.append(btm)
+    sep._p.get_or_add_pPr().append(sep_border)
+
+    # ═══ 2-BLOK: Bemor ma'lumotlari ══════════════════════════════
     pat_table = doc.add_table(rows=2, cols=3)
     pat_table.style = 'Table Grid'
     pat_table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    # Klinik jadval bilan bir xil stil va kenglik: 6.5+6.5+6.0=19sm
     _apply_table_widths(pat_table, [6.5, 6.5, 6.0])
 
-    # Sarlavha qatori — och ko'k fon
-    HDR_BLUE = "2E75B6"   # och ko'k rang (kraskada kam sarflanadi)
     for ci, hdr in enumerate(["F.I.SH.", "Tug'ilgan sana", "Jins"]):
         c = pat_table.rows[0].cells[ci]
-        _set_cell_shading(c, HDR_BLUE)
-        _set_cell_border(c,
-            top    = {'val':'single','sz':4,'color':'2E75B6'},
-            bottom = {'val':'single','sz':4,'color':'2E75B6'},
-            left   = {'val':'single','sz':4,'color':'2E75B6'},
-            right  = {'val':'single','sz':4,'color':'2E75B6'},
-        )
-        ph = c.paragraphs[0]
-        ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        _set_para_spacing(ph, 0, 0)
-        r = _add_run_tnr(ph, hdr, 12, bold=True)
-        r.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+        _set_cell_shading(c, hdr_bg_hex)
+        p = c.paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(p, 1, 1)
+        _add_run_tnr(p, hdr, 12, bold=True, color_rgb=RGBColor(0xFF, 0xFF, 0xFF))
 
-    # Ma'lumot qatori
     for ci, val in enumerate([fish or "—", tug_text, jins_text]):
         c = pat_table.rows[1].cells[ci]
-        _set_cell_shading(c, "E6E6E6")
-        _set_cell_border(c,
-            top    = {'val':'single','sz':2,'color':'2E75B6'},
-            bottom = {'val':'single','sz':6,'color':'2E75B6'},
-            left   = {'val':'single','sz':4,'color':'2E75B6'},
-            right  = {'val':'single','sz':4,'color':'2E75B6'},
-        )
-        pv = c.paragraphs[0]
-        pv.alignment = WD_ALIGN_PARAGRAPH.CENTER if ci > 0 else WD_ALIGN_PARAGRAPH.LEFT
-        _set_para_spacing(pv, 0, 0)
-        _add_run_tnr(pv, val, 12, bold=(ci == 0))
+        _set_cell_shading(c, bemor_row_hex)
+        p = c.paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(p, 1, 1)
+        _add_run_tnr(p, val, 13, bold=True)
 
+    print(f"   [OK] Oddiy header qo'shildi")
 
-def insert_simple_header(doc: Document, order_info: dict):
-    """Eski oddiy header — endi insert_premium_header ga yo'naltiradi"""
-    insert_premium_header(doc, order_info)
-
-def insert_blanka_ustuni_header(doc: Document, order_info: dict):
+def insert_blanka_ustuni_header(doc: Document, order_info: dict, qr_link_override=None):
     config = load_blanka_config()
+    header_type = config.get('header_type', 'shablon')
+
+    if header_type == 'premium':
+        insert_premium_header(doc, order_info, qr_link_override=qr_link_override)
+        return
+    elif header_type == 'oddiy':
+        insert_oddiy_header(doc, order_info)
+        return
+
     blanka_path = config.get('blanka_ustuni_path', r"G:\DASTUR\URIT 50\Standart shablonlar\blanka ustuni.docx")
     if not os.path.exists(blanka_path):
         print(f"   [OGOHLANTIRISH] Blanka ustuni shablon topilmadi: {blanka_path}, premium header ishlatilmoqda")
-        insert_premium_header(doc, order_info)
+        insert_premium_header(doc, order_info, qr_link_override=qr_link_override)
         return
     try:
         header_doc = Document(blanka_path)
@@ -3340,20 +3673,13 @@ def insert_blanka_ustuni_header(doc: Document, order_info: dict):
         fish_value = (fish or '').strip()
         tugilgan_sana = order_info.get('tugilgan_sana', '')
         yosh = order_info.get('yosh', '')
-        if yosh:
+        _tf3 = _fmt_tug_sana(tugilgan_sana)
+        if _tf3 and yosh:
+            tugilgan_text = f"{_tf3} ({yosh} yosh)"
+        elif _tf3:
+            tugilgan_text = _tf3
+        elif yosh:
             tugilgan_text = f"{yosh} yosh"
-        elif tugilgan_sana:
-            try:
-                if isinstance(tugilgan_sana, str) and '-' in tugilgan_sana:
-                    parts = tugilgan_sana.split('-')
-                    if len(parts) == 3:
-                        tugilgan_text = f"{parts[2]}.{parts[1]}.{parts[0]}"
-                    else:
-                        tugilgan_text = tugilgan_sana
-                else:
-                    tugilgan_text = str(tugilgan_sana)
-            except:
-                tugilgan_text = str(tugilgan_sana) if tugilgan_sana else ""
         else:
             tugilgan_text = ""
         # Tahlil kuni: sample_id ning dastlabki 6 xonasidan (YYMMDD) olinadi
@@ -4578,12 +4904,12 @@ def add_page_footer_to_doc(doc: Document, order_info: dict):
         section.footer_distance = Cm(0.5)  # 0.5sm sahifa chetidan (printerda ko'rinadi)
 
 # [14] create_unified_blank() - single DOCX with all sections
-def create_unified_blank(order_id: int, order_info: dict, organized: dict, test_results: dict = None):
+def create_unified_blank(order_id: int, order_info: dict, organized: dict, test_results: dict = None, qr_link_override=None):
     doc = Document()
     is_first_section = True
     header_added = False
     if not header_added:
-        insert_blanka_ustuni_header(doc, order_info)
+        insert_blanka_ustuni_header(doc, order_info, qr_link_override=qr_link_override)
         header_added = True
         is_first_section = False
 
@@ -5397,8 +5723,6 @@ def create_blanks_for_order(order_id: int, test_results: dict = None, file_exist
 
     organized = organize_tests_by_template(all_tests, order_id=order_id)
     try:
-        unified_doc = create_unified_blank(order_id, order_info, organized, test_results)
-        save_dir = get_save_dir()
         sample_id = order_info.get('sample_id', '') or str(order_id)
         fish = (order_info.get('fish') or '').strip() if order_info.get('fish') else ''
         tugilgan_sana = order_info.get('tugilgan_sana', '')
@@ -5426,6 +5750,9 @@ def create_blanks_for_order(order_id: int, test_results: dict = None, file_exist
         if telefon:
             name_parts.append(clean_filename(telefon))
         file_name = f"{' '.join(name_parts)}.docx"
+
+        unified_doc = create_unified_blank(order_id, order_info, organized, test_results)
+        save_dir = get_save_dir()
         full_path = os.path.join(save_dir, file_name)
         if os.path.exists(full_path):
             if file_exists_callback:
@@ -8073,6 +8400,12 @@ class MonoblokApp:
         self._last_save_error = None  # Oxirgi saqlash xatosi (retry uchun)
         self.previous_order_id = None  # Oldingi buyurtma ID (saqlanmagan ma'lumotlar uchun)
         self._db_warning_shown = False  # Database xatosi xabari ko'rsatilganmi
+        self._search_win = None        # Qidiruv oynasi (Tarixni ko'rish uchun)
+        self._history_mode = False     # Tarix ko'rish rejimi
+        self._history_trd = {}         # {test_item_id: {result_data, status}}
+        self._history_orders_meta = {} # {order_id: {sana_vaqt, tahlil_soni}}
+        self._history_frozen = False   # True: history_tree qotib turadi (qayta yuklanmaydi)
+        self._history_all_tests = []   # Barcha bemorlar tahlillari (frozen rejimda saqlanadi)
         
         # Status bar (avval yaratish kerak)
         self.status_var = tk.StringVar(value="[OGOHLANTIRISH] Yuklash uchun bemor tanlang")
@@ -8912,9 +9245,10 @@ class MonoblokApp:
             
             print("   [UI] Chap panel yaratilmoqda...")
             # Chap panel - Bemor ma'lumotlari
-            left_frame = ttk.LabelFrame(main_frame, text="Bemor Ma'lumotlari", padding="10")
+            left_frame = ttk.LabelFrame(main_frame, text="Bemor Ma'lumotlari", padding="7")
             left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=5)
-            left_frame.config(width=300)
+            left_frame.config(width=220)
+            left_frame.pack_propagate(False)  # Ramka 220px da qotib qolsin
             
             print("   [UI] Bemor paneli yaratilmoqda...")
             self.create_patient_panel(left_frame)
@@ -8950,35 +9284,68 @@ class MonoblokApp:
     
     def create_patient_panel(self, parent):
         """Bemor ma'lumotlari paneli"""
-        # Bemor ma'lumotlari text area
+        # Yuqori: bemor info matni
         info_frame = ttk.Frame(parent)
-        info_frame.pack(fill=tk.BOTH, expand=True, pady=5)
-        
+        info_frame.pack(fill=tk.BOTH, expand=False, pady=3)
+
         self.patient_info = scrolledtext.ScrolledText(
-            info_frame, 
-            width=28, 
-            height=22, 
-            font=("Arial", 10),
-            state=tk.DISABLED
+            info_frame, width=24, height=17,
+            font=("Arial", 10), state=tk.DISABLED
         )
         self.patient_info.pack(fill=tk.BOTH, expand=True)
-        
-        # Tahrirlash tugmasi (pastda)
+
+        # Tahrirlash tugmasi
         edit_frame = ttk.Frame(parent)
-        edit_frame.pack(fill=tk.X, pady=5)
-        
+        edit_frame.pack(fill=tk.X, pady=3)
         self.tahrirlash_btn = tk.Button(
-            edit_frame,
-            text="✏ Tahrirlash",
+            edit_frame, text="✏ Tahrirlash",
             command=self.edit_patient,
             bg="#5C6BC0", fg="white",
             font=("Arial", 9, "bold"),
             padx=10, pady=4,
-            relief=tk.RAISED, bd=2,
-            cursor="hand2",
-            state=tk.DISABLED  # Bemor yuklanmaguncha o'chirilgan
+            relief=tk.RAISED, bd=2, cursor="hand2",
+            state=tk.DISABLED
         )
         self.tahrirlash_btn.pack(fill=tk.X)
+
+        # ──── Oldingi tashriflar ────────────────────────────────
+        hist_frame = ttk.LabelFrame(parent, text="📋 Oldingi tashriflar", padding="4")
+        hist_frame.pack(fill=tk.BOTH, expand=True, pady=3)
+
+        hist_cols = ("Sana", "Tahlil soni", "Sample ID")
+        self.history_tree = ttk.Treeview(
+            hist_frame, columns=hist_cols, show="headings", height=8)
+        self.history_tree.heading("Sana",        text="Sana")
+        self.history_tree.heading("Tahlil soni", text="Tahlillar")
+        self.history_tree.heading("Sample ID",   text="Sample ID")
+        self.history_tree.column("Sana",        width=95,  anchor=tk.CENTER)
+        self.history_tree.column("Tahlil soni", width=65,  anchor=tk.CENTER)
+        self.history_tree.column("Sample ID",   width=120, anchor=tk.W)
+
+        hist_sb = ttk.Scrollbar(hist_frame, orient=tk.VERTICAL,
+                                command=self.history_tree.yview)
+        self.history_tree.configure(yscrollcommand=hist_sb.set)
+        self.history_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        hist_sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Bir marta bosish → o'sha buyurtmani yuklash
+        self.history_tree.bind("<ButtonRelease-1>", self._on_history_single_click)
+        ttk.Label(hist_frame,
+                  text="↑ Bir marta bosing — natijalarni ko'ring",
+                  foreground="gray", font=("Arial", 8)
+                  ).pack(side=tk.BOTTOM, anchor=tk.W, pady=1)
+
+        # ──── Tarixni ko'rish (fuzzy qidiruv) ───────────────────
+        self.tarix_btn = tk.Button(
+            parent, text="📋 Tarixni ko'rish",
+            command=self._main_win_tarix_btn,
+            bg="#1A5276", fg="white",
+            font=("Arial", 9, "bold"),
+            padx=8, pady=4,
+            relief=tk.RAISED, bd=2, cursor="hand2",
+            state=tk.DISABLED
+        )
+        self.tarix_btn.pack(fill=tk.X, pady=(4, 2))
     
     def create_tests_panel(self, parent):
         """Tahlillar ro'yxati paneli"""
@@ -9168,78 +9535,119 @@ class MonoblokApp:
         """Bemorlarni qidirish oynasini ochish"""
         search_win = tk.Toplevel(self.root)
         search_win.title("Bemorlarni Qidirish")
-        search_win.geometry("800x600")
+        # Ekran o'lchamiga qarab moslash
+        sw = search_win.winfo_screenwidth()
+        sh = search_win.winfo_screenheight()
+        win_w = min(1520, sw - 40)
+        win_h = min(790, sh - 80)
+        search_win.geometry(f"{win_w}x{win_h}")
         search_win.transient(self.root)
-        
+        search_win.minsize(900, 500)
+
         # Qidirish maydonlari
         search_frame = ttk.LabelFrame(search_win, text="Qidirish Ma'lumotlari", padding="10")
-        search_frame.pack(fill=tk.X, padx=10, pady=10)
-        
+        search_frame.pack(fill=tk.X, padx=10, pady=8)
+
         # Ism
         ttk.Label(search_frame, text="Ism:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
-        self.search_ism_entry = ttk.Entry(search_frame, width=30)
+        self.search_ism_entry = ttk.Entry(search_frame, width=35)
         self.search_ism_entry.grid(row=0, column=1, padx=5, pady=5, sticky=tk.W)
-        
+
         # Familiya
         ttk.Label(search_frame, text="Familiya:").grid(row=0, column=2, sticky=tk.W, padx=5, pady=5)
-        self.search_fam_entry = ttk.Entry(search_frame, width=30)
+        self.search_fam_entry = ttk.Entry(search_frame, width=35)
         self.search_fam_entry.grid(row=0, column=3, padx=5, pady=5, sticky=tk.W)
-        
+
         # Telefon
         ttk.Label(search_frame, text="Telefon:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
-        self.search_tel_entry = ttk.Entry(search_frame, width=30)
+        self.search_tel_entry = ttk.Entry(search_frame, width=35)
         self.search_tel_entry.grid(row=1, column=1, padx=5, pady=5, sticky=tk.W)
-        
-        # Tug'ilgan sana
-        ttk.Label(search_frame, text="Tug'ilgan sana (YYYY-MM-DD):").grid(row=1, column=2, sticky=tk.W, padx=5, pady=5)
-        self.search_dob_entry = ttk.Entry(search_frame, width=30)
+
+        # Tug'ilgan sana — faqat yil yoki to'liq sana
+        ttk.Label(search_frame, text="Tug'ilgan yil (YYYY):").grid(row=1, column=2, sticky=tk.W, padx=5, pady=5)
+        self.search_dob_entry = ttk.Entry(search_frame, width=35)
         self.search_dob_entry.grid(row=1, column=3, padx=5, pady=5, sticky=tk.W)
-        
+
         # Jins
         ttk.Label(search_frame, text="Jins:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
         self.search_jins_var = tk.StringVar(value="")
-        jins_combo = ttk.Combobox(search_frame, textvariable=self.search_jins_var, width=27, values=["", "Erkak", "Ayol"])
+        jins_combo = ttk.Combobox(search_frame, textvariable=self.search_jins_var,
+                                  width=32, values=["", "Erkak", "Ayol"])
         jins_combo.grid(row=2, column=1, padx=5, pady=5, sticky=tk.W)
-        
-        # Qidirish tugmasi
-        search_btn_frame = ttk.Frame(search_frame)
-        search_btn_frame.grid(row=2, column=2, columnspan=2, pady=10, sticky=tk.E)
-        ttk.Button(search_btn_frame, text="🔍 Qidirish", command=self.search_patients).pack(side=tk.LEFT, padx=5)
-        ttk.Button(search_btn_frame, text="[XATO] Tozalash", command=self.clear_search_fields).pack(side=tk.LEFT, padx=5)
 
-        # Sifat nazorati tugmasi
+        # Qidirish tugmalari
+        search_btn_frame = ttk.Frame(search_frame)
+        search_btn_frame.grid(row=2, column=2, columnspan=2, pady=5, sticky=tk.E)
+        ttk.Button(search_btn_frame, text="🔍 Qidirish",
+                   command=self.search_patients).pack(side=tk.LEFT, padx=5)
+        ttk.Button(search_btn_frame, text="[XATO] Tozalash",
+                   command=self.clear_search_fields).pack(side=tk.LEFT, padx=5)
+
+        # Sifat nazorati
         qc_btn = tk.Button(search_frame, text="Sifat nazorati", command=self.open_qc_window,
                            bg="#D32F2F", fg="white", font=("Arial", 11, "bold"),
                            padx=15, pady=5, relief=tk.RAISED, bd=2, cursor="hand2")
-        qc_btn.grid(row=3, column=0, columnspan=2, pady=10, sticky=tk.W, padx=5)
+        qc_btn.grid(row=3, column=0, columnspan=2, pady=8, sticky=tk.W, padx=5)
 
         # Natijalar jadvali
         results_frame = ttk.LabelFrame(search_win, text="Qidiruv Natijalari", padding="10")
-        results_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
+        results_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
         columns = ("ID", "F.I.SH", "Yosh", "Jins", "Telefon", "Tug'ilgan sana", "Buyurtma ID", "Sample ID")
-        self.search_results_tree = ttk.Treeview(results_frame, columns=columns, show="headings", height=15)
-        
+        self.search_results_tree = ttk.Treeview(
+            results_frame, columns=columns, show="headings", height=20)
+
+        col_widths = {"ID": 65, "F.I.SH": 280, "Yosh": 60, "Jins": 80,
+                      "Telefon": 140, "Tug'ilgan sana": 130, "Buyurtma ID": 110, "Sample ID": 160}
         for col in columns:
             self.search_results_tree.heading(col, text=col)
-            self.search_results_tree.column(col, width=100)
-        
-        scrollbar = ttk.Scrollbar(results_frame, orient=tk.VERTICAL, command=self.search_results_tree.yview)
-        self.search_results_tree.configure(yscrollcommand=scrollbar.set)
-        
+            self.search_results_tree.column(col, width=col_widths.get(col, 100),
+                                            anchor=tk.CENTER if col in ("ID","Yosh","Jins","Buyurtma ID") else tk.W)
+
+        scrollbar_y = ttk.Scrollbar(results_frame, orient=tk.VERTICAL,
+                                    command=self.search_results_tree.yview)
+        scrollbar_x = ttk.Scrollbar(results_frame, orient=tk.HORIZONTAL,
+                                    command=self.search_results_tree.xview)
+        self.search_results_tree.configure(yscrollcommand=scrollbar_y.set,
+                                           xscrollcommand=scrollbar_x.set)
+
         self.search_results_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Double-click event - buyurtmani yuklash
+        scrollbar_y.pack(side=tk.RIGHT, fill=tk.Y)
+        scrollbar_x.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # Amallar qatori
+        action_frame = ttk.Frame(search_win)
+        action_frame.pack(pady=4)
+
+        ttk.Button(
+            action_frame, text="✓ Yuklash (2x bosish)",
+            command=lambda: self.on_search_result_double_click(None)
+        ).pack(side=tk.LEFT, padx=6)
+
+        tk.Button(
+            action_frame, text="📋 Tarixni ko'rish",
+            command=self._on_view_history_btn,
+            bg="#1A5276", fg="white",
+            font=("Arial", 10, "bold"),
+            padx=12, pady=4, relief=tk.RAISED, bd=2, cursor="hand2"
+        ).pack(side=tk.LEFT, padx=6)
+
+        # Yo'riqnoma
+        ttk.Label(search_win,
+                  text="💡 Bir marta bosish → tanlash  |  Ikki marta bosish → yuklash  |  "
+                       "📋 Tarixni ko'rish → barcha tashriflarni birga ko'rsatish",
+                  foreground="gray").pack(pady=3)
+
+        # Double-click event
         self.search_results_tree.bind("<Double-1>", self.on_search_result_double_click)
-        
+        # search_win ni saqlash (Tarixni ko'rish tugmasi uchun)
+        self._search_win = search_win
+
         # Enter key binding
-        self.search_ism_entry.bind("<Return>", lambda e: self.search_patients())
-        self.search_fam_entry.bind("<Return>", lambda e: self.search_patients())
-        self.search_tel_entry.bind("<Return>", lambda e: self.search_patients())
-        self.search_dob_entry.bind("<Return>", lambda e: self.search_patients())
-        
-        # Focus
+        for entry in (self.search_ism_entry, self.search_fam_entry,
+                      self.search_tel_entry, self.search_dob_entry):
+            entry.bind("<Return>", lambda e: self.search_patients())
+
         self.search_ism_entry.focus()
     
     def open_qc_window(self):
@@ -9344,10 +9752,17 @@ class MonoblokApp:
                 query += " AND b.telefon LIKE %s"
                 params.append(f"%{tel}%")
             
-            # Tug'ilgan sana bo'yicha qidirish
+            # Tug'ilgan yil yoki sana bo'yicha qidirish
             if dob:
-                query += " AND DATE(b.tugilgan_sana) = %s"
-                params.append(dob)
+                dob_clean = dob.strip()
+                if len(dob_clean) == 4 and dob_clean.isdigit():
+                    # Faqat yil kiritilgan: YYYY
+                    query += " AND YEAR(b.tugilgan_sana) = %s"
+                    params.append(int(dob_clean))
+                else:
+                    # To'liq sana: YYYY-MM-DD
+                    query += " AND DATE(b.tugilgan_sana) = %s"
+                    params.append(dob_clean)
             
             # Jins bo'yicha qidirish
             if jins:
@@ -9376,7 +9791,7 @@ class MonoblokApp:
                     row.get('yosh', ''),
                     row.get('jins', ''),
                     row.get('telefon', ''),
-                    str(row.get('tugilgan_sana', '')) if row.get('tugilgan_sana') else '',
+                    _fmt_tug_sana(row.get('tugilgan_sana', '')),
                     row.get('order_id', ''),
                     row.get('sample_id', '')
                 ))
@@ -9570,11 +9985,24 @@ class MonoblokApp:
 
         vazn_buyrak = data.get('vazn_buyrak')
         vazn_str = f"\nVazn: {vazn_buyrak} kg" if vazn_buyrak else ""
+        tug_fmt = _fmt_tug_sana(data.get('tugilgan_sana', '')) or 'N/A'
+        manzil_val = (data.get('manzil') or '').strip() or 'N/A'
+        # Sana formati: DD.MM.YYYY
+        _sv = data.get('sana_vaqt', '')
+        if hasattr(_sv, 'strftime'):
+            _sana_fmt = _sv.strftime('%d.%m.%Y')
+        elif _sv:
+            _s = str(_sv)[:10]
+            _p = _s.split('-')
+            _sana_fmt = f"{_p[2]}.{_p[1]}.{_p[0]}" if len(_p) == 3 else _s
+        else:
+            _sana_fmt = 'N/A'
         info = f"""F.I.SH: {data.get('fish', 'N/A')}
 Yosh: {data.get('yosh', 'N/A')}
 Jins: {data.get('jins', 'N/A')}
-Tug\'ilgan sana: {data.get('tugilgan_sana', 'N/A')}{vazn_str}
+Tug\'ilgan sana: {tug_fmt}{vazn_str}
 Telefon: {data.get('telefon', 'N/A')}
+Manzil: {manzil_val}
 Shifokor: {data.get('shifokor', 'N/A')}
 
 Buyurtma ID: {data.get('order_id', 'N/A')}
@@ -9582,7 +10010,7 @@ Sample ID: {data.get('sample_id', 'N/A')}
 Kod yo\'llanma: {data.get('kod_yollanma', 'N/A')}
 Natija kodi: {data.get('natija_kodi', 'N/A')}
 
-Sana: {data.get('sana_vaqt', 'N/A')}"""
+Sana: {_sana_fmt}"""
 
         # Tegilgan teglar uchun config
         self.patient_info.tag_config('emizikli_tag', foreground='red', font=('Arial', 10, 'bold'))
@@ -9645,7 +10073,716 @@ Sana: {data.get('sana_vaqt', 'N/A')}"""
         # Tahrirlash tugmasini faollashtirish
         if hasattr(self, 'tahrirlash_btn'):
             self.tahrirlash_btn.config(state=tk.NORMAL)
+        # Tarixni ko'rish tugmasini faollashtirish
+        if hasattr(self, 'tarix_btn'):
+            self.tarix_btn.config(state=tk.NORMAL)
+
+        # Oldingi tashriflar tarixini yuklash + sanalarni patient_info ga qo'shish
+        bemor_id = data.get('bemor_id') or data.get('id')
+        current_order_id = data.get('order_id')
+        if bemor_id and hasattr(self, 'history_tree'):
+            dates_list = self._load_patient_history(bemor_id, current_order_id)
+            # Tahlil sanalarini patient_info oxiriga qo'shish
+            if dates_list:
+                try:
+                    self.patient_info.config(state=tk.NORMAL)
+                    self.patient_info.tag_config(
+                        'visit_dates_tag', foreground='#1A5276', font=('Arial', 9))
+                    self.patient_info.tag_config(
+                        'visit_dates_hdr_tag', foreground='#1A5276', font=('Arial', 9, 'bold'))
+                    self.patient_info.insert(tk.END, "\n\nTahlil sanalari:\n", 'visit_dates_hdr_tag')
+                    for sana, cnt in dates_list[:10]:  # Ko'pi bilan 10 ta
+                        self.patient_info.insert(
+                            tk.END, f"  • {sana}  ({cnt} ta tahlil)\n", 'visit_dates_tag')
+                    self.patient_info.config(state=tk.DISABLED)
+                except Exception:
+                    pass
     
+    def _load_patient_history(self, bemor_id, current_order_id=None):
+        """Bemor ID bo'yicha barcha oldingi buyurtmalarni yuklaydi.
+        Qaytaradi: [(sana_str, tahlil_soni), ...] — DD.MM.YYYY tartibda (eng yangi birinchi)."""
+        if not hasattr(self, 'history_tree'):
+            return []
+        # Jadvalni tozalash
+        for item in self.history_tree.get_children():
+            self.history_tree.delete(item)
+        dates_list = []
+        try:
+            conn = db_conn()
+            if not conn:
+                return []
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("""
+                SELECT o.id as order_id, o.sample_id, o.sana_vaqt,
+                       COUNT(oi.id) as tahlil_soni
+                FROM orders o
+                LEFT JOIN order_items oi ON oi.order_id = o.id
+                WHERE o.bemor_id = %s
+                GROUP BY o.id
+                ORDER BY o.sana_vaqt DESC
+                LIMIT 50
+            """, (bemor_id,))
+            rows = cursor.fetchall()
+            cursor.close()
+            conn.close()
+
+            for row in rows:
+                oid = row.get('order_id')
+                # Sana formati: DD.MM.YYYY (soatsiz)
+                sana_raw = row.get('sana_vaqt')
+                if sana_raw is None:
+                    sana = ''
+                elif hasattr(sana_raw, 'strftime'):
+                    sana = sana_raw.strftime('%d.%m.%Y')
+                else:
+                    _s = str(sana_raw)[:10]
+                    _p = _s.split('-')
+                    sana = f"{_p[2]}.{_p[1]}.{_p[0]}" if len(_p) == 3 else _s
+                sid  = row.get('sample_id', '') or ''
+                cnt  = row.get('tahlil_soni', 0)
+                is_current = (oid == current_order_id)
+                tag = 'current' if is_current else ''
+                self.history_tree.insert(
+                    '', tk.END,
+                    iid=str(oid),
+                    values=(sana, cnt, sid),
+                    tags=(tag,)
+                )
+                if sana:
+                    dates_list.append((sana, cnt))
+            # Joriy buyurtmani ajratib ko'rsatish
+            self.history_tree.tag_configure('current',
+                                            background='#C8E6C9', font=('Arial', 9, 'bold'))
+        except Exception as e:
+            print(f"[Tarix] yuklashda xato: {e}")
+        return dates_list
+
+    def _on_history_single_click(self, event):
+        """Tarix jadvalida bir marta bosib o'sha buyurtmani yuklash."""
+        item = self.history_tree.identify_row(event.y)
+        if not item:
+            return  # Sarlavha yoki bo'sh joyga bosildi
+        try:
+            order_id = int(item)
+        except ValueError:
+            return
+
+        # ── Frozen rejim: history_tree qoladi, faqat highlight + asosiy treeview yangilanadi ──
+        if getattr(self, '_history_frozen', False):
+            self._history_select_order(order_id)
+            return
+
+        # ── Oddiy rejim: barcode orqali to'liq yuklash ──
+        if self.current_order_id == order_id:
+            return  # Allaqachon yuklangan
+        item_vals = self.history_tree.item(item, 'values')
+        sample_id = item_vals[2] if item_vals and len(item_vals) > 2 else ''
+        load_key = str(sample_id) if sample_id else str(order_id)
+        self.barcode_entry.delete(0, tk.END)
+        self.barcode_entry.insert(0, load_key)
+        self.process_barcode(load_key)
+
+    def _on_history_double_click(self, event):
+        """Moslik uchun saqlanadi (eski kod uchun)."""
+        self._on_history_single_click(event)
+
+    # ─── Asosiy oynadan Tarixni ko'rish (fuzzy qidiruv) ─────────────────────
+
+    def _main_win_tarix_btn(self):
+        """Asosiy oynadagi 'Tarixni ko'rish' tugmasi — joriy bemorga o'xshash
+        bemorlarni fuzzy usulda topib ko'rsatadi."""
+        if not self.current_bemor_data:
+            messagebox.showinfo("Ma'lumot", "Avval bemor yuklang.")
+            return
+
+        fish = (self.current_bemor_data.get('fish') or '').strip()
+        tug_sana = self.current_bemor_data.get('tugilgan_sana')
+        birth_year = _extract_birth_year_smart(tug_sana)
+        ref_jins = (self.current_bemor_data.get('jins') or '').strip() or None
+
+        if not fish:
+            messagebox.showinfo("Ma'lumot", "Bemor ismi aniqlanmadi.")
+            return
+
+        # Tug'ilgan yil majburiy — yo'q bo'lsa qidiruv ishonchsiz
+        if not birth_year:
+            messagebox.showinfo(
+                "Tug'ilgan yil aniqlanmadi",
+                "Tug'ilgan yil ma'lumot bazasida topilmadi.\n"
+                "Tarixni ko'rish uchun 'Oldingi tashriflar' jadvalidan foydalaning.")
+            return
+
+        # DB dan o'xshash ismli, yil va jins mos bemorlarni olish
+        candidates = _fuzzy_search_bemorlar(fish, birth_year, ref_jins=ref_jins)
+        if not candidates:
+            messagebox.showinfo(
+                "Topilmadi",
+                f"'{fish}' ({birth_year}, {ref_jins or '?'}) uchun\n"
+                "o'xshash bemor topilmadi (90% dan yuqori mos kerakligi shartdir).\n\n"
+                "Hozirgi bemor tarixini ko'rish uchun\n"
+                "'Oldingi tashriflar' jadvalidan foydalaning.")
+            return
+
+        self._show_fuzzy_history_dialog(candidates, fish, birth_year)
+
+    def _show_fuzzy_history_dialog(self, candidates, ref_fish, ref_year):
+        """Fuzzy qidiruv natijalarini dialog oynada ko'rsatadi.
+        Checkbox bilan bir yoki bir nechta bemorni belgilab, tarixlarini ko'rish mumkin."""
+        dlg = tk.Toplevel(self.root)
+        dlg.title("O'xshash bemorlar — Tarixni ko'rish")
+        sw, sh = dlg.winfo_screenwidth(), dlg.winfo_screenheight()
+        w, h = min(1050, sw - 40), min(600, sh - 60)
+        dlg.geometry(f"{w}x{h}+{(sw-w)//2}+{(sh-h)//2}")
+        dlg.transient(self.root)
+        dlg.grab_set()
+
+        # Sarlavha
+        hdr = ttk.Frame(dlg, padding="8 6 8 2")
+        hdr.pack(fill=tk.X)
+        ttk.Label(hdr,
+            text=f"'{ref_fish}' nomi bilan o'xshash bemorlar"
+                 + (f"  (tug'ilgan yil: {ref_year})" if ref_year else ""),
+            font=("Arial", 10, "bold")).pack(side=tk.LEFT)
+        ttk.Label(hdr,
+            text="  Belgilang → Natijani ko'rish  |  yoki tanlang → Tarixni ko'rish",
+            font=("Arial", 9), foreground="#555").pack(side=tk.LEFT)
+
+        # Treeview
+        tv_frame = ttk.Frame(dlg, padding="8 0 8 2")
+        tv_frame.pack(fill=tk.BOTH, expand=True)
+
+        cols = ("Belgilash", "Mos%", "F.I.SH", "Yosh", "Jins",
+                "Telefon", "Tug'ilgan sana", "Manzil", "Tahlil sanasi")
+        tv = ttk.Treeview(tv_frame, columns=cols, show="headings", height=18)
+        col_w = {
+            "Belgilash": 60, "Mos%": 50, "F.I.SH": 200,
+            "Yosh": 42, "Jins": 55, "Telefon": 105,
+            "Tug'ilgan sana": 100, "Manzil": 140, "Tahlil sanasi": 95
+        }
+        for c in cols:
+            tv.heading(c, text=c)
+            tv.column(c, width=col_w.get(c, 80),
+                      anchor=tk.CENTER if c in ("Belgilash","Mos%","Yosh","Jins","Tahlil sanasi")
+                      else tk.W)
+
+        sb = ttk.Scrollbar(tv_frame, orient=tk.VERTICAL, command=tv.yview)
+        tv.configure(yscrollcommand=sb.set)
+        tv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Rang teglari
+        tv.tag_configure('exact',  background='#C8E6C9')
+        tv.tag_configure('close',  background='#FFF9C4')
+        tv.tag_configure('fuzzy',  background='#FFFFFF')
+        tv.tag_configure('checked_exact', background='#4CAF50', foreground='white')
+        tv.tag_configure('checked_close', background='#FFC107', foreground='black')
+        tv.tag_configure('checked_fuzzy', background='#90CAF9', foreground='black')
+
+        # Checkbox holati: {iid: bool}
+        _checked = {}
+
+        def _fmt_oxirgi(val):
+            """oxirgi_tashrif → DD.MM.YYYY"""
+            if not val:
+                return ''
+            if hasattr(val, 'strftime'):
+                return val.strftime('%d.%m.%Y')
+            s = str(val)[:10]
+            p = s.split('-')
+            return f"{p[2]}.{p[1]}.{p[0]}" if len(p) == 3 else s
+
+        # Kandidatlarni to'ldirish
+        for cand in candidates:
+            score = cand.get('_score', 0)
+            base_tag = 'exact' if score >= 95 else ('close' if score >= 75 else 'fuzzy')
+            iid = str(cand['id'])
+            _checked[iid] = False
+            tv.insert("", tk.END, iid=iid, values=(
+                "☐",
+                f"{score}%",
+                cand.get('fish', ''),
+                cand.get('yosh', ''),
+                cand.get('jins', ''),
+                cand.get('telefon', ''),
+                _fmt_tug_sana(cand.get('tugilgan_sana', '')),
+                (cand.get('manzil') or '')[:35],
+                _fmt_oxirgi(cand.get('oxirgi_tashrif')),
+            ), tags=(base_tag,))
+
+        def _toggle(iid):
+            """Checkbox ni almashtirish."""
+            _checked[iid] = not _checked.get(iid, False)
+            is_ch = _checked[iid]
+            # Tegni yangilash
+            cur_tags = list(tv.item(iid, 'tags'))
+            base = [t for t in cur_tags if not t.startswith('checked_')]
+            base_tag_name = base[0] if base else 'fuzzy'
+            new_tag = f"checked_{base_tag_name}" if is_ch else base_tag_name
+            tv.item(iid, tags=(new_tag,))
+            # Belgilash ustunini yangilash
+            vals = list(tv.item(iid, 'values'))
+            vals[0] = "☑" if is_ch else "☐"
+            tv.item(iid, values=vals)
+
+        def _on_click(event):
+            item = tv.identify_row(event.y)
+            if item:
+                _toggle(item)
+
+        tv.bind("<ButtonRelease-1>", _on_click)
+
+        def _select_all():
+            for iid in tv.get_children():
+                if not _checked.get(iid):
+                    _toggle(iid)
+
+        def _clear_all():
+            for iid in tv.get_children():
+                if _checked.get(iid):
+                    _toggle(iid)
+
+        # ── Tugmalar ───────────────────────────────────────────────────────────
+        btn_frame = ttk.Frame(dlg, padding="8 4 8 8")
+        btn_frame.pack(fill=tk.X)
+
+        def _load_single():
+            """Tanlangan (highlighted) bemor tarixini ko'rish."""
+            sel = tv.selection()
+            checked_ids = [int(iid) for iid, v in _checked.items() if v]
+            # Avval checked listdan, yo'q bo'lsa selection dan
+            if checked_ids:
+                dlg.destroy()
+                primary = checked_ids[0]
+                extra = checked_ids[1:] if len(checked_ids) > 1 else None
+                self.show_patient_all_history(primary, extra_bemor_ids=extra)
+            elif sel:
+                try:
+                    bemor_id = int(sel[0])
+                except (ValueError, TypeError):
+                    return
+                dlg.destroy()
+                self.show_patient_all_history(bemor_id)
+            else:
+                messagebox.showwarning(
+                    "Diqqat",
+                    "Kamida bitta bemorni belgilang (☑) yoki tanlang!",
+                    parent=dlg)
+
+        def _load_checked():
+            """Belgilangan bemorlar tarixini birlashtirib ko'rish."""
+            checked_ids = [int(iid) for iid, v in _checked.items() if v]
+            if not checked_ids:
+                messagebox.showwarning(
+                    "Diqqat", "Avval bemorlarni ☑ bilan belgilang!", parent=dlg)
+                return
+            dlg.destroy()
+            primary = checked_ids[0]
+            extra = checked_ids[1:] if len(checked_ids) > 1 else None
+            self.show_patient_all_history(primary, extra_bemor_ids=extra)
+
+        # Chap tugmalar
+        tk.Button(btn_frame, text="📋 Tarixni ko'rish",
+                  command=_load_single,
+                  bg="#1A5276", fg="white", font=("Arial", 9, "bold"),
+                  padx=10, pady=4, relief=tk.RAISED, bd=2, cursor="hand2"
+                  ).pack(side=tk.LEFT, padx=4)
+
+        ttk.Button(btn_frame, text="Bekor",
+                   command=dlg.destroy).pack(side=tk.LEFT, padx=3)
+
+        # O'rta: Hammasi / Tozalash
+        mid_frame = ttk.Frame(btn_frame)
+        mid_frame.pack(side=tk.LEFT, padx=16)
+
+        tk.Button(mid_frame, text="Hammasi",
+                  command=_select_all,
+                  font=("Arial", 9), padx=8, pady=3,
+                  relief=tk.RIDGE, bd=1
+                  ).pack(side=tk.LEFT, padx=2)
+
+        tk.Button(mid_frame, text="Tozalash",
+                  command=_clear_all,
+                  font=("Arial", 9), padx=8, pady=3,
+                  relief=tk.RIDGE, bd=1
+                  ).pack(side=tk.LEFT, padx=2)
+
+        # O'ng: Natijani ko'rish (bir necha belgilangan uchun)
+        tk.Button(btn_frame, text="✅ Natijani ko'rish",
+                  command=_load_checked,
+                  bg="#1B5E20", fg="white", font=("Arial", 9, "bold"),
+                  padx=10, pady=4, relief=tk.RAISED, bd=2, cursor="hand2"
+                  ).pack(side=tk.RIGHT, padx=4)
+
+        ttk.Label(btn_frame,
+            text="💡 Yashil=aniq mos  Sariq=o'xshash  Oq=ehtimoliy",
+            foreground="gray", font=("Arial", 8)
+            ).pack(side=tk.RIGHT, padx=8)
+
+    # ─── Tarixni ko'rish (barcha buyurtmalar) ────────────────────────────────
+
+    def _on_view_history_btn(self):
+        """Qidiruv oynasidagi 'Tarixni ko'rish' tugmasi bosilganda."""
+        sel = self.search_results_tree.selection()
+        if not sel:
+            messagebox.showwarning("Diqqat", "Avval bemorni tanlang!", parent=self._search_win)
+            return
+        item = self.search_results_tree.item(sel[0])
+        vals = item.get('values', [])
+        if not vals:
+            return
+        bemor_id = vals[0]  # 1-ustun = ID
+        fish = vals[1] if len(vals) > 1 else ''
+        try:
+            bemor_id = int(bemor_id)
+        except (ValueError, TypeError):
+            return
+
+        # Qidiruv oynasini yopamiz
+        if self._search_win and self._search_win.winfo_exists():
+            self._search_win.destroy()
+            self._search_win = None
+
+        # Barcha tarixni asosiy oynada ko'rsatish
+        self.show_patient_all_history(bemor_id)
+
+    def show_patient_all_history(self, bemor_id, extra_bemor_ids=None):
+        """
+        Bemorning barcha buyurtmalari tahlillarini asosiy oynada ko'rsatish.
+        Har bir buyurtma oldida sana-separator qator chiqadi.
+        extra_bemor_ids — qo'shimcha bemor ID lari (bir nechta bemor birlashtirilganda).
+        """
+        conn = db_conn()
+        if not conn:
+            messagebox.showerror("Xatolik", "Database ga ulanib bo'lmadi.")
+            return
+
+        try:
+            cursor = conn.cursor(dictionary=True)
+
+            # 1. Bemor ma'lumotlari (asosiy)
+            cursor.execute("SELECT * FROM bemorlar WHERE id = %s", (bemor_id,))
+            bemor = cursor.fetchone()
+            if not bemor:
+                messagebox.showwarning("Topilmadi", f"Bemor ID={bemor_id} topilmadi.")
+                return
+
+            # Extra bemorlar ma'lumotlarini olish
+            all_bemor_ids = [bemor_id]
+            extra_bemor_map = {}  # {bemor_id: bemor_row}
+            if extra_bemor_ids:
+                for eid in extra_bemor_ids:
+                    if eid and eid != bemor_id:
+                        cursor.execute("SELECT * FROM bemorlar WHERE id = %s", (eid,))
+                        eb = cursor.fetchone()
+                        if eb:
+                            extra_bemor_map[eid] = eb
+                            all_bemor_ids.append(eid)
+
+            # 2. Barcha buyurtmalar (eskidan yangi tartibda)
+            # Eslatma: shifokor, kod_yollanma, natija_kodi — bemorlar jadvalida,
+            # orders jadvalida faqat sana_vaqt va sample_id bor
+            ph_b = ','.join(['%s'] * len(all_bemor_ids))
+            cursor.execute(f"""
+                SELECT id, bemor_id, sample_id, sana_vaqt
+                FROM orders
+                WHERE bemor_id IN ({ph_b})
+                ORDER BY sana_vaqt ASC, id ASC
+            """, all_bemor_ids)
+            all_orders = cursor.fetchall()
+
+            if not all_orders:
+                messagebox.showinfo("Ma'lumot", "Bu bemor uchun buyurtmalar topilmadi.")
+                return
+
+            all_order_ids = [o['id'] for o in all_orders]
+            latest_order = all_orders[-1]
+
+            # Har bir order uchun tahlil soni
+            ph = ','.join(['%s'] * len(all_order_ids))
+            cursor.execute(
+                f"SELECT order_id, COUNT(*) as cnt FROM order_items WHERE order_id IN ({ph}) GROUP BY order_id",
+                all_order_ids
+            )
+            tahlil_count_map = {row['order_id']: row['cnt'] for row in cursor.fetchall()}
+
+            # orders_meta: {order_id: {sana_vaqt, tahlil_soni, fish}}
+            # Multi-bemor rejimda separator da fish ko'rsatiladi
+            multi_bemor_mode = bool(extra_bemor_map)
+            orders_meta = {}
+            for o in all_orders:
+                oid = o['id']
+                obid = o.get('bemor_id')
+                # Fish ni aniqlash: asosiy bemor yoki extra
+                if obid == bemor_id:
+                    _fish = bemor.get('fish', '') if multi_bemor_mode else ''
+                else:
+                    _fish = extra_bemor_map.get(obid, {}).get('fish', '') if multi_bemor_mode else ''
+                orders_meta[oid] = {
+                    'sana_vaqt': o.get('sana_vaqt', ''),
+                    'tahlil_soni': tahlil_count_map.get(oid, 0),
+                    'sample_id': o.get('sample_id', ''),
+                    'fish': _fish,
+                }
+
+            # 3. Barcha order_items (order_id bilan birga)
+            cursor.execute(f"""
+                SELECT
+                    oi.id,
+                    oi.order_id,
+                    oi.tahlil_id,
+                    oi.nomi,
+                    oi.narxi,
+                    COALESCE(t.sample, '') as test_type,
+                    COALESCE(tn.response_options, '') as response_options,
+                    COALESCE(tn.standard_blank_path, '') as standard_blank_path,
+                    COALESCE(tn.type, '') as type
+                FROM order_items oi
+                LEFT JOIN tahlillar t ON oi.tahlil_id = t.id
+                LEFT JOIN tahlillar_norma tn ON oi.nomi = tn.tahlil_nomi
+                WHERE oi.order_id IN ({ph})
+                ORDER BY oi.order_id ASC, oi.id ASC
+            """, all_order_ids)
+            all_tests = cursor.fetchall()
+
+            # 4. Barcha test_results (order_id bo'yicha)
+            str_order_ids = [str(oid) for oid in all_order_ids]
+            ph_s = ','.join(['%s'] * len(str_order_ids))
+            cursor.execute(f"""
+                SELECT order_id, test_name, result_data, status
+                FROM test_results
+                WHERE order_id IN ({ph_s})
+            """, str_order_ids)
+            # _history_trd: keyed by order_item id (int)
+            # We'll build it after matching test_name + order_id → order_item id
+            trd_by_order_name = {}  # {(order_id_str, test_name): {result_data, status}}
+            for row in cursor.fetchall():
+                key = (str(row['order_id']), row['test_name'])
+                trd_by_order_name[key] = {
+                    'result_data': row['result_data'],
+                    'status': row['status']
+                }
+
+            # 5. Barcha result_items (eski tizim)
+            cursor.execute(
+                f"SELECT id, order_id FROM results WHERE order_id IN ({ph})",
+                all_order_ids
+            )
+            result_id_map = {row['order_id']: row['id'] for row in cursor.fetchall()}
+            saved_results = {}  # {(order_id, test_name): qiymat}
+            if result_id_map:
+                res_ids = list(result_id_map.values())
+                ph2 = ','.join(['%s'] * len(res_ids))
+                cursor.execute(f"""
+                    SELECT ri.tahlil_nomi, ri.qiymat, r.order_id
+                    FROM result_items ri
+                    JOIN results r ON ri.result_id = r.id
+                    WHERE ri.result_id IN ({ph2})
+                """, res_ids)
+                for row in cursor.fetchall():
+                    saved_results[(row['order_id'], row['tahlil_nomi'])] = row['qiymat']
+
+        except Exception as e:
+            messagebox.showerror("Xatolik", f"Ma'lumot o'qishda xato: {e}")
+            return
+        finally:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+        # 6. self.test_results va _history_trd ni tuzish
+        self.test_results = {}
+        history_trd = {}  # {test_item_id: {result_data, status}}
+
+        for test in all_tests:
+            tid = test['id']
+            oid = test.get('order_id')
+            tname = test.get('nomi', '')
+
+            # Eski tizimdan (result_items)
+            ri_val = saved_results.get((oid, tname))
+            if ri_val is not None:
+                self.test_results[tid] = ri_val
+
+            # Yangi tizimdan (test_results)
+            tr_key = (str(oid), tname)
+            tr_data = trd_by_order_name.get(tr_key)
+            if tr_data:
+                rd = (tr_data.get('result_data') or '').strip()
+                if rd:
+                    self.test_results[tid] = rd
+                history_trd[tid] = tr_data
+            elif ri_val is not None:
+                # eski tizim: status yo'q, "Saqlandi" deb belgilaymiz
+                history_trd[tid] = {'result_data': str(ri_val), 'status': 'Saqlandi'}
+
+        # 7. Holatni sozlash
+        self.current_order_id = latest_order['id']
+        # bemor (SELECT * FROM bemorlar) ichida shifokor, telefon va boshqalar bor
+        # orders jadvalidagi faqat sana_vaqt va sample_id ni ustiga qo'shamiz
+        self.current_bemor_data = {
+            **bemor,
+            'order_id':  latest_order['id'],
+            'sample_id': latest_order.get('sample_id', ''),
+            'sana_vaqt': latest_order.get('sana_vaqt', ''),
+            'bemor_id':  bemor_id,
+        }
+        self.current_tests = all_tests
+        self._history_mode = True
+        self._history_trd = history_trd
+        self._history_orders_meta = orders_meta
+
+        # 8. Bemor ma'lumotlari paneliga yozish
+        self.display_patient_info(self.current_bemor_data)
+        # Tarix xulosasini qo'shimcha ko'rsatish
+        try:
+            self.patient_info.config(state=tk.NORMAL)
+            total_tests = len(all_tests)
+            # Oxirgi tashrif sana formati: DD.MM.YYYY
+            _lt_sana = latest_order.get('sana_vaqt', '')
+            if hasattr(_lt_sana, 'strftime'):
+                _lt_sana_str = _lt_sana.strftime('%d.%m.%Y')
+            elif _lt_sana:
+                _s = str(_lt_sana)[:10]
+                _p = _s.split('-')
+                _lt_sana_str = f"{_p[2]}.{_p[1]}.{_p[0]}" if len(_p) == 3 else _s
+            else:
+                _lt_sana_str = ''
+            _hist_text = (
+                f"\n\n📋 TAHLILLAR TARIXI\n"
+                f"Tashriflar: {len(all_orders)} ta\n"
+                f"Jami tahlillar: {total_tests} ta\n"
+                f"(Oxirgi tashrif: {_lt_sana_str})"
+            )
+            if extra_bemor_map:
+                _extra_names = ', '.join(
+                    eb.get('fish', f'ID={eid}') for eid, eb in extra_bemor_map.items()
+                )
+                _hist_text += f"\n+ Qo'shilgan: {_extra_names}"
+            self.patient_info.insert(tk.END, _hist_text, 'history_info_tag')
+            self.patient_info.tag_config('history_info_tag',
+                foreground='#1A5276', font=('Arial', 9, 'bold'))
+            self.patient_info.config(state=tk.DISABLED)
+        except Exception:
+            pass
+
+        # 9. Treeview ni load_tests orqali to'ldirish
+        self._history_all_tests = list(all_tests)  # Frozen rejim uchun saqlash
+        try:
+            self.load_tests()
+        finally:
+            self._history_mode = False
+
+        # 10. Oldingi tashriflar panelini barcha buyurtmalar bilan to'ldirish
+        #     (eng yangi tepada, eng eski pastda; ko'p bemor rejimda ham to'g'ri ishlaydi)
+        if hasattr(self, 'history_tree'):
+            try:
+                for _hi in self.history_tree.get_children():
+                    self.history_tree.delete(_hi)
+                # all_orders ASC tartibda — reversed() → yangilar tepada
+                for _ho in reversed(all_orders):
+                    _hoid = _ho['id']
+                    _hsana_raw = _ho.get('sana_vaqt', '')
+                    if _hsana_raw is None:
+                        _hsana = ''
+                    elif hasattr(_hsana_raw, 'strftime'):
+                        _hsana = _hsana_raw.strftime('%d.%m.%Y')
+                    else:
+                        _hs = str(_hsana_raw)[:10]
+                        _hp = _hs.split('-')
+                        _hsana = f"{_hp[2]}.{_hp[1]}.{_hp[0]}" if len(_hp) == 3 else _hs
+                    _hsid = _ho.get('sample_id', '') or ''
+                    _hcnt = orders_meta.get(_hoid, {}).get('tahlil_soni', 0)
+                    _is_cur = (_hoid == latest_order['id'])
+                    _htag = 'current' if _is_cur else ''
+                    self.history_tree.insert(
+                        '', tk.END, iid=str(_hoid),
+                        values=(_hsana, _hcnt, _hsid),
+                        tags=(_htag,)
+                    )
+                self.history_tree.tag_configure(
+                    'current', background='#C8E6C9', font=('Arial', 9, 'bold'))
+            except Exception as _he:
+                print(f"[Tarix] history_tree yangilashda xato: {_he}")
+
+        _status_fish = bemor.get('fish', '')
+        if extra_bemor_map:
+            _status_fish += ' + ' + ', '.join(
+                eb.get('fish', '') for eb in extra_bemor_map.values()
+            )
+        self.status_var.set(
+            f"📋 {_status_fish} — {len(all_orders)} ta tashrif, {len(all_tests)} ta tahlil")
+
+        # Frozen rejim: history_tree endi qayta yuklanmaydi (bosish bilan o'chib ketmaydi)
+        self._history_frozen = True
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _history_select_order(self, order_id):
+        """Frozen tarix rejimida bitta buyurtmani tanlash.
+        History_tree o'zgarmaydi — faqat highlight yangilanadi va asosiy treeview to'ldiriladi."""
+        # 1. History_tree da tanlangan qatorni yashil qilish
+        try:
+            for _iid in self.history_tree.get_children():
+                try:
+                    _is_cur = (int(_iid) == order_id)
+                except (ValueError, TypeError):
+                    _is_cur = False
+                self.history_tree.item(_iid, tags=('current',) if _is_cur else ())
+            self.history_tree.tag_configure(
+                'current', background='#C8E6C9', font=('Arial', 9, 'bold'))
+        except Exception as _e:
+            print(f"[Tarix] history_tree highlight xato: {_e}")
+
+        # 2. current_order_id va current_bemor_data ni yangilash
+        self.current_order_id = order_id
+        _ometa = getattr(self, '_history_orders_meta', {}).get(order_id, {})
+        if self.current_bemor_data:
+            self.current_bemor_data['order_id']  = order_id
+            self.current_bemor_data['sample_id'] = _ometa.get('sample_id', '')
+            _sana = _ometa.get('sana_vaqt', '')
+            if hasattr(_sana, 'strftime'):
+                self.current_bemor_data['sana_vaqt'] = _sana
+            elif _sana:
+                self.current_bemor_data['sana_vaqt'] = _sana
+
+        # 3. Faqat shu order ning tahlillarini asosiy treeview ga yuklash
+        _all = self._history_all_tests or []
+        _order_tests = [t for t in _all if t.get('order_id') == order_id]
+        if not _order_tests:
+            return
+
+        # Vaqtincha current_tests ni o'zgartirish (history_mode=False)
+        _saved_tests      = self.current_tests
+        _saved_history_mode = self._history_mode
+        self.current_tests  = _order_tests
+        self._history_mode  = False
+        try:
+            self.load_tests()
+        finally:
+            # Barcha testlarni tiklash
+            self.current_tests  = _saved_tests
+            self._history_mode  = _saved_history_mode
+
+        # Status yangilash
+        _sana_raw = _ometa.get('sana_vaqt', '')
+        if hasattr(_sana_raw, 'strftime'):
+            _sana_str = _sana_raw.strftime('%d.%m.%Y')
+        elif _sana_raw:
+            _s = str(_sana_raw)[:10]
+            _p = _s.split('-')
+            _sana_str = f"{_p[2]}.{_p[1]}.{_p[0]}" if len(_p) == 3 else _s
+        else:
+            _sana_str = str(order_id)
+        _fish = (self.current_bemor_data or {}).get('fish', '')
+        self.status_var.set(
+            f"📋 {_fish} — {_sana_str}  ({len(_order_tests)} ta tahlil)  |  "
+            f"Buyurtma #{order_id}")
+
     def _close_active_popup(self):
         """Ochiq dropdown/popup ni yopish (Manfiy/Musbat va boshqalar)"""
         if self.result_entry:
@@ -9672,8 +10809,12 @@ Sana: {data.get('sana_vaqt', 'N/A')}"""
         self.current_bemor_data = None
         self.current_tests = []
         self.test_results = {}
+        self._history_frozen = False
+        self._history_all_tests = []
         if hasattr(self, 'tahrirlash_btn'):
             self.tahrirlash_btn.config(state=tk.DISABLED)
+        if hasattr(self, 'tarix_btn'):
+            self.tarix_btn.config(state=tk.DISABLED)
         self.status_var.set("[OGOHLANTIRISH] Yuklash uchun bemor tanlang")
     
     def edit_patient(self):
@@ -9823,74 +10964,77 @@ Sana: {data.get('sana_vaqt', 'N/A')}"""
         
         try:
             cursor = conn.cursor(dictionary=True)
-            print(f"[YANGILANMOQDA] Tahlillarni yuklayapman (Order ID: {self.current_order_id})...")
-            
-            query = """
-                SELECT 
-                    oi.id,
-                    oi.tahlil_id,
-                    oi.nomi,
-                    oi.narxi,
-                    COALESCE(t.sample, '') as test_type,
-                    COALESCE(tn.response_options, '') as response_options,
-                    COALESCE(tn.standard_blank_path, '') as standard_blank_path,
-                    COALESCE(tn.type, '') as type
-                FROM order_items oi
-                LEFT JOIN tahlillar t ON oi.tahlil_id = t.id
-                LEFT JOIN tahlillar_norma tn ON oi.nomi = tn.tahlil_nomi
-                WHERE oi.order_id = %s
-                ORDER BY oi.id
-            """
-            
-            cursor.execute(query, (self.current_order_id,))
-            self.current_tests = cursor.fetchall()
+            history_mode = getattr(self, '_history_mode', False)
 
-            # ── Panel member testlarini yashirish ──────────────────────────────
-            # Agar "Lipid spektri" yoki "Buyrak paneli" panel buyurtmada bo'lsa,
-            # ularning tarkibidagi yakka testlar (tahlil_id bo'yicha) ko'rsatilmaydi —
-            # natija panelning JSON qatorida saqlanadi, alohida qator ortiqcha bo'ladi.
-            _has_lipid_panel  = any(_is_lipid_spektri_test(t.get('nomi', ''))  for t in self.current_tests)
-            _has_buyrak_panel = any(_is_buyrak_paneli_test(t.get('nomi', '')) for t in self.current_tests)
-            if _has_lipid_panel or _has_buyrak_panel:
-                _skip_member_ids = set()
-                if _has_lipid_panel:
-                    _skip_member_ids |= LIPID_PANEL_MEMBER_IDS
-                if _has_buyrak_panel:
-                    _skip_member_ids |= BUYRAK_PANEL_MEMBER_IDS
-                self.current_tests = [
-                    t for t in self.current_tests
-                    if t.get('tahlil_id') not in _skip_member_ids
-                ]
-            # ─────────────────────────────────────────────────────────────────
+            if not history_mode:
+                print(f"[YANGILANMOQDA] Tahlillarni yuklayapman (Order ID: {self.current_order_id})...")
 
-            # Bazadan natijalarni yuklash (agar saqlangan bo'lsa)
-            cursor.execute("""
-                SELECT id FROM results WHERE order_id = %s
-            """, (self.current_order_id,))
-            result_row = cursor.fetchone()
-            
-            if result_row:
-                result_id = result_row['id']
-                # result_items dan natijalarni olish
+                query = """
+                    SELECT
+                        oi.id,
+                        oi.tahlil_id,
+                        oi.nomi,
+                        oi.narxi,
+                        COALESCE(t.sample, '') as test_type,
+                        COALESCE(tn.response_options, '') as response_options,
+                        COALESCE(tn.standard_blank_path, '') as standard_blank_path,
+                        COALESCE(tn.type, '') as type
+                    FROM order_items oi
+                    LEFT JOIN tahlillar t ON oi.tahlil_id = t.id
+                    LEFT JOIN tahlillar_norma tn ON oi.nomi = tn.tahlil_nomi
+                    WHERE oi.order_id = %s
+                    ORDER BY oi.id
+                """
+
+                cursor.execute(query, (self.current_order_id,))
+                self.current_tests = cursor.fetchall()
+
+                # ── Panel member testlarini yashirish ──────────────────────────────
+                # Agar "Lipid spektri" yoki "Buyrak paneli" panel buyurtmada bo'lsa,
+                # ularning tarkibidagi yakka testlar (tahlil_id bo'yicha) ko'rsatilmaydi —
+                # natija panelning JSON qatorida saqlanadi, alohida qator ortiqcha bo'ladi.
+                _has_lipid_panel  = any(_is_lipid_spektri_test(t.get('nomi', ''))  for t in self.current_tests)
+                _has_buyrak_panel = any(_is_buyrak_paneli_test(t.get('nomi', '')) for t in self.current_tests)
+                if _has_lipid_panel or _has_buyrak_panel:
+                    _skip_member_ids = set()
+                    if _has_lipid_panel:
+                        _skip_member_ids |= LIPID_PANEL_MEMBER_IDS
+                    if _has_buyrak_panel:
+                        _skip_member_ids |= BUYRAK_PANEL_MEMBER_IDS
+                    self.current_tests = [
+                        t for t in self.current_tests
+                        if t.get('tahlil_id') not in _skip_member_ids
+                    ]
+                # ─────────────────────────────────────────────────────────────────
+
+                # Bazadan natijalarni yuklash (agar saqlangan bo'lsa)
                 cursor.execute("""
-                    SELECT tahlil_nomi, qiymat 
-                    FROM result_items 
-                    WHERE result_id = %s
-                """, (result_id,))
-                saved_results = {}
-                for row in cursor.fetchall():
-                    saved_results[row['tahlil_nomi']] = row['qiymat']
-                
-                # test_results ga yuklash (test_id bo'yicha)
-                for test in self.current_tests:
-                    test_name = test.get('nomi', '')
-                    if test_name in saved_results:
-                        self.test_results[test['id']] = saved_results[test_name]
-            
-            # Treeview ni tozalash
+                    SELECT id FROM results WHERE order_id = %s
+                """, (self.current_order_id,))
+                result_row = cursor.fetchone()
+
+                if result_row:
+                    result_id = result_row['id']
+                    # result_items dan natijalarni olish
+                    cursor.execute("""
+                        SELECT tahlil_nomi, qiymat
+                        FROM result_items
+                        WHERE result_id = %s
+                    """, (result_id,))
+                    saved_results = {}
+                    for row in cursor.fetchall():
+                        saved_results[row['tahlil_nomi']] = row['qiymat']
+
+                    # test_results ga yuklash (test_id bo'yicha)
+                    for test in self.current_tests:
+                        test_name = test.get('nomi', '')
+                        if test_name in saved_results:
+                            self.test_results[test['id']] = saved_results[test_name]
+
+            # Treeview ni tozalash (har doim)
             for item in self.tests_tree.get_children():
                 self.tests_tree.delete(item)
-            
+
             # Bemor ma'lumotlari (norma uchun)
             jins = self.current_bemor_data.get('jins', '') if self.current_bemor_data else ''
             yosh = self.current_bemor_data.get('yosh', None) if self.current_bemor_data else None
@@ -9898,28 +11042,32 @@ Sana: {data.get('sana_vaqt', 'N/A')}"""
                 yosh_int = int(yosh) if yosh else None
             except:
                 yosh_int = None
-            
-            # test_results jadvalidan natijalarni yuklash
-            cursor.execute("""
-                SELECT test_name, result_data, status
-                FROM test_results
-                WHERE order_id = %s
-            """, (str(self.current_order_id),))
-            test_results_data = {}
-            for row in cursor.fetchall():
-                test_results_data[row['test_name']] = {
-                    'result_data': row['result_data'],
-                    'status': row['status']
-                }
 
-            # test_results jadvalidan JSON natijalarni self.test_results ga yuklash
-            # (multi-component testlar uchun: REVMOPROBA, bilirubin va boshqalar)
-            for _t in self.current_tests:
-                _tname = _t.get('nomi', '')
-                if _tname in test_results_data:
-                    _rd = (test_results_data[_tname].get('result_data') or '').strip()
-                    if _rd:
-                        self.test_results[_t['id']] = _rd
+            if not history_mode:
+                # test_results jadvalidan natijalarni yuklash
+                cursor.execute("""
+                    SELECT test_name, result_data, status
+                    FROM test_results
+                    WHERE order_id = %s
+                """, (str(self.current_order_id),))
+                test_results_data = {}
+                for row in cursor.fetchall():
+                    test_results_data[row['test_name']] = {
+                        'result_data': row['result_data'],
+                        'status': row['status']
+                    }
+
+                # test_results jadvalidan JSON natijalarni self.test_results ga yuklash
+                # (multi-component testlar uchun: REVMOPROBA, bilirubin va boshqalar)
+                for _t in self.current_tests:
+                    _tname = _t.get('nomi', '')
+                    if _tname in test_results_data:
+                        _rd = (test_results_data[_tname].get('result_data') or '').strip()
+                        if _rd:
+                            self.test_results[_t['id']] = _rd
+            else:
+                print(f"[TARIX] Tahlillar tarixi ko'rsatilmoqda ({len(self.current_tests)} ta tahlil)...")
+                test_results_data = {}  # history_mode da _history_trd ishlatiladi
 
             # ── Barcha norma ma'lumotlarini BIR so'rovda yuklash (performance) ──
             _all_test_names = [t.get('nomi', '') for t in self.current_tests if t.get('nomi')]
@@ -9966,15 +11114,51 @@ Sana: {data.get('sana_vaqt', 'N/A')}"""
             # Tahlillarni ko'rsatish
             has_siydik = False
             row_idx = 0
+            _last_hist_order_id = None
             for test in self.current_tests:
                 test_id = test['id']
                 test_name = test.get('nomi', 'N/A')
                 # test_type None bo'lishi mumkin, shuning uchun xavfsiz tekshirish
                 test_type_raw = test.get('test_type') or ''
                 test_type = str(test_type_raw).upper() if test_type_raw else ''
-                
+
+                # History mode: yangi buyurtma boshida separator qator qo'shish
+                if history_mode:
+                    _cur_oid = test.get('order_id')
+                    if _cur_oid != _last_hist_order_id:
+                        _last_hist_order_id = _cur_oid
+                        _order_meta = getattr(self, '_history_orders_meta', {}).get(_cur_oid, {})
+                        _sana = _order_meta.get('sana_vaqt', '')
+                        if hasattr(_sana, 'strftime'):
+                            _sana_str = _sana.strftime('%d.%m.%Y')
+                        elif _sana:
+                            _s = str(_sana)[:10]
+                            _p = _s.split('-')
+                            _sana_str = f"{_p[2]}.{_p[1]}.{_p[0]}" if len(_p) == 3 else _s
+                        else:
+                            _sana_str = f"#{_cur_oid}"
+                        _tahlil_soni = _order_meta.get('tahlil_soni', '')
+                        _bemor_fish = _order_meta.get('fish', '')
+                        _sep_label = f"  ── {_sana_str}"
+                        if _bemor_fish:
+                            _sep_label += f"  [{_bemor_fish}]"
+                        _sep_label += f"  (Buyurtma #{_cur_oid}"
+                        if _tahlil_soni:
+                            _sep_label += f" | {_tahlil_soni} ta tahlil"
+                        _sep_label += ")  ──"
+                        self.tests_tree.insert("", tk.END, values=(
+                            "", _sep_label, "", "", ""
+                        ), tags=("history_sep",))
+                        self.tests_tree.tag_configure(
+                            "history_sep",
+                            background="#D6EAF8", foreground="#1A5276",
+                            font=("Arial", 9, "bold italic"))
+
                 # test_results jadvalidan statusni olish
-                test_result = test_results_data.get(test_name, {})
+                if history_mode:
+                    test_result = getattr(self, '_history_trd', {}).get(test_id, {})
+                else:
+                    test_result = test_results_data.get(test_name, {})
                 result_status = test_result.get('status', 'Kutilmoqda')
                 
                 # Siydik tahlili bormi tekshirish
@@ -15617,56 +16801,73 @@ Sana: {data.get('sana_vaqt', 'N/A')}"""
         NatijaKiritish(result_window, self.current_order_id)
     
     def open_blanka_settings(self):
-        """Blanka sozlamalari oynasini ochish"""
+        """Blanka sozlamalari oynasini ochish — to'liq universal"""
+        from tkinter import colorchooser
+
         dialog = tk.Toplevel(self.root)
         dialog.title("Blanka Sozlamalari")
-        dialog.geometry("640x280")
+        dialog.geometry("750x750")
         dialog.transient(self.root)
         dialog.grab_set()
-        
-        main_frame = ttk.Frame(dialog, padding="20")
-        main_frame.pack(fill=tk.BOTH, expand=True)
-        
-        ttk.Label(main_frame, text="Blanka Sozlamalari", font=("Arial", 12, "bold")).pack(pady=(0, 10))
-        
+        dialog.resizable(True, True)
+
         try:
             config = load_blanka_config()
         except:
             config = {}
 
-        # ── 1. Shablon fayl ──────────────────────────────────────────
-        ttk.Label(main_frame, text="Blanka ustuni shablon (.docx):").pack(anchor=tk.W)
-        path_frame = ttk.Frame(main_frame)
-        path_frame.pack(fill=tk.X, pady=(2, 8))
-        
-        path_var = tk.StringVar(value=config.get('blanka_ustuni_path', r"G:\DASTUR\URIT 50\Standart shablonlar\blanka ustuni.docx"))
-        path_entry = ttk.Entry(path_frame, textvariable=path_var, width=55)
-        path_entry.pack(side=tk.LEFT, padx=(0, 5), fill=tk.X, expand=True)
-        
-        def browse_docx():
-            try:
-                fp = tk.filedialog.askopenfilename(
-                    title="Blanka ustuni shablonini tanlang",
-                    filetypes=[("Word Documents", "*.docx"), ("All Files", "*.*")],
-                )
-                if fp:
-                    path_var.set(fp)
-            except Exception as e:
-                messagebox.showerror("Xatolik", str(e))
-        ttk.Button(path_frame, text="Tanlash...", command=browse_docx).pack(side=tk.LEFT)
+        # ── Scrollable canvas ─────────────────────────────────────────
+        outer = ttk.Frame(dialog)
+        outer.pack(fill=tk.BOTH, expand=True)
+        canvas = tk.Canvas(outer)
+        scrollbar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        main_frame = ttk.Frame(canvas, padding="15")
+        main_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=main_frame, anchor="nw", tags="inner")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig("inner", width=e.width))
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        def _on_dialog_destroy():
+            canvas.unbind_all("<MouseWheel>")
+            dialog.destroy()
 
-        # ── 2. Logotib fayl ──────────────────────────────────────────
-        ttk.Label(main_frame, text="Logotib rasmi (.jpg / .png):").pack(anchor=tk.W)
-        logo_frame = ttk.Frame(main_frame)
-        logo_frame.pack(fill=tk.X, pady=(2, 8))
-        
+        ttk.Label(main_frame, text="Blanka Sozlamalari", font=("Arial", 14, "bold")).pack(pady=(0, 12))
+
+        # ══════════════════════════════════════════════════════════════
+        # 1. HEADER TURI
+        # ══════════════════════════════════════════════════════════════
+        type_frame = ttk.LabelFrame(main_frame, text="Blanka boshi turi", padding="8")
+        type_frame.pack(fill=tk.X, pady=(0, 8))
+
+        saved_type = config.get('header_type', 'premium')
+        if saved_type == 'shablon':
+            saved_type = 'premium'
+        header_type_var = tk.StringVar(value=saved_type)
+        type_descriptions = [
+            ("premium", "Premium (3-ustunli) — barcode/QR + klinika + logo"),
+            ("oddiy",   "Oddiy (2-ustunli) — klinika + logo, barcodesiz"),
+        ]
+        for val, desc in type_descriptions:
+            ttk.Radiobutton(type_frame, text=desc, variable=header_type_var, value=val,
+                            command=lambda: _update_visibility()).pack(anchor=tk.W, pady=1)
+
+        shablon_frame = ttk.Frame(main_frame)
+        path_var = tk.StringVar(value=config.get('blanka_ustuni_path', ''))
+
+        # ══════════════════════════════════════════════════════════════
+        # 3. LOGOTIP
+        # ══════════════════════════════════════════════════════════════
+        logo_lf = ttk.LabelFrame(main_frame, text="Logotip rasmi", padding="8")
+
+        logo_top = ttk.Frame(logo_lf)
+        logo_top.pack(fill=tk.X)
         logo_var = tk.StringVar(value=config.get('logo_path', LOGO_DEFAULT_PATH))
-        logo_entry = ttk.Entry(logo_frame, textvariable=logo_var, width=55)
-        logo_entry.pack(side=tk.LEFT, padx=(0, 5), fill=tk.X, expand=True)
-        
-        # Logo holati
-        logo_status = ttk.Label(logo_frame, text="")
-        
+        ttk.Entry(logo_top, textvariable=logo_var, width=50).pack(side=tk.LEFT, padx=(0, 5), fill=tk.X, expand=True)
+        logo_status = ttk.Label(logo_top, text="")
         def check_logo(*args):
             p = logo_var.get().strip()
             if p and os.path.exists(p):
@@ -15676,50 +16877,225 @@ Sana: {data.get('sana_vaqt', 'N/A')}"""
             else:
                 logo_status.config(text="")
         logo_var.trace('w', check_logo)
-        
         def browse_logo():
-            try:
-                fp = tk.filedialog.askopenfilename(
-                    title="Logotib rasmini tanlang",
-                    filetypes=[("Rasm fayllari", "*.jpg *.jpeg *.png *.bmp"), ("All Files", "*.*")],
-                )
-                if fp:
-                    logo_var.set(fp)
-            except Exception as e:
-                messagebox.showerror("Xatolik", str(e))
-        
-        ttk.Button(logo_frame, text="Tanlash...", command=browse_logo).pack(side=tk.LEFT, padx=5)
+            fp = tk.filedialog.askopenfilename(title="Logotip tanlang", filetypes=[("Rasm", "*.jpg *.jpeg *.png *.bmp"), ("All", "*.*")])
+            if fp:
+                logo_var.set(fp)
+        ttk.Button(logo_top, text="Tanlash...", command=browse_logo).pack(side=tk.LEFT, padx=5)
         logo_status.pack(side=tk.LEFT, padx=5)
         check_logo()
 
-        # ── Tugmalar ─────────────────────────────────────────────────
+        # Logo o'lchami
+        logo_size_frame = ttk.Frame(logo_lf)
+        logo_size_frame.pack(fill=tk.X, pady=(5, 0))
+        ttk.Label(logo_size_frame, text="Kengligi (sm):").pack(side=tk.LEFT)
+        logo_w_var = tk.StringVar(value=str(config.get('logo_width', 3.2)))
+        ttk.Entry(logo_size_frame, textvariable=logo_w_var, width=6).pack(side=tk.LEFT, padx=(2, 10))
+        ttk.Label(logo_size_frame, text="Balandligi (sm):").pack(side=tk.LEFT)
+        logo_h_var = tk.StringVar(value=str(config.get('logo_height', 3.2)))
+        ttk.Entry(logo_size_frame, textvariable=logo_h_var, width=6).pack(side=tk.LEFT, padx=2)
+
+        # ══════════════════════════════════════════════════════════════
+        # 4. PANEL JOYLASHUVI (premium uchun: chap va o'ng)
+        # ══════════════════════════════════════════════════════════════
+        layout_lf = ttk.LabelFrame(main_frame, text="Panel joylashuvi (3-ustunli header)", padding="8")
+
+        panel_options = [
+            ("barcode", "Barcode (shtrix-kod)"),
+            ("qrcode",  "QR kod"),
+            ("logo",    "Logotip"),
+            ("bosh",    "Bo'sh"),
+        ]
+
+        layout_grid = ttk.Frame(layout_lf)
+        layout_grid.pack(fill=tk.X)
+
+        ttk.Label(layout_grid, text="Chap panel:", font=("Arial", 10, "bold")).grid(row=0, column=0, sticky=tk.W, padx=(0, 15))
+        chap_var = tk.StringVar(value=config.get('chap_panel', 'barcode'))
+        for i, (val, text) in enumerate(panel_options):
+            ttk.Radiobutton(layout_grid, text=text, variable=chap_var, value=val).grid(row=i+1, column=0, sticky=tk.W, padx=(10, 15))
+
+        ttk.Label(layout_grid, text="O'ng panel:", font=("Arial", 10, "bold")).grid(row=0, column=1, sticky=tk.W)
+        ong_var = tk.StringVar(value=config.get('ong_panel', 'logo'))
+        for i, (val, text) in enumerate(panel_options):
+            ttk.Radiobutton(layout_grid, text=text, variable=ong_var, value=val).grid(row=i+1, column=1, sticky=tk.W, padx=10)
+
+        ttk.Label(layout_grid, text="Markaz: doimo klinika ma'lumotlari", foreground="gray").grid(row=5, column=0, columnspan=2, sticky=tk.W, pady=(5, 0))
+
+        # ── QR kod link shablon ───────────────────────────────────────
+        qr_frame = ttk.LabelFrame(layout_lf, text="QR kod ichidagi ma'lumot", padding="6")
+        qr_frame.pack(fill=tk.X, pady=(8, 0))
+
+        qr_link_var = tk.StringVar(value=config.get('qr_link_template', ''))
+
+        qr_top = ttk.Frame(qr_frame)
+        qr_top.pack(fill=tk.X)
+        ttk.Entry(qr_top, textvariable=qr_link_var, width=58).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+
+        def _paste_sample_tag():
+            cur = qr_link_var.get()
+            qr_link_var.set(cur + '{{SAMPLE}}')
+        def _paste_date_tag():
+            cur = qr_link_var.get()
+            qr_link_var.set(cur + '{{DATE}}')
+
+        ttk.Button(qr_top, text="+ID", width=4, command=_paste_sample_tag).pack(side=tk.LEFT, padx=1)
+        ttk.Button(qr_top, text="+Sana", width=6, command=_paste_date_tag).pack(side=tk.LEFT, padx=1)
+
+        hint_text = (
+            "  Bo'sh → QR da faqat namuna ID yoziladi (masalan: 260507003689)\n"
+            "  OneDrive papka linki → QR skanerda shu papka ochiladi\n"
+            "  Link + {{SAMPLE}} → https://1drv.ms/f/xxx?id={{SAMPLE}}\n"
+            "  {{DATE}} = sana (07.05.2026),   {{SAMPLE}} = namuna ID"
+        )
+        ttk.Label(qr_frame, text=hint_text, foreground="#555555",
+                  font=("Arial", 8), justify=tk.LEFT).pack(anchor=tk.W, pady=(4, 0))
+
+        # OneDrive yo'l-yo'riq
+        onedrive_lf = ttk.LabelFrame(qr_frame, text="OneDrive dan link olish", padding="5")
+        onedrive_lf.pack(fill=tk.X, pady=(6, 0))
+        onedrive_steps = (
+            "1. OneDrive → 'Natijalar' papkasiga o'ng klik\n"
+            "2. 'Ulashish' → 'Havola nusxalash' ni bosing\n"
+            "3. Nusxalangan linkni yuqoridagi maydonga joylashtiring\n"
+            "   (QR skanerda shu papka ochiladi)"
+        )
+        ttk.Label(onedrive_lf, text=onedrive_steps, foreground="#336699",
+                  font=("Arial", 8), justify=tk.LEFT).pack(anchor=tk.W)
+
+        # ══════════════════════════════════════════════════════════════
+        # 5. KLINIKA MA'LUMOTLARI
+        # ══════════════════════════════════════════════════════════════
+        klinika_lf = ttk.LabelFrame(main_frame, text="Klinika ma'lumotlari", padding="8")
+
+        kl_fields = {}
+        kl_labels = [
+            ("klinika_nomi",   "Klinika nomi:"),
+            ("klinika_sub",    "Qo'shimcha (sub):"),
+            ("klinika_manzil", "Manzil:"),
+            ("klinika_tel",    "Telefon:"),
+        ]
+        for i, (key, label) in enumerate(kl_labels):
+            ttk.Label(klinika_lf, text=label).grid(row=i, column=0, sticky=tk.W, pady=2, padx=(0, 5))
+            var = tk.StringVar(value=config.get(key, ''))
+            ttk.Entry(klinika_lf, textvariable=var, width=55).grid(row=i, column=1, sticky=tk.EW, pady=2)
+            kl_fields[key] = var
+        klinika_lf.columnconfigure(1, weight=1)
+
+        # ══════════════════════════════════════════════════════════════
+        # 6. RANGLAR
+        # ══════════════════════════════════════════════════════════════
+        rang_lf = ttk.LabelFrame(main_frame, text="Ranglar", padding="8")
+
+        color_vars = {}
+        color_labels = [
+            ("klinika_rang",    "Klinika nomi rangi:",     config.get('klinika_rang', '1E9943')),
+            ("header_bg_color", "Bemor jadvali fon rangi:", config.get('header_bg_color', '2E75B6')),
+            ("bemor_row_color", "Bemor qator fon rangi:",   config.get('bemor_row_color', 'E6E6E6')),
+        ]
+
+        for i, (key, label, default_hex) in enumerate(color_labels):
+            ttk.Label(rang_lf, text=label).grid(row=i, column=0, sticky=tk.W, pady=3, padx=(0, 5))
+            var = tk.StringVar(value=default_hex)
+            color_vars[key] = var
+            ent = ttk.Entry(rang_lf, textvariable=var, width=10)
+            ent.grid(row=i, column=1, sticky=tk.W, pady=3, padx=(0, 5))
+
+            preview = tk.Label(rang_lf, text="  ", width=3, relief="solid", borderwidth=1)
+            preview.grid(row=i, column=2, pady=3, padx=(0, 5))
+
+            def _update_preview(pv=preview, v=var):
+                try:
+                    hex_c = v.get().strip().lstrip('#')
+                    if len(hex_c) == 6:
+                        pv.config(bg=f"#{hex_c}")
+                except:
+                    pass
+            var.trace('w', lambda *a, up=_update_preview: up())
+            _update_preview()
+
+            def _pick_color(v=var, pv=preview):
+                try:
+                    hex_c = v.get().strip().lstrip('#')
+                    initial = f"#{hex_c}" if len(hex_c) == 6 else "#2E75B6"
+                    result = colorchooser.askcolor(color=initial, title="Rang tanlang")
+                    if result and result[1]:
+                        v.set(result[1].lstrip('#').upper())
+                except:
+                    pass
+            ttk.Button(rang_lf, text="Tanlash...", command=_pick_color).grid(row=i, column=3, pady=3)
+
+        rang_lf.columnconfigure(1, weight=0)
+
+        # ══════════════════════════════════════════════════════════════
+        # VISIBILITY TOGGLING
+        # ══════════════════════════════════════════════════════════════
+        all_sections = [logo_lf, layout_lf, klinika_lf, rang_lf]
+
+        def _update_visibility():
+            for s in all_sections:
+                s.pack_forget()
+
+            ht = header_type_var.get()
+            if ht == 'premium':
+                logo_lf.pack(fill=tk.X, pady=(0, 8), after=type_frame)
+                layout_lf.pack(fill=tk.X, pady=(0, 8), after=logo_lf)
+                klinika_lf.pack(fill=tk.X, pady=(0, 8), after=layout_lf)
+                rang_lf.pack(fill=tk.X, pady=(0, 8), after=klinika_lf)
+            elif ht == 'oddiy':
+                logo_lf.pack(fill=tk.X, pady=(0, 8), after=type_frame)
+                klinika_lf.pack(fill=tk.X, pady=(0, 8), after=logo_lf)
+                rang_lf.pack(fill=tk.X, pady=(0, 8), after=klinika_lf)
+
+        _update_visibility()
+
+        # ══════════════════════════════════════════════════════════════
+        # TUGMALAR
+        # ══════════════════════════════════════════════════════════════
         btn_frame = ttk.Frame(main_frame)
-        btn_frame.pack(pady=10)
-        
+        btn_frame.pack(pady=12)
+
         def save_settings():
-            new_path   = path_var.get().strip()
-            new_logo   = logo_var.get().strip()
-            
-            if not new_path:
-                messagebox.showwarning("Diqqat", "Shablon manzilini kiriting!")
+            ht = header_type_var.get()
+            new_path = path_var.get().strip()
+            new_logo = logo_var.get().strip()
+
+            if not kl_fields['klinika_nomi'].get().strip():
+                messagebox.showwarning("Diqqat", "Klinika nomini kiriting!")
                 return
-            
-            if not os.path.exists(new_path):
-                result = messagebox.askyesno("Diqqat",
-                    f"Shablon fayl topilmadi:\n{new_path}\n\nYana ham saqlashni xohlaysizmi?")
-                if not result:
-                    return
-            
+
             try:
-                save_blanka_config({"blanka_ustuni_path": new_path, "logo_path": new_logo})
-                messagebox.showinfo("Muvaffaqiyat", 
-                    "Sozlamalar saqlandi!\n\nLogotib va shablon yangilandi.")
-                dialog.destroy()
+                lw = float(logo_w_var.get().replace(',', '.'))
+                lh = float(logo_h_var.get().replace(',', '.'))
+            except:
+                lw, lh = 3.2, 3.2
+
+            new_config = {
+                "header_type": ht,
+                "blanka_ustuni_path": new_path,
+                "logo_path": new_logo,
+                "logo_width": max(0.5, min(lw, 10.0)),
+                "logo_height": max(0.5, min(lh, 10.0)),
+                "chap_panel": chap_var.get(),
+                "ong_panel": ong_var.get(),
+                "qr_link_template": qr_link_var.get().strip(),
+            }
+            for key, var in kl_fields.items():
+                new_config[key] = var.get().strip()
+            for key, var in color_vars.items():
+                hex_c = var.get().strip().lstrip('#').upper()
+                new_config[key] = hex_c if len(hex_c) == 6 else config.get(key, '2E75B6')
+
+            try:
+                save_blanka_config(new_config)
+                messagebox.showinfo("Muvaffaqiyat", "Blanka sozlamalari saqlandi!")
+                _on_dialog_destroy()
             except Exception as e:
                 messagebox.showerror("Xatolik", str(e))
-        
+
         ttk.Button(btn_frame, text="✔ Saqlash", command=save_settings, width=20).pack(side=tk.LEFT, padx=10)
-        ttk.Button(btn_frame, text="✘ Bekor qilish", command=dialog.destroy, width=20).pack(side=tk.LEFT, padx=10)
+        ttk.Button(btn_frame, text="✘ Bekor qilish", command=_on_dialog_destroy, width=20).pack(side=tk.LEFT, padx=10)
+        dialog.protocol("WM_DELETE_WINDOW", _on_dialog_destroy)
         dialog.focus_set()
     
     def create_blanks(self):
