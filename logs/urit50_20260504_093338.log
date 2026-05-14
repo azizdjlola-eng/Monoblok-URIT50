@@ -1,0 +1,2044 @@
+============================================================
+  URIT-50 Integratsiya - AzizMedLine LIMS
+============================================================
+URIT-50 ma'lumot kutilyapti...
+Skaner orqali barcode o'qib, bemor ma'lumotlari avtomatik olinadi
+Natijalar blankaga avtomatik yoziladi
+
+Skaner tayyor. Barcode skanerlang...
+OK: Skaner thread ishga tushdi
+
+
+============================================================
+📡 Yangi tahlilni yuborish uchun URIT'da RS232 tugmasini bosing...
+📷 Yoki avval barcode skanerlang (kod_yollanma yoki natija_kodi)
+============================================================
+
+======= #1-TAHLIL RAW BLOK =======
+  
+ID:260504003514
+NO.000015 2000-01-01
+            02:18:01
+
+*LEU +-     15 CELL/uL
+ KET -        0 mmol/L
+ NIT -   
+ URO            Normal
+ BIL -        0 umol/L
+ GLU -        0 mmol/L
+ PRO -           0 g/L
+ SG         1.005     
+ pH         5.5       
+ BLD -       0 CELL/uL
+ Vc  -        0 mmol/L
+ MA          <=10 mg/L
+*Ca       <=1.0 mmol/L
+ CR         4.4 mmol/L
+ ACR       <3.4mg/mmol
+ 
+
+
+
+
+
+=======================================
+📝 RAW saqlandi: G:\DASTUR\URIT 50\Urit\RAW_LOGS\202605\urit_raw_20260504_102615.txt
+🆔 URIT-50 dan ID (sample_id) topildi: 260504003514
+📅 URIT-50 dan DATE topildi: 2000-01-01
+🕐 URIT-50 dan TIME topildi: 02:18:01
+
+--- PARSE QILINGAN NATIJA ---
+{'NO': '000015', 'ID': '260504003514', 'DATE': '2000-01-01', 'TIME': '02:18:01', 'LEU': '+-     15 CELL/µL', 'KET': '0 mmol/L', 'NIT': '-', 'URO': 'Normal', 'BIL': '0 umol/L', 'GLU': '0 mmol/L', 'PRO': '0 g/L', 'SG': '1.005', 'pH': '5.5', 'BLD': '0 CELL/µL', 'Vc': '0 mmol/L', 'MA': '<=10 mg/L', 'Ca': '<=1.0 mmol/L', 'CR': '4.4 mmol/L', 'ACR': '<3.4mg/mmol', 'ABNORMAL': ['Ca', 'LEU']}
+🆔 URIT-50 dan kelgan sample_id: 260504003514
+
+🔍 Bemor qidiryapman - Barcode: '260504003514'
+✅ Database ulanishi yaratildi (Connection Pooling)
+🔍 Barcode qidiryapman: '260504003514'
+✅ Bemor topildi: Xojiyeva Oysaxat
+   ID: 3617
+   Sample ID: 260504003514
+   Kod yo'llanma: 
+   Natija kodi: 
+   ✅ Tug'ilgan sana topildi: '1977-01-01'
+
+✅ Bemor ma'lumotlari topildi:
+   F.I.SH: 'Xojiyeva Oysaxat' (fish bo'sh bo'lsa, kod_yollanma ishlatildi)
+   Yosh: 49
+   Tug'ilgan sana: '1977-01-01'
+   ID: 3617
+   Kod yo'llanma: 
+   Natija kodi: 
+   Sample ID: 260504003514
+
+📋 Poloskа turi: 14-parametrli
+
+============================================================
+Blanka yaratishni boshlayapman...
+============================================================
+
+--- create_doc_from_data chaqirildi ---
+✅ ID topilmasa ham blanka HAR DOIM yaratiladi
+   patient_data: {'id': 3617, 'sample_id': '260504003514', 'kod_yollanma': '', 'fish': 'Xojiyeva Oysaxat', 'yosh': 49, 'jins': 'Ayol', 'tugilgan_sana': datetime.date(1977, 1, 1), 'telefon': '996674403', 'shifokor': "Yo'ldoshev Ro'ziboy", 'natija_kodi': ''}
+   fish: 'Xojiyeva Oysaxat', yosh: '49', tugilgan_sana: '1977-01-01'
+TEMPLATE_PATH: G:\DASTUR\URIT 50\blank.docx
+Shablon fayl mavjudmi: True
+Shablonni ochayapman: G:\DASTUR\URIT 50\blank.docx
+OK: Shablon ochildi
+
+🔢 Nomeratsiya (ID raqam) aniqlash:
+   patient_data: True
+   Sample ID topildi: 260504003514
+✅ Yakuniy nomeratsiya: '514'
+
+🕐 Test vaqti (kompyuterdan, har safar yangi): 04.05.2026 10:26
+   ⚠️ URIT-50 dan kelgan vaqt e'tiborsiz qoldirildi (analizator vaqti xato bo'lishi mumkin)
+   ✅ № o'rniga to'liq ID raqami ko'rsatiladi: '3617'
+
+📝 Placeholderlarni almashtiryapman:
+   {SAMPLE}: '000015'
+   {DATE_TIME}: '04.05.2026 10:26'
+   {FISH}: 'Xojiyeva Oysaxat'
+   {YOSH}: '49'
+   {NOMERATSIYA}: '514'
+   Bemor ID (№ o'rniga): '3617'
+   ✅ {FISH} almashtirildi: 'Xojiyeva Oysaxat'
+   ✅ {ID} almashtirildi: '3617' (to'liq ID)
+   ✅ № almashtirildi: '3617' (to'liq ID raqami)
+✅ Placeholderlar almashtirildi
+   Tug'ilgan yil: '1977' (sana: '1977-01-01')
+   📋 Sarlavha qatori topildi va saqlandi: '№  514Siydikning umumiy taxlili №  514Siydikning umumiy taxlili №  514Siydikning umumiy taxlili №  514Siydikning umumiy taxlili №  514Siydikning umumiy taxlili №  514Siydikning umumiy taxlili №  514Siydikning umumiy taxlili №  514Siydikning umumiy taxlili №  514Siydikning umumiy taxlili'
+   📋 Sarlavha qatori topildi va saqlandi: 'FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI'
+   📋 Sarlavha qatori topildi va saqlandi: 'Ko‘rsatkich Kod Kod Natija Natija Natija Norma Norma O‘lchov birligi'
+   📋 Sarlavha qatori topildi va saqlandi: 'Urobilinogen  URO URO    (3.2-16)  normal (3.2-16)  normal Mkmol/l'
+   📋 Sarlavha qatori topildi va saqlandi: 'SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI'
+
+============================================================
+MIKROSKOPIYA qismini to'ldirish...
+============================================================
+LEU (biokimyo): +-     15 CELL/µL
+BLD (biokimyo): 0 CELL/µL
+
+Mikroskopiya natijalari:
+  WBC: 10-15 (QORA)
+  RBC-D: 1-2 (QORA)
+  RBC-U: 0-1 (QORA)
+  SEC: 2-3 (QORA)
+  TEC: - (QORA)
+  RTEC: - (QORA)
+✅ Mikroskopiya qismi topildi
+  ✅ WBC: 10-15 yozildi
+  ✅ RBC-D: 1-2 yozildi
+  ✅ RBC-U: 0-1 yozildi
+============================================================
+✅ Mikroskopiya to'ldirildi!
+============================================================
+
+🔬 Mikroskopiya qismini to'ldiryapman...
+   LEU: '+-     15 CELL/µL' -> format: ' +/-', value: 15
+   📋 Mikroskopiya jadvali topildi, WBC qatorini qidiryapman...
+   ✅ WBC qatori topildi (mikroskopiya): Ko'rsatkich='Leykotsitlar', Kod='WBC'
+   ✅ WBC qatori topildi, 9 ta katak
+      Katak 0: 'Leykotsitlar'
+      Katak 1: 'WBC'
+      Katak 2: '10-15'
+      Katak 3: '10-15'
+      Katak 4: '10-15'
+      Katak 0 tekshirilmoqda: 'Leykotsitlar'
+      Katak 1 tekshirilmoqda: 'WBC'
+      ✅ WBC kod topildi: ustun 1 ('WBC')
+      ✅ Natija ustuni topildi: ustun 2 (koddan keyingi)
+   ✅ WBC (Leykotsitlar) natija yozildi: '10-15' -> '10-15' (qizil, ustun 2)
+   BLD: '0 CELL/µL' -> mikroskopiya qiymatlari hisoblandi
+   📋 Mikroskopiya jadvali topildi, RBC kodlarini qidiryapman...
+   ✅ RBC-D kodi topildi: Kod ustuni='RBC-D'
+   ✅ RBC-D (o'zgargan) natija yozildi: '1-2' -> '1-2' (qora, 2-ustun)
+   ✅ RBC-U kodi topildi: Kod ustuni='RBC-U'
+   ✅ RBC-U (o'zgarmagan) natija yozildi: '0-1' -> '0-1' (qora, 2-ustun)
+✅ Eritrositlar qismi to'ldirildi!
+✅ Mikroskopiya qismi to'ldirildi
+
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+
+Saqlash papkasi: G:\Қилинган анализлар\04.05.2026
+OK: Papka yaratildi yoki mavjud: G:\Қилинган анализлар\04.05.2026
+
+Blanka faylni saqlayapman: G:\Қилинган анализлар\04.05.2026\SIYDIK TAHLILI - 260504003514 Xojiyeva Oysaxat 1977.docx
+   Papka: G:\Қилинган анализлар\04.05.2026
+   Fayl nomi: SIYDIK TAHLILI - 260504003514 Xojiyeva Oysaxat 1977.docx
+✅ OK: Word blank saqlandi: G:\Қилинган анализлар\04.05.2026\SIYDIK TAHLILI - 260504003514 Xojiyeva Oysaxat 1977.docx
+   Fayl mavjudmi: True
+   Fayl o'lchami: 227063 bayt
+
+✅ OK: Blanka saqlandi:
+G:\Қилинган анализлар\04.05.2026\SIYDIK TAHLILI - 260504003514 Xojiyeva Oysaxat 1977.docx
+
+💾 Bazaga saqlayapman...
+💾 Natijalarni bazaga saqlayapman...
+   Bemor ID: 3617
+   Order ID: 3514
+❌ Bazaga saqlashda xatolik: 1054 (42S22): Unknown column 'test_turi' in 'where clause'
+✅ Bazaga saqlandi
+
+============================================================
+OK: Tahlil yakunlandi. Keyingi tahlil uchun barcode skanerlang...
+============================================================
+
+============================================================
+📡 Yangi tahlilni yuborish uchun URIT'da RS232 tugmasini bosing...
+📷 Yoki avval barcode skanerlang (kod_yollanma yoki natija_kodi)
+============================================================
+
+======= #2-TAHLIL RAW BLOK =======
+  
+ID:260504003525
+NO.000016 2000-01-01
+            02:19:18
+
+*LEU +2    125 CELL/uL
+ KET -        0 mmol/L
+ NIT -   
+ URO            Normal
+ BIL -        0 umol/L
+ GLU -        0 mmol/L
+*PRO +-       0.15 g/L
+ SG         1.030     
+ pH         5.0       
+*BLD +2     80 CELL/uL
+ Vc  -        0 mmol/L
+*MA            80 mg/L
+ Ca         2.5 mmol/L
+*CR       >=26.4mmol/L
+ ACR       <3.4mg/mmol
+ 
+
+
+
+
+
+=======================================
+📝 RAW saqlandi: G:\DASTUR\URIT 50\Urit\RAW_LOGS\202605\urit_raw_20260504_102731.txt
+🆔 URIT-50 dan ID (sample_id) topildi: 260504003525
+📅 URIT-50 dan DATE topildi: 2000-01-01
+🕐 URIT-50 dan TIME topildi: 02:19:18
+
+--- PARSE QILINGAN NATIJA ---
+{'NO': '000016', 'ID': '260504003525', 'DATE': '2000-01-01', 'TIME': '02:19:18', 'LEU': '+2    125 CELL/µL', 'KET': '0 mmol/L', 'NIT': '-', 'URO': 'Normal', 'BIL': '0 umol/L', 'GLU': '0 mmol/L', 'PRO': '+-       0.15 g/L', 'SG': '1.030', 'pH': '5.0', 'BLD': '+2     80 CELL/µL', 'Vc': '0 mmol/L', 'MA': '80 mg/L', 'Ca': '2.5 mmol/L', 'CR': '>=26.4mmol/L', 'ACR': '<3.4mg/mmol', 'ABNORMAL': ['BLD', 'PRO', 'LEU', 'MA', 'CR']}
+🆔 URIT-50 dan kelgan sample_id: 260504003525
+
+🔍 Bemor qidiryapman - Barcode: '260504003525'
+✅ Database ulanishi yaratildi (Connection Pooling)
+🔍 Barcode qidiryapman: '260504003525'
+✅ Bemor topildi: Mavlonova Dildora
+   ID: 3628
+   Sample ID: 260504003525
+   Kod yo'llanma: 
+   Natija kodi: 
+   ✅ Tug'ilgan sana topildi: '1981-01-01'
+
+✅ Bemor ma'lumotlari topildi:
+   F.I.SH: 'Mavlonova Dildora' (fish bo'sh bo'lsa, kod_yollanma ishlatildi)
+   Yosh: 45
+   Tug'ilgan sana: '1981-01-01'
+   ID: 3628
+   Kod yo'llanma: 
+   Natija kodi: 
+   Sample ID: 260504003525
+
+📋 Poloskа turi: 11-parametrli
+   → 11-parametrli: MA, Ca, CR, ACR blankada ko'rinmaydi
+
+============================================================
+Blanka yaratishni boshlayapman...
+============================================================
+
+--- create_doc_from_data chaqirildi ---
+✅ ID topilmasa ham blanka HAR DOIM yaratiladi
+   patient_data: {'id': 3628, 'sample_id': '260504003525', 'kod_yollanma': '', 'fish': 'Mavlonova Dildora', 'yosh': 45, 'jins': 'Ayol', 'tugilgan_sana': datetime.date(1981, 1, 1), 'telefon': '941369339', 'shifokor': 'Xolboyeva Gulsara', 'natija_kodi': ''}
+   fish: 'Mavlonova Dildora', yosh: '45', tugilgan_sana: '1981-01-01'
+TEMPLATE_PATH: G:\DASTUR\URIT 50\blank.docx
+Shablon fayl mavjudmi: True
+Shablonni ochayapman: G:\DASTUR\URIT 50\blank.docx
+OK: Shablon ochildi
+
+🔢 Nomeratsiya (ID raqam) aniqlash:
+   patient_data: True
+   Sample ID topildi: 260504003525
+✅ Yakuniy nomeratsiya: '525'
+
+🕐 Test vaqti (kompyuterdan, har safar yangi): 04.05.2026 10:27
+   ⚠️ URIT-50 dan kelgan vaqt e'tiborsiz qoldirildi (analizator vaqti xato bo'lishi mumkin)
+   ✅ № o'rniga to'liq ID raqami ko'rsatiladi: '3628'
+
+📝 Placeholderlarni almashtiryapman:
+   {SAMPLE}: '000016'
+   {DATE_TIME}: '04.05.2026 10:27'
+   {FISH}: 'Mavlonova Dildora'
+   {YOSH}: '45'
+   {NOMERATSIYA}: '525'
+   Bemor ID (№ o'rniga): '3628'
+   ✅ {FISH} almashtirildi: 'Mavlonova Dildora'
+   ✅ {ID} almashtirildi: '3628' (to'liq ID)
+   ✅ № almashtirildi: '3628' (to'liq ID raqami)
+✅ Placeholderlar almashtirildi
+   Tug'ilgan yil: '1981' (sana: '1981-01-01')
+   📋 Sarlavha qatori topildi va saqlandi: '№  525Siydikning umumiy taxlili №  525Siydikning umumiy taxlili №  525Siydikning umumiy taxlili №  525Siydikning umumiy taxlili №  525Siydikning umumiy taxlili №  525Siydikning umumiy taxlili №  525Siydikning umumiy taxlili №  525Siydikning umumiy taxlili №  525Siydikning umumiy taxlili'
+   📋 Sarlavha qatori topildi va saqlandi: 'FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI'
+   📋 Sarlavha qatori topildi va saqlandi: 'Ko‘rsatkich Kod Kod Natija Natija Natija Norma Norma O‘lchov birligi'
+   📋 Sarlavha qatori topildi va saqlandi: 'Urobilinogen  URO URO    (3.2-16)  normal (3.2-16)  normal Mkmol/l'
+   📋 Sarlavha qatori topildi va saqlandi: 'SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI'
+
+============================================================
+MIKROSKOPIYA qismini to'ldirish...
+============================================================
+LEU (biokimyo): +2    125 CELL/µL
+BLD (biokimyo): +2     80 CELL/µL
+
+Mikroskopiya natijalari:
+  WBC: 100-125 (QIZIL)
+  RBC-D: 1-2 (QORA)
+  RBC-U: 0-1 (QORA)
+  SEC: 2-3 (QORA)
+  TEC: - (QORA)
+  RTEC: - (QORA)
+✅ Mikroskopiya qismi topildi
+  ✅ WBC: 100-125 yozildi
+  ✅ RBC-D: 1-2 yozildi
+  ✅ RBC-U: 0-1 yozildi
+============================================================
+✅ Mikroskopiya to'ldirildi!
+============================================================
+
+🔬 Mikroskopiya qismini to'ldiryapman...
+   LEU: '+2    125 CELL/µL' -> format: '+1', value: 2
+   📋 Mikroskopiya jadvali topildi, WBC qatorini qidiryapman...
+   ✅ WBC qatori topildi (mikroskopiya): Ko'rsatkich='Leykotsitlar', Kod='WBC'
+   ✅ WBC qatori topildi, 9 ta katak
+      Katak 0: 'Leykotsitlar'
+      Katak 1: 'WBC'
+      Katak 2: '100-125'
+      Katak 3: '100-125'
+      Katak 4: '100-125'
+      Katak 0 tekshirilmoqda: 'Leykotsitlar'
+      Katak 1 tekshirilmoqda: 'WBC'
+      ✅ WBC kod topildi: ustun 1 ('WBC')
+      ✅ Natija ustuni topildi: ustun 2 (koddan keyingi)
+   ✅ WBC (Leykotsitlar) natija yozildi: '100-125' -> '50-60' (qizil, ustun 2)
+   BLD: '+2     80 CELL/µL' -> mikroskopiya qiymatlari hisoblandi
+   📋 Mikroskopiya jadvali topildi, RBC kodlarini qidiryapman...
+   ✅ RBC-D kodi topildi: Kod ustuni='RBC-D'
+   ✅ RBC-D (o'zgargan) natija yozildi: '1-2' -> '1-2' (qora, 2-ustun)
+   ✅ RBC-U kodi topildi: Kod ustuni='RBC-U'
+   ✅ RBC-U (o'zgarmagan) natija yozildi: '0-1' -> '0-1' (qora, 2-ustun)
+✅ Eritrositlar qismi to'ldirildi!
+✅ Mikroskopiya qismi to'ldirildi
+
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+
+Saqlash papkasi: G:\Қилинган анализлар\04.05.2026
+OK: Papka yaratildi yoki mavjud: G:\Қилинган анализлар\04.05.2026
+
+Blanka faylni saqlayapman: G:\Қилинган анализлар\04.05.2026\SIYDIK TAHLILI - 260504003525 Mavlonova Dildora 1981.docx
+   Papka: G:\Қилинган анализлар\04.05.2026
+   Fayl nomi: SIYDIK TAHLILI - 260504003525 Mavlonova Dildora 1981.docx
+✅ OK: Word blank saqlandi: G:\Қилинган анализлар\04.05.2026\SIYDIK TAHLILI - 260504003525 Mavlonova Dildora 1981.docx
+   Fayl mavjudmi: True
+   Fayl o'lchami: 227042 bayt
+
+✅ OK: Blanka saqlandi:
+G:\Қилинган анализлар\04.05.2026\SIYDIK TAHLILI - 260504003525 Mavlonova Dildora 1981.docx
+
+💾 Bazaga saqlayapman...
+💾 Natijalarni bazaga saqlayapman...
+   Bemor ID: 3628
+   Order ID: 3525
+❌ Bazaga saqlashda xatolik: 1054 (42S22): Unknown column 'test_turi' in 'where clause'
+✅ Bazaga saqlandi
+
+============================================================
+OK: Tahlil yakunlandi. Keyingi tahlil uchun barcode skanerlang...
+============================================================
+
+============================================================
+📡 Yangi tahlilni yuborish uchun URIT'da RS232 tugmasini bosing...
+📷 Yoki avval barcode skanerlang (kod_yollanma yoki natija_kodi)
+============================================================
+
+======= #3-TAHLIL RAW BLOK =======
+  
+ID:260504003518
+NO.000017 2000-01-01
+            02:20:38
+
+ LEU -       0 CELL/uL
+ KET -        0 mmol/L
+ NIT -   
+ URO            Normal
+*BIL +1     8.6 umol/L
+ GLU -        0 mmol/L
+ PRO -           0 g/L
+ SG         1.030     
+ pH         5.0       
+ BLD -       0 CELL/uL
+ Vc  -        0 mmol/L
+ MA          <=10 mg/L
+*Ca       <=1.0 mmol/L
+ CR        17.6 mmol/L
+ ACR       <3.4mg/mmol
+ 
+
+
+
+
+
+=======================================
+📝 RAW saqlandi: G:\DASTUR\URIT 50\Urit\RAW_LOGS\202605\urit_raw_20260504_102851.txt
+🆔 URIT-50 dan ID (sample_id) topildi: 260504003518
+📅 URIT-50 dan DATE topildi: 2000-01-01
+🕐 URIT-50 dan TIME topildi: 02:20:38
+
+--- PARSE QILINGAN NATIJA ---
+{'NO': '000017', 'ID': '260504003518', 'DATE': '2000-01-01', 'TIME': '02:20:38', 'LEU': '0 CELL/µL', 'KET': '0 mmol/L', 'NIT': '-', 'URO': 'Normal', 'BIL': '+1     8.6 umol/L', 'GLU': '0 mmol/L', 'PRO': '0 g/L', 'SG': '1.030', 'pH': '5.0', 'BLD': '0 CELL/µL', 'Vc': '0 mmol/L', 'MA': '<=10 mg/L', 'Ca': '<=1.0 mmol/L', 'CR': '17.6 mmol/L', 'ACR': '<3.4mg/mmol', 'ABNORMAL': ['Ca', 'BIL']}
+🆔 URIT-50 dan kelgan sample_id: 260504003518
+
+🔍 Bemor qidiryapman - Barcode: '260504003518'
+✅ Database ulanishi yaratildi (Connection Pooling)
+🔍 Barcode qidiryapman: '260504003518'
+✅ Bemor topildi: Xolmurodov Abbos
+   ID: 3621
+   Sample ID: 260504003518
+   Kod yo'llanma: 
+   Natija kodi: 
+   ✅ Tug'ilgan sana topildi: '1988-01-01'
+
+✅ Bemor ma'lumotlari topildi:
+   F.I.SH: 'Xolmurodov Abbos' (fish bo'sh bo'lsa, kod_yollanma ishlatildi)
+   Yosh: 38
+   Tug'ilgan sana: '1988-01-01'
+   ID: 3621
+   Kod yo'llanma: 
+   Natija kodi: 
+   Sample ID: 260504003518
+
+📋 Poloskа turi: 14-parametrli
+
+============================================================
+Blanka yaratishni boshlayapman...
+============================================================
+
+--- create_doc_from_data chaqirildi ---
+✅ ID topilmasa ham blanka HAR DOIM yaratiladi
+   patient_data: {'id': 3621, 'sample_id': '260504003518', 'kod_yollanma': '', 'fish': 'Xolmurodov Abbos', 'yosh': 38, 'jins': 'Erkak', 'tugilgan_sana': datetime.date(1988, 1, 1), 'telefon': '940758388', 'shifokor': 'Xolboyeva Gulsara', 'natija_kodi': ''}
+   fish: 'Xolmurodov Abbos', yosh: '38', tugilgan_sana: '1988-01-01'
+TEMPLATE_PATH: G:\DASTUR\URIT 50\blank.docx
+Shablon fayl mavjudmi: True
+Shablonni ochayapman: G:\DASTUR\URIT 50\blank.docx
+OK: Shablon ochildi
+
+🔢 Nomeratsiya (ID raqam) aniqlash:
+   patient_data: True
+   Sample ID topildi: 260504003518
+✅ Yakuniy nomeratsiya: '518'
+
+🕐 Test vaqti (kompyuterdan, har safar yangi): 04.05.2026 10:28
+   ⚠️ URIT-50 dan kelgan vaqt e'tiborsiz qoldirildi (analizator vaqti xato bo'lishi mumkin)
+   ✅ № o'rniga to'liq ID raqami ko'rsatiladi: '3621'
+
+📝 Placeholderlarni almashtiryapman:
+   {SAMPLE}: '000017'
+   {DATE_TIME}: '04.05.2026 10:28'
+   {FISH}: 'Xolmurodov Abbos'
+   {YOSH}: '38'
+   {NOMERATSIYA}: '518'
+   Bemor ID (№ o'rniga): '3621'
+   ✅ {FISH} almashtirildi: 'Xolmurodov Abbos'
+   ✅ {ID} almashtirildi: '3621' (to'liq ID)
+   ✅ № almashtirildi: '3621' (to'liq ID raqami)
+✅ Placeholderlar almashtirildi
+   Tug'ilgan yil: '1988' (sana: '1988-01-01')
+   📋 Sarlavha qatori topildi va saqlandi: '№  518Siydikning umumiy taxlili №  518Siydikning umumiy taxlili №  518Siydikning umumiy taxlili №  518Siydikning umumiy taxlili №  518Siydikning umumiy taxlili №  518Siydikning umumiy taxlili №  518Siydikning umumiy taxlili №  518Siydikning umumiy taxlili №  518Siydikning umumiy taxlili'
+   📋 Sarlavha qatori topildi va saqlandi: 'FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI'
+   📋 Sarlavha qatori topildi va saqlandi: 'Ko‘rsatkich Kod Kod Natija Natija Natija Norma Norma O‘lchov birligi'
+   📋 Sarlavha qatori topildi va saqlandi: 'Urobilinogen  URO URO    (3.2-16)  normal (3.2-16)  normal Mkmol/l'
+   📋 Sarlavha qatori topildi va saqlandi: 'SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI'
+
+============================================================
+MIKROSKOPIYA qismini to'ldirish...
+============================================================
+LEU (biokimyo): 0 CELL/µL
+BLD (biokimyo): 0 CELL/µL
+
+Mikroskopiya natijalari:
+  WBC: 4-5 (QORA)
+  RBC-D: 1-2 (QORA)
+  RBC-U: 0-1 (QORA)
+  SEC: 2-3 (QORA)
+  TEC: - (QORA)
+  RTEC: - (QORA)
+✅ Mikroskopiya qismi topildi
+  ✅ WBC: 4-5 yozildi
+  ✅ RBC-D: 1-2 yozildi
+  ✅ RBC-U: 0-1 yozildi
+============================================================
+✅ Mikroskopiya to'ldirildi!
+============================================================
+
+🔬 Mikroskopiya qismini to'ldiryapman...
+   LEU: '0 CELL/µL' -> format: '0', value: 0
+   📋 Mikroskopiya jadvali topildi, WBC qatorini qidiryapman...
+   ✅ WBC qatori topildi (mikroskopiya): Ko'rsatkich='Leykotsitlar', Kod='WBC'
+   ✅ WBC qatori topildi, 9 ta katak
+      Katak 0: 'Leykotsitlar'
+      Katak 1: 'WBC'
+      Katak 2: '4-5'
+      Katak 3: '4-5'
+      Katak 4: '4-5'
+      Katak 0 tekshirilmoqda: 'Leykotsitlar'
+      Katak 1 tekshirilmoqda: 'WBC'
+      ✅ WBC kod topildi: ustun 1 ('WBC')
+      ✅ Natija ustuni topildi: ustun 2 (koddan keyingi)
+   ✅ WBC (Leykotsitlar) natija yozildi: '4-5' -> '4-5' (qora, ustun 2)
+   BLD: '0 CELL/µL' -> mikroskopiya qiymatlari hisoblandi
+   📋 Mikroskopiya jadvali topildi, RBC kodlarini qidiryapman...
+   ✅ RBC-D kodi topildi: Kod ustuni='RBC-D'
+   ✅ RBC-D (o'zgargan) natija yozildi: '1-2' -> '1-2' (qora, 2-ustun)
+   ✅ RBC-U kodi topildi: Kod ustuni='RBC-U'
+   ✅ RBC-U (o'zgarmagan) natija yozildi: '0-1' -> '0-1' (qora, 2-ustun)
+✅ Eritrositlar qismi to'ldirildi!
+✅ Mikroskopiya qismi to'ldirildi
+
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+
+Saqlash papkasi: G:\Қилинган анализлар\04.05.2026
+OK: Papka yaratildi yoki mavjud: G:\Қилинган анализлар\04.05.2026
+
+Blanka faylni saqlayapman: G:\Қилинган анализлар\04.05.2026\SIYDIK TAHLILI - 260504003518 Xolmurodov Abbos 1988.docx
+   Papka: G:\Қилинган анализлар\04.05.2026
+   Fayl nomi: SIYDIK TAHLILI - 260504003518 Xolmurodov Abbos 1988.docx
+✅ OK: Word blank saqlandi: G:\Қилинган анализлар\04.05.2026\SIYDIK TAHLILI - 260504003518 Xolmurodov Abbos 1988.docx
+   Fayl mavjudmi: True
+   Fayl o'lchami: 227070 bayt
+
+✅ OK: Blanka saqlandi:
+G:\Қилинган анализлар\04.05.2026\SIYDIK TAHLILI - 260504003518 Xolmurodov Abbos 1988.docx
+
+💾 Bazaga saqlayapman...
+💾 Natijalarni bazaga saqlayapman...
+   Bemor ID: 3621
+   Order ID: 3518
+❌ Bazaga saqlashda xatolik: 1054 (42S22): Unknown column 'test_turi' in 'where clause'
+✅ Bazaga saqlandi
+
+============================================================
+OK: Tahlil yakunlandi. Keyingi tahlil uchun barcode skanerlang...
+============================================================
+
+============================================================
+📡 Yangi tahlilni yuborish uchun URIT'da RS232 tugmasini bosing...
+📷 Yoki avval barcode skanerlang (kod_yollanma yoki natija_kodi)
+============================================================
+
+======= #4-TAHLIL RAW BLOK =======
+  
+ID:260504003520
+NO.000018 2000-01-01
+            02:21:52
+
+ LEU -       0 CELL/uL
+ KET -        0 mmol/L
+ NIT -   
+ URO            Normal
+ BIL -        0 umol/L
+ GLU -        0 mmol/L
+ PRO -           0 g/L
+ SG         1.015     
+ pH         5.0       
+ BLD -       0 CELL/uL
+ Vc  -        0 mmol/L
+ MA          <=10 mg/L
+ Ca         2.5 mmol/L
+ CR         4.4 mmol/L
+ ACR       <3.4mg/mmol
+ 
+
+
+
+
+
+=======================================
+📝 RAW saqlandi: G:\DASTUR\URIT 50\Urit\RAW_LOGS\202605\urit_raw_20260504_103005.txt
+🆔 URIT-50 dan ID (sample_id) topildi: 260504003520
+📅 URIT-50 dan DATE topildi: 2000-01-01
+🕐 URIT-50 dan TIME topildi: 02:21:52
+
+--- PARSE QILINGAN NATIJA ---
+{'NO': '000018', 'ID': '260504003520', 'DATE': '2000-01-01', 'TIME': '02:21:52', 'LEU': '0 CELL/µL', 'KET': '0 mmol/L', 'NIT': '-', 'URO': 'Normal', 'BIL': '0 umol/L', 'GLU': '0 mmol/L', 'PRO': '0 g/L', 'SG': '1.015', 'pH': '5.0', 'BLD': '0 CELL/µL', 'Vc': '0 mmol/L', 'MA': '<=10 mg/L', 'Ca': '2.5 mmol/L', 'CR': '4.4 mmol/L', 'ACR': '<3.4mg/mmol', 'ABNORMAL': []}
+🆔 URIT-50 dan kelgan sample_id: 260504003520
+
+🔍 Bemor qidiryapman - Barcode: '260504003520'
+✅ Database ulanishi yaratildi (Connection Pooling)
+🔍 Barcode qidiryapman: '260504003520'
+✅ Bemor topildi: Fozilova Sohiba
+   ID: 3623
+   Sample ID: 260504003520
+   Kod yo'llanma: 
+   Natija kodi: 
+   ✅ Tug'ilgan sana topildi: '1986-01-01'
+
+✅ Bemor ma'lumotlari topildi:
+   F.I.SH: 'Fozilova Sohiba' (fish bo'sh bo'lsa, kod_yollanma ishlatildi)
+   Yosh: 40
+   Tug'ilgan sana: '1986-01-01'
+   ID: 3623
+   Kod yo'llanma: 
+   Natija kodi: 
+   Sample ID: 260504003520
+
+📋 Poloskа turi: 11-parametrli
+   → 11-parametrli: MA, Ca, CR, ACR blankada ko'rinmaydi
+
+============================================================
+Blanka yaratishni boshlayapman...
+============================================================
+
+--- create_doc_from_data chaqirildi ---
+✅ ID topilmasa ham blanka HAR DOIM yaratiladi
+   patient_data: {'id': 3623, 'sample_id': '260504003520', 'kod_yollanma': '', 'fish': 'Fozilova Sohiba', 'yosh': 40, 'jins': 'Ayol', 'tugilgan_sana': datetime.date(1986, 1, 1), 'telefon': '331768600', 'shifokor': '1', 'natija_kodi': ''}
+   fish: 'Fozilova Sohiba', yosh: '40', tugilgan_sana: '1986-01-01'
+TEMPLATE_PATH: G:\DASTUR\URIT 50\blank.docx
+Shablon fayl mavjudmi: True
+Shablonni ochayapman: G:\DASTUR\URIT 50\blank.docx
+OK: Shablon ochildi
+
+🔢 Nomeratsiya (ID raqam) aniqlash:
+   patient_data: True
+   Sample ID topildi: 260504003520
+✅ Yakuniy nomeratsiya: '520'
+
+🕐 Test vaqti (kompyuterdan, har safar yangi): 04.05.2026 10:30
+   ⚠️ URIT-50 dan kelgan vaqt e'tiborsiz qoldirildi (analizator vaqti xato bo'lishi mumkin)
+   ✅ № o'rniga to'liq ID raqami ko'rsatiladi: '3623'
+
+📝 Placeholderlarni almashtiryapman:
+   {SAMPLE}: '000018'
+   {DATE_TIME}: '04.05.2026 10:30'
+   {FISH}: 'Fozilova Sohiba'
+   {YOSH}: '40'
+   {NOMERATSIYA}: '520'
+   Bemor ID (№ o'rniga): '3623'
+   ✅ {FISH} almashtirildi: 'Fozilova Sohiba'
+   ✅ {ID} almashtirildi: '3623' (to'liq ID)
+   ✅ № almashtirildi: '3623' (to'liq ID raqami)
+✅ Placeholderlar almashtirildi
+   Tug'ilgan yil: '1986' (sana: '1986-01-01')
+   📋 Sarlavha qatori topildi va saqlandi: '№  520Siydikning umumiy taxlili №  520Siydikning umumiy taxlili №  520Siydikning umumiy taxlili №  520Siydikning umumiy taxlili №  520Siydikning umumiy taxlili №  520Siydikning umumiy taxlili №  520Siydikning umumiy taxlili №  520Siydikning umumiy taxlili №  520Siydikning umumiy taxlili'
+   📋 Sarlavha qatori topildi va saqlandi: 'FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI'
+   📋 Sarlavha qatori topildi va saqlandi: 'Ko‘rsatkich Kod Kod Natija Natija Natija Norma Norma O‘lchov birligi'
+   📋 Sarlavha qatori topildi va saqlandi: 'Urobilinogen  URO URO    (3.2-16)  normal (3.2-16)  normal Mkmol/l'
+   📋 Sarlavha qatori topildi va saqlandi: 'SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI'
+
+============================================================
+MIKROSKOPIYA qismini to'ldirish...
+============================================================
+LEU (biokimyo): 0 CELL/µL
+BLD (biokimyo): 0 CELL/µL
+
+Mikroskopiya natijalari:
+  WBC: 4-5 (QORA)
+  RBC-D: 1-2 (QORA)
+  RBC-U: 0-1 (QORA)
+  SEC: 2-3 (QORA)
+  TEC: - (QORA)
+  RTEC: - (QORA)
+✅ Mikroskopiya qismi topildi
+  ✅ WBC: 4-5 yozildi
+  ✅ RBC-D: 1-2 yozildi
+  ✅ RBC-U: 0-1 yozildi
+============================================================
+✅ Mikroskopiya to'ldirildi!
+============================================================
+
+🔬 Mikroskopiya qismini to'ldiryapman...
+   LEU: '0 CELL/µL' -> format: '0', value: 0
+   📋 Mikroskopiya jadvali topildi, WBC qatorini qidiryapman...
+   ✅ WBC qatori topildi (mikroskopiya): Ko'rsatkich='Leykotsitlar', Kod='WBC'
+   ✅ WBC qatori topildi, 9 ta katak
+      Katak 0: 'Leykotsitlar'
+      Katak 1: 'WBC'
+      Katak 2: '4-5'
+      Katak 3: '4-5'
+      Katak 4: '4-5'
+      Katak 0 tekshirilmoqda: 'Leykotsitlar'
+      Katak 1 tekshirilmoqda: 'WBC'
+      ✅ WBC kod topildi: ustun 1 ('WBC')
+      ✅ Natija ustuni topildi: ustun 2 (koddan keyingi)
+   ✅ WBC (Leykotsitlar) natija yozildi: '4-5' -> '4-5' (qora, ustun 2)
+   BLD: '0 CELL/µL' -> mikroskopiya qiymatlari hisoblandi
+   📋 Mikroskopiya jadvali topildi, RBC kodlarini qidiryapman...
+   ✅ RBC-D kodi topildi: Kod ustuni='RBC-D'
+   ✅ RBC-D (o'zgargan) natija yozildi: '1-2' -> '1-2' (qora, 2-ustun)
+   ✅ RBC-U kodi topildi: Kod ustuni='RBC-U'
+   ✅ RBC-U (o'zgarmagan) natija yozildi: '0-1' -> '0-1' (qora, 2-ustun)
+✅ Eritrositlar qismi to'ldirildi!
+✅ Mikroskopiya qismi to'ldirildi
+
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+
+Saqlash papkasi: G:\Қилинган анализлар\04.05.2026
+OK: Papka yaratildi yoki mavjud: G:\Қилинган анализлар\04.05.2026
+
+Blanka faylni saqlayapman: G:\Қилинган анализлар\04.05.2026\SIYDIK TAHLILI - 260504003520 Fozilova Sohiba 1986.docx
+   Papka: G:\Қилинган анализлар\04.05.2026
+   Fayl nomi: SIYDIK TAHLILI - 260504003520 Fozilova Sohiba 1986.docx
+✅ OK: Word blank saqlandi: G:\Қилинган анализлар\04.05.2026\SIYDIK TAHLILI - 260504003520 Fozilova Sohiba 1986.docx
+   Fayl mavjudmi: True
+   Fayl o'lchami: 226997 bayt
+
+✅ OK: Blanka saqlandi:
+G:\Қилинган анализлар\04.05.2026\SIYDIK TAHLILI - 260504003520 Fozilova Sohiba 1986.docx
+
+💾 Bazaga saqlayapman...
+💾 Natijalarni bazaga saqlayapman...
+   Bemor ID: 3623
+   Order ID: 3520
+❌ Bazaga saqlashda xatolik: 1054 (42S22): Unknown column 'test_turi' in 'where clause'
+✅ Bazaga saqlandi
+
+============================================================
+OK: Tahlil yakunlandi. Keyingi tahlil uchun barcode skanerlang...
+============================================================
+
+============================================================
+📡 Yangi tahlilni yuborish uchun URIT'da RS232 tugmasini bosing...
+📷 Yoki avval barcode skanerlang (kod_yollanma yoki natija_kodi)
+============================================================
+
+======= #5-TAHLIL RAW BLOK =======
+  
+ID:260504003513
+NO.000019 2000-01-01
+            02:23:07
+
+ LEU -       0 CELL/uL
+ KET -        0 mmol/L
+ NIT -   
+ URO            Normal
+ BIL -        0 umol/L
+ GLU -        0 mmol/L
+ PRO -           0 g/L
+ SG         1.020     
+ pH         6.5       
+ BLD -       0 CELL/uL
+ Vc  -        0 mmol/L
+ MA          <=10 mg/L
+ Ca         2.5 mmol/L
+ CR         8.8 mmol/L
+ ACR       <3.4mg/mmol
+ 
+
+
+
+
+
+=======================================
+📝 RAW saqlandi: G:\DASTUR\URIT 50\Urit\RAW_LOGS\202605\urit_raw_20260504_103121.txt
+🆔 URIT-50 dan ID (sample_id) topildi: 260504003513
+📅 URIT-50 dan DATE topildi: 2000-01-01
+🕐 URIT-50 dan TIME topildi: 02:23:07
+
+--- PARSE QILINGAN NATIJA ---
+{'NO': '000019', 'ID': '260504003513', 'DATE': '2000-01-01', 'TIME': '02:23:07', 'LEU': '0 CELL/µL', 'KET': '0 mmol/L', 'NIT': '-', 'URO': 'Normal', 'BIL': '0 umol/L', 'GLU': '0 mmol/L', 'PRO': '0 g/L', 'SG': '1.020', 'pH': '6.5', 'BLD': '0 CELL/µL', 'Vc': '0 mmol/L', 'MA': '<=10 mg/L', 'Ca': '2.5 mmol/L', 'CR': '8.8 mmol/L', 'ACR': '<3.4mg/mmol', 'ABNORMAL': []}
+🆔 URIT-50 dan kelgan sample_id: 260504003513
+
+🔍 Bemor qidiryapman - Barcode: '260504003513'
+✅ Database ulanishi yaratildi (Connection Pooling)
+🔍 Barcode qidiryapman: '260504003513'
+✅ Bemor topildi: To'llayev Bekmurod
+   ID: 3616
+   Sample ID: 260504003513
+   Kod yo'llanma: 
+   Natija kodi: 
+   ✅ Tug'ilgan sana topildi: '1959-01-01'
+
+✅ Bemor ma'lumotlari topildi:
+   F.I.SH: 'To'llayev Bekmurod' (fish bo'sh bo'lsa, kod_yollanma ishlatildi)
+   Yosh: 67
+   Tug'ilgan sana: '1959-01-01'
+   ID: 3616
+   Kod yo'llanma: 
+   Natija kodi: 
+   Sample ID: 260504003513
+
+📋 Poloskа turi: 11-parametrli
+   → 11-parametrli: MA, Ca, CR, ACR blankada ko'rinmaydi
+
+============================================================
+Blanka yaratishni boshlayapman...
+============================================================
+
+--- create_doc_from_data chaqirildi ---
+✅ ID topilmasa ham blanka HAR DOIM yaratiladi
+   patient_data: {'id': 3616, 'sample_id': '260504003513', 'kod_yollanma': '', 'fish': "To'llayev Bekmurod", 'yosh': 67, 'jins': 'Erkak', 'tugilgan_sana': datetime.date(1959, 1, 1), 'telefon': '943385747', 'shifokor': '1', 'natija_kodi': ''}
+   fish: 'To'llayev Bekmurod', yosh: '67', tugilgan_sana: '1959-01-01'
+TEMPLATE_PATH: G:\DASTUR\URIT 50\blank.docx
+Shablon fayl mavjudmi: True
+Shablonni ochayapman: G:\DASTUR\URIT 50\blank.docx
+OK: Shablon ochildi
+
+🔢 Nomeratsiya (ID raqam) aniqlash:
+   patient_data: True
+   Sample ID topildi: 260504003513
+✅ Yakuniy nomeratsiya: '513'
+
+🕐 Test vaqti (kompyuterdan, har safar yangi): 04.05.2026 10:31
+   ⚠️ URIT-50 dan kelgan vaqt e'tiborsiz qoldirildi (analizator vaqti xato bo'lishi mumkin)
+   ✅ № o'rniga to'liq ID raqami ko'rsatiladi: '3616'
+
+📝 Placeholderlarni almashtiryapman:
+   {SAMPLE}: '000019'
+   {DATE_TIME}: '04.05.2026 10:31'
+   {FISH}: 'To'llayev Bekmurod'
+   {YOSH}: '67'
+   {NOMERATSIYA}: '513'
+   Bemor ID (№ o'rniga): '3616'
+   ✅ {FISH} almashtirildi: 'To'llayev Bekmurod'
+   ✅ {ID} almashtirildi: '3616' (to'liq ID)
+   ✅ № almashtirildi: '3616' (to'liq ID raqami)
+✅ Placeholderlar almashtirildi
+   Tug'ilgan yil: '1959' (sana: '1959-01-01')
+   📋 Sarlavha qatori topildi va saqlandi: '№  513Siydikning umumiy taxlili №  513Siydikning umumiy taxlili №  513Siydikning umumiy taxlili №  513Siydikning umumiy taxlili №  513Siydikning umumiy taxlili №  513Siydikning umumiy taxlili №  513Siydikning umumiy taxlili №  513Siydikning umumiy taxlili №  513Siydikning umumiy taxlili'
+   📋 Sarlavha qatori topildi va saqlandi: 'FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI'
+   📋 Sarlavha qatori topildi va saqlandi: 'Ko‘rsatkich Kod Kod Natija Natija Natija Norma Norma O‘lchov birligi'
+   📋 Sarlavha qatori topildi va saqlandi: 'Urobilinogen  URO URO    (3.2-16)  normal (3.2-16)  normal Mkmol/l'
+   📋 Sarlavha qatori topildi va saqlandi: 'SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI'
+
+============================================================
+MIKROSKOPIYA qismini to'ldirish...
+============================================================
+LEU (biokimyo): 0 CELL/µL
+BLD (biokimyo): 0 CELL/µL
+
+Mikroskopiya natijalari:
+  WBC: 4-5 (QORA)
+  RBC-D: 1-2 (QORA)
+  RBC-U: 0-1 (QORA)
+  SEC: 2-3 (QORA)
+  TEC: - (QORA)
+  RTEC: - (QORA)
+✅ Mikroskopiya qismi topildi
+  ✅ WBC: 4-5 yozildi
+  ✅ RBC-D: 1-2 yozildi
+  ✅ RBC-U: 0-1 yozildi
+============================================================
+✅ Mikroskopiya to'ldirildi!
+============================================================
+
+🔬 Mikroskopiya qismini to'ldiryapman...
+   LEU: '0 CELL/µL' -> format: '0', value: 0
+   📋 Mikroskopiya jadvali topildi, WBC qatorini qidiryapman...
+   ✅ WBC qatori topildi (mikroskopiya): Ko'rsatkich='Leykotsitlar', Kod='WBC'
+   ✅ WBC qatori topildi, 9 ta katak
+      Katak 0: 'Leykotsitlar'
+      Katak 1: 'WBC'
+      Katak 2: '4-5'
+      Katak 3: '4-5'
+      Katak 4: '4-5'
+      Katak 0 tekshirilmoqda: 'Leykotsitlar'
+      Katak 1 tekshirilmoqda: 'WBC'
+      ✅ WBC kod topildi: ustun 1 ('WBC')
+      ✅ Natija ustuni topildi: ustun 2 (koddan keyingi)
+   ✅ WBC (Leykotsitlar) natija yozildi: '4-5' -> '4-5' (qora, ustun 2)
+   BLD: '0 CELL/µL' -> mikroskopiya qiymatlari hisoblandi
+   📋 Mikroskopiya jadvali topildi, RBC kodlarini qidiryapman...
+   ✅ RBC-D kodi topildi: Kod ustuni='RBC-D'
+   ✅ RBC-D (o'zgargan) natija yozildi: '1-2' -> '1-2' (qora, 2-ustun)
+   ✅ RBC-U kodi topildi: Kod ustuni='RBC-U'
+   ✅ RBC-U (o'zgarmagan) natija yozildi: '0-1' -> '0-1' (qora, 2-ustun)
+✅ Eritrositlar qismi to'ldirildi!
+✅ Mikroskopiya qismi to'ldirildi
+
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+
+Saqlash papkasi: G:\Қилинган анализлар\04.05.2026
+OK: Papka yaratildi yoki mavjud: G:\Қилинган анализлар\04.05.2026
+
+Blanka faylni saqlayapman: G:\Қилинган анализлар\04.05.2026\SIYDIK TAHLILI - 260504003513 To'llayev Bekmurod 1959.docx
+   Papka: G:\Қилинган анализлар\04.05.2026
+   Fayl nomi: SIYDIK TAHLILI - 260504003513 To'llayev Bekmurod 1959.docx
+✅ OK: Word blank saqlandi: G:\Қилинган анализлар\04.05.2026\SIYDIK TAHLILI - 260504003513 To'llayev Bekmurod 1959.docx
+   Fayl mavjudmi: True
+   Fayl o'lchami: 227001 bayt
+
+✅ OK: Blanka saqlandi:
+G:\Қилинган анализлар\04.05.2026\SIYDIK TAHLILI - 260504003513 To'llayev Bekmurod 1959.docx
+
+💾 Bazaga saqlayapman...
+💾 Natijalarni bazaga saqlayapman...
+   Bemor ID: 3616
+   Order ID: 3513
+❌ Bazaga saqlashda xatolik: 1054 (42S22): Unknown column 'test_turi' in 'where clause'
+✅ Bazaga saqlandi
+
+============================================================
+OK: Tahlil yakunlandi. Keyingi tahlil uchun barcode skanerlang...
+============================================================
+
+============================================================
+📡 Yangi tahlilni yuborish uchun URIT'da RS232 tugmasini bosing...
+📷 Yoki avval barcode skanerlang (kod_yollanma yoki natija_kodi)
+============================================================
+
+======= #6-TAHLIL RAW BLOK =======
+  
+ID:260504003526
+NO.000020 2000-01-01
+            02:44:28
+
+*LEU +-     15 CELL/uL
+*KET +-     0.5 mmol/L
+ NIT -   
+ URO            Normal
+ BIL -        0 umol/L
+ GLU -        0 mmol/L
+ PRO -           0 g/L
+ SG         1.020     
+ pH         6.0       
+ BLD -       0 CELL/uL
+ Vc  -        0 mmol/L
+ MA          <=10 mg/L
+*Ca       <=1.0 mmol/L
+ CR         8.8 mmol/L
+ ACR       <3.4mg/mmol
+ 
+
+
+
+
+
+=======================================
+📝 RAW saqlandi: G:\DASTUR\URIT 50\Urit\RAW_LOGS\202605\urit_raw_20260504_105242.txt
+🆔 URIT-50 dan ID (sample_id) topildi: 260504003526
+📅 URIT-50 dan DATE topildi: 2000-01-01
+🕐 URIT-50 dan TIME topildi: 02:44:28
+
+--- PARSE QILINGAN NATIJA ---
+{'NO': '000020', 'ID': '260504003526', 'DATE': '2000-01-01', 'TIME': '02:44:28', 'LEU': '+-     15 CELL/µL', 'KET': '+-     0.5 mmol/L', 'NIT': '-', 'URO': 'Normal', 'BIL': '0 umol/L', 'GLU': '0 mmol/L', 'PRO': '0 g/L', 'SG': '1.020', 'pH': '6.0', 'BLD': '0 CELL/µL', 'Vc': '0 mmol/L', 'MA': '<=10 mg/L', 'Ca': '<=1.0 mmol/L', 'CR': '8.8 mmol/L', 'ACR': '<3.4mg/mmol', 'ABNORMAL': ['KET', 'Ca', 'LEU']}
+🆔 URIT-50 dan kelgan sample_id: 260504003526
+
+🔍 Bemor qidiryapman - Barcode: '260504003526'
+✅ Database ulanishi yaratildi (Connection Pooling)
+🔍 Barcode qidiryapman: '260504003526'
+✅ Bemor topildi: Maxmudova Sojida
+   ID: 3629
+   Sample ID: 260504003526
+   Kod yo'llanma: 
+   Natija kodi: 
+   ✅ Tug'ilgan sana topildi: '1987-01-01'
+
+✅ Bemor ma'lumotlari topildi:
+   F.I.SH: 'Maxmudova Sojida' (fish bo'sh bo'lsa, kod_yollanma ishlatildi)
+   Yosh: 39
+   Tug'ilgan sana: '1987-01-01'
+   ID: 3629
+   Kod yo'llanma: 
+   Natija kodi: 
+   Sample ID: 260504003526
+
+📋 Poloskа turi: 14-parametrli
+
+============================================================
+Blanka yaratishni boshlayapman...
+============================================================
+
+--- create_doc_from_data chaqirildi ---
+✅ ID topilmasa ham blanka HAR DOIM yaratiladi
+   patient_data: {'id': 3629, 'sample_id': '260504003526', 'kod_yollanma': '', 'fish': 'Maxmudova Sojida', 'yosh': 39, 'jins': 'Ayol', 'tugilgan_sana': datetime.date(1987, 1, 1), 'telefon': '952535848', 'shifokor': 'Suvonova Zarxol', 'natija_kodi': ''}
+   fish: 'Maxmudova Sojida', yosh: '39', tugilgan_sana: '1987-01-01'
+TEMPLATE_PATH: G:\DASTUR\URIT 50\blank.docx
+Shablon fayl mavjudmi: True
+Shablonni ochayapman: G:\DASTUR\URIT 50\blank.docx
+OK: Shablon ochildi
+
+🔢 Nomeratsiya (ID raqam) aniqlash:
+   patient_data: True
+   Sample ID topildi: 260504003526
+✅ Yakuniy nomeratsiya: '526'
+
+🕐 Test vaqti (kompyuterdan, har safar yangi): 04.05.2026 10:52
+   ⚠️ URIT-50 dan kelgan vaqt e'tiborsiz qoldirildi (analizator vaqti xato bo'lishi mumkin)
+   ✅ № o'rniga to'liq ID raqami ko'rsatiladi: '3629'
+
+📝 Placeholderlarni almashtiryapman:
+   {SAMPLE}: '000020'
+   {DATE_TIME}: '04.05.2026 10:52'
+   {FISH}: 'Maxmudova Sojida'
+   {YOSH}: '39'
+   {NOMERATSIYA}: '526'
+   Bemor ID (№ o'rniga): '3629'
+   ✅ {FISH} almashtirildi: 'Maxmudova Sojida'
+   ✅ {ID} almashtirildi: '3629' (to'liq ID)
+   ✅ № almashtirildi: '3629' (to'liq ID raqami)
+✅ Placeholderlar almashtirildi
+   Tug'ilgan yil: '1987' (sana: '1987-01-01')
+   📋 Sarlavha qatori topildi va saqlandi: '№  526Siydikning umumiy taxlili №  526Siydikning umumiy taxlili №  526Siydikning umumiy taxlili №  526Siydikning umumiy taxlili №  526Siydikning umumiy taxlili №  526Siydikning umumiy taxlili №  526Siydikning umumiy taxlili №  526Siydikning umumiy taxlili №  526Siydikning umumiy taxlili'
+   📋 Sarlavha qatori topildi va saqlandi: 'FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI'
+   📋 Sarlavha qatori topildi va saqlandi: 'Ko‘rsatkich Kod Kod Natija Natija Natija Norma Norma O‘lchov birligi'
+   📋 Sarlavha qatori topildi va saqlandi: 'Urobilinogen  URO URO    (3.2-16)  normal (3.2-16)  normal Mkmol/l'
+   📋 Sarlavha qatori topildi va saqlandi: 'SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI'
+
+============================================================
+MIKROSKOPIYA qismini to'ldirish...
+============================================================
+LEU (biokimyo): +-     15 CELL/µL
+BLD (biokimyo): 0 CELL/µL
+
+Mikroskopiya natijalari:
+  WBC: 10-15 (QORA)
+  RBC-D: 1-2 (QORA)
+  RBC-U: 0-1 (QORA)
+  SEC: 2-3 (QORA)
+  TEC: - (QORA)
+  RTEC: - (QORA)
+✅ Mikroskopiya qismi topildi
+  ✅ WBC: 10-15 yozildi
+  ✅ RBC-D: 1-2 yozildi
+  ✅ RBC-U: 0-1 yozildi
+============================================================
+✅ Mikroskopiya to'ldirildi!
+============================================================
+
+🔬 Mikroskopiya qismini to'ldiryapman...
+   LEU: '+-     15 CELL/µL' -> format: ' +/-', value: 15
+   📋 Mikroskopiya jadvali topildi, WBC qatorini qidiryapman...
+   ✅ WBC qatori topildi (mikroskopiya): Ko'rsatkich='Leykotsitlar', Kod='WBC'
+   ✅ WBC qatori topildi, 9 ta katak
+      Katak 0: 'Leykotsitlar'
+      Katak 1: 'WBC'
+      Katak 2: '10-15'
+      Katak 3: '10-15'
+      Katak 4: '10-15'
+      Katak 0 tekshirilmoqda: 'Leykotsitlar'
+      Katak 1 tekshirilmoqda: 'WBC'
+      ✅ WBC kod topildi: ustun 1 ('WBC')
+      ✅ Natija ustuni topildi: ustun 2 (koddan keyingi)
+   ✅ WBC (Leykotsitlar) natija yozildi: '10-15' -> '10-15' (qizil, ustun 2)
+   BLD: '0 CELL/µL' -> mikroskopiya qiymatlari hisoblandi
+   📋 Mikroskopiya jadvali topildi, RBC kodlarini qidiryapman...
+   ✅ RBC-D kodi topildi: Kod ustuni='RBC-D'
+   ✅ RBC-D (o'zgargan) natija yozildi: '1-2' -> '1-2' (qora, 2-ustun)
+   ✅ RBC-U kodi topildi: Kod ustuni='RBC-U'
+   ✅ RBC-U (o'zgarmagan) natija yozildi: '0-1' -> '0-1' (qora, 2-ustun)
+✅ Eritrositlar qismi to'ldirildi!
+✅ Mikroskopiya qismi to'ldirildi
+
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+
+Saqlash papkasi: G:\Қилинган анализлар\04.05.2026
+OK: Papka yaratildi yoki mavjud: G:\Қилинган анализлар\04.05.2026
+
+Blanka faylni saqlayapman: G:\Қилинган анализлар\04.05.2026\SIYDIK TAHLILI - 260504003526 Maxmudova Sojida 1987.docx
+   Papka: G:\Қилинган анализлар\04.05.2026
+   Fayl nomi: SIYDIK TAHLILI - 260504003526 Maxmudova Sojida 1987.docx
+✅ OK: Word blank saqlandi: G:\Қилинган анализлар\04.05.2026\SIYDIK TAHLILI - 260504003526 Maxmudova Sojida 1987.docx
+   Fayl mavjudmi: True
+   Fayl o'lchami: 227070 bayt
+
+✅ OK: Blanka saqlandi:
+G:\Қилинган анализлар\04.05.2026\SIYDIK TAHLILI - 260504003526 Maxmudova Sojida 1987.docx
+
+💾 Bazaga saqlayapman...
+💾 Natijalarni bazaga saqlayapman...
+   Bemor ID: 3629
+   Order ID: 3526
+❌ Bazaga saqlashda xatolik: 1054 (42S22): Unknown column 'test_turi' in 'where clause'
+✅ Bazaga saqlandi
+
+============================================================
+OK: Tahlil yakunlandi. Keyingi tahlil uchun barcode skanerlang...
+============================================================
+
+============================================================
+📡 Yangi tahlilni yuborish uchun URIT'da RS232 tugmasini bosing...
+📷 Yoki avval barcode skanerlang (kod_yollanma yoki natija_kodi)
+============================================================
+
+======= #7-TAHLIL RAW BLOK =======
+  
+ID:260504003532
+NO.000021 2000-01-01
+            02:48:48
+
+*LEU +-     15 CELL/uL
+ KET -        0 mmol/L
+ NIT -   
+ URO            Normal
+ BIL -        0 umol/L
+ GLU -        0 mmol/L
+ PRO -           0 g/L
+ SG         1.030     
+ pH         5.0       
+ BLD -       0 CELL/uL
+ Vc  -        0 mmol/L
+ MA          <=10 mg/L
+*Ca       <=1.0 mmol/L
+*CR       >=26.4mmol/L
+ ACR       <3.4mg/mmol
+ 
+
+
+
+
+
+=======================================
+📝 RAW saqlandi: G:\DASTUR\URIT 50\Urit\RAW_LOGS\202605\urit_raw_20260504_105702.txt
+🆔 URIT-50 dan ID (sample_id) topildi: 260504003532
+📅 URIT-50 dan DATE topildi: 2000-01-01
+🕐 URIT-50 dan TIME topildi: 02:48:48
+
+--- PARSE QILINGAN NATIJA ---
+{'NO': '000021', 'ID': '260504003532', 'DATE': '2000-01-01', 'TIME': '02:48:48', 'LEU': '+-     15 CELL/µL', 'KET': '0 mmol/L', 'NIT': '-', 'URO': 'Normal', 'BIL': '0 umol/L', 'GLU': '0 mmol/L', 'PRO': '0 g/L', 'SG': '1.030', 'pH': '5.0', 'BLD': '0 CELL/µL', 'Vc': '0 mmol/L', 'MA': '<=10 mg/L', 'Ca': '<=1.0 mmol/L', 'CR': '>=26.4mmol/L', 'ACR': '<3.4mg/mmol', 'ABNORMAL': ['Ca', 'LEU', 'CR']}
+🆔 URIT-50 dan kelgan sample_id: 260504003532
+
+🔍 Bemor qidiryapman - Barcode: '260504003532'
+✅ Database ulanishi yaratildi (Connection Pooling)
+🔍 Barcode qidiryapman: '260504003532'
+✅ Bemor topildi: Jabborov Tursinpo'lat
+   ID: 3635
+   Sample ID: 260504003532
+   Kod yo'llanma: 
+   Natija kodi: 
+   ✅ Tug'ilgan sana topildi: '0191-01-01'
+
+✅ Bemor ma'lumotlari topildi:
+   F.I.SH: 'Jabborov Tursinpo'lat' (fish bo'sh bo'lsa, kod_yollanma ishlatildi)
+   Yosh: 1835
+   Tug'ilgan sana: '0191-01-01'
+   ID: 3635
+   Kod yo'llanma: 
+   Natija kodi: 
+   Sample ID: 260504003532
+
+📋 Poloskа turi: 14-parametrli
+
+============================================================
+Blanka yaratishni boshlayapman...
+============================================================
+
+--- create_doc_from_data chaqirildi ---
+✅ ID topilmasa ham blanka HAR DOIM yaratiladi
+   patient_data: {'id': 3635, 'sample_id': '260504003532', 'kod_yollanma': '', 'fish': "Jabborov Tursinpo'lat", 'yosh': 1835, 'jins': 'Erkak', 'tugilgan_sana': datetime.date(191, 1, 1), 'telefon': '930024348', 'shifokor': 'Aliyarov Odil', 'natija_kodi': ''}
+   fish: 'Jabborov Tursinpo'lat', yosh: '1835', tugilgan_sana: '0191-01-01'
+TEMPLATE_PATH: G:\DASTUR\URIT 50\blank.docx
+Shablon fayl mavjudmi: True
+Shablonni ochayapman: G:\DASTUR\URIT 50\blank.docx
+OK: Shablon ochildi
+
+🔢 Nomeratsiya (ID raqam) aniqlash:
+   patient_data: True
+   Sample ID topildi: 260504003532
+✅ Yakuniy nomeratsiya: '532'
+
+🕐 Test vaqti (kompyuterdan, har safar yangi): 04.05.2026 10:57
+   ⚠️ URIT-50 dan kelgan vaqt e'tiborsiz qoldirildi (analizator vaqti xato bo'lishi mumkin)
+   ✅ № o'rniga to'liq ID raqami ko'rsatiladi: '3635'
+
+📝 Placeholderlarni almashtiryapman:
+   {SAMPLE}: '000021'
+   {DATE_TIME}: '04.05.2026 10:57'
+   {FISH}: 'Jabborov Tursinpo'lat'
+   {YOSH}: '1835'
+   {NOMERATSIYA}: '532'
+   Bemor ID (№ o'rniga): '3635'
+   ✅ {FISH} almashtirildi: 'Jabborov Tursinpo'lat'
+   ✅ {ID} almashtirildi: '3635' (to'liq ID)
+   ✅ № almashtirildi: '3635' (to'liq ID raqami)
+✅ Placeholderlar almashtirildi
+   Tug'ilgan yil: '0191' (sana: '0191-01-01')
+   📋 Sarlavha qatori topildi va saqlandi: '№  532Siydikning umumiy taxlili №  532Siydikning umumiy taxlili №  532Siydikning umumiy taxlili №  532Siydikning umumiy taxlili №  532Siydikning umumiy taxlili №  532Siydikning umumiy taxlili №  532Siydikning umumiy taxlili №  532Siydikning umumiy taxlili №  532Siydikning umumiy taxlili'
+   📋 Sarlavha qatori topildi va saqlandi: 'FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI'
+   📋 Sarlavha qatori topildi va saqlandi: 'Ko‘rsatkich Kod Kod Natija Natija Natija Norma Norma O‘lchov birligi'
+   📋 Sarlavha qatori topildi va saqlandi: 'Urobilinogen  URO URO    (3.2-16)  normal (3.2-16)  normal Mkmol/l'
+   📋 Sarlavha qatori topildi va saqlandi: 'SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI'
+
+============================================================
+MIKROSKOPIYA qismini to'ldirish...
+============================================================
+LEU (biokimyo): +-     15 CELL/µL
+BLD (biokimyo): 0 CELL/µL
+
+Mikroskopiya natijalari:
+  WBC: 10-15 (QORA)
+  RBC-D: 1-2 (QORA)
+  RBC-U: 0-1 (QORA)
+  SEC: 2-3 (QORA)
+  TEC: - (QORA)
+  RTEC: - (QORA)
+✅ Mikroskopiya qismi topildi
+  ✅ WBC: 10-15 yozildi
+  ✅ RBC-D: 1-2 yozildi
+  ✅ RBC-U: 0-1 yozildi
+============================================================
+✅ Mikroskopiya to'ldirildi!
+============================================================
+
+🔬 Mikroskopiya qismini to'ldiryapman...
+   LEU: '+-     15 CELL/µL' -> format: ' +/-', value: 15
+   📋 Mikroskopiya jadvali topildi, WBC qatorini qidiryapman...
+   ✅ WBC qatori topildi (mikroskopiya): Ko'rsatkich='Leykotsitlar', Kod='WBC'
+   ✅ WBC qatori topildi, 9 ta katak
+      Katak 0: 'Leykotsitlar'
+      Katak 1: 'WBC'
+      Katak 2: '10-15'
+      Katak 3: '10-15'
+      Katak 4: '10-15'
+      Katak 0 tekshirilmoqda: 'Leykotsitlar'
+      Katak 1 tekshirilmoqda: 'WBC'
+      ✅ WBC kod topildi: ustun 1 ('WBC')
+      ✅ Natija ustuni topildi: ustun 2 (koddan keyingi)
+   ✅ WBC (Leykotsitlar) natija yozildi: '10-15' -> '10-15' (qizil, ustun 2)
+   BLD: '0 CELL/µL' -> mikroskopiya qiymatlari hisoblandi
+   📋 Mikroskopiya jadvali topildi, RBC kodlarini qidiryapman...
+   ✅ RBC-D kodi topildi: Kod ustuni='RBC-D'
+   ✅ RBC-D (o'zgargan) natija yozildi: '1-2' -> '1-2' (qora, 2-ustun)
+   ✅ RBC-U kodi topildi: Kod ustuni='RBC-U'
+   ✅ RBC-U (o'zgarmagan) natija yozildi: '0-1' -> '0-1' (qora, 2-ustun)
+✅ Eritrositlar qismi to'ldirildi!
+✅ Mikroskopiya qismi to'ldirildi
+
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+
+Saqlash papkasi: G:\Қилинган анализлар\04.05.2026
+OK: Papka yaratildi yoki mavjud: G:\Қилинган анализлар\04.05.2026
+
+Blanka faylni saqlayapman: G:\Қилинган анализлар\04.05.2026\SIYDIK TAHLILI - 260504003532 Jabborov Tursinpo'lat 0191.docx
+   Papka: G:\Қилинган анализлар\04.05.2026
+   Fayl nomi: SIYDIK TAHLILI - 260504003532 Jabborov Tursinpo'lat 0191.docx
+✅ OK: Word blank saqlandi: G:\Қилинган анализлар\04.05.2026\SIYDIK TAHLILI - 260504003532 Jabborov Tursinpo'lat 0191.docx
+   Fayl mavjudmi: True
+   Fayl o'lchami: 227066 bayt
+
+✅ OK: Blanka saqlandi:
+G:\Қилинган анализлар\04.05.2026\SIYDIK TAHLILI - 260504003532 Jabborov Tursinpo'lat 0191.docx
+
+💾 Bazaga saqlayapman...
+💾 Natijalarni bazaga saqlayapman...
+   Bemor ID: 3635
+   Order ID: 3532
+❌ Bazaga saqlashda xatolik: 1054 (42S22): Unknown column 'test_turi' in 'where clause'
+✅ Bazaga saqlandi
+
+============================================================
+OK: Tahlil yakunlandi. Keyingi tahlil uchun barcode skanerlang...
+============================================================
+
+============================================================
+📡 Yangi tahlilni yuborish uchun URIT'da RS232 tugmasini bosing...
+📷 Yoki avval barcode skanerlang (kod_yollanma yoki natija_kodi)
+============================================================
+
+======= #8-TAHLIL RAW BLOK =======
+  
+ID:260504003534
+NO.000022 2000-01-01
+            02:49:51
+
+ LEU -       0 CELL/uL
+ KET -        0 mmol/L
+ NIT -   
+ URO            Normal
+ BIL -        0 umol/L
+*GLU +-     2.8 mmol/L
+ PRO -           0 g/L
+ SG         1.020     
+ pH         6.5       
+ BLD -       0 CELL/uL
+ Vc  -        0 mmol/L
+ MA          <=10 mg/L
+ Ca         2.5 mmol/L
+ CR         8.8 mmol/L
+ ACR       <3.4mg/mmol
+ 
+
+
+
+
+
+=======================================
+📝 RAW saqlandi: G:\DASTUR\URIT 50\Urit\RAW_LOGS\202605\urit_raw_20260504_105805.txt
+🆔 URIT-50 dan ID (sample_id) topildi: 260504003534
+📅 URIT-50 dan DATE topildi: 2000-01-01
+🕐 URIT-50 dan TIME topildi: 02:49:51
+
+--- PARSE QILINGAN NATIJA ---
+{'NO': '000022', 'ID': '260504003534', 'DATE': '2000-01-01', 'TIME': '02:49:51', 'LEU': '0 CELL/µL', 'KET': '0 mmol/L', 'NIT': '-', 'URO': 'Normal', 'BIL': '0 umol/L', 'GLU': '+-     2.8 mmol/L', 'PRO': '0 g/L', 'SG': '1.020', 'pH': '6.5', 'BLD': '0 CELL/µL', 'Vc': '0 mmol/L', 'MA': '<=10 mg/L', 'Ca': '2.5 mmol/L', 'CR': '8.8 mmol/L', 'ACR': '<3.4mg/mmol', 'ABNORMAL': ['GLU']}
+🆔 URIT-50 dan kelgan sample_id: 260504003534
+
+🔍 Bemor qidiryapman - Barcode: '260504003534'
+✅ Database ulanishi yaratildi (Connection Pooling)
+🔍 Barcode qidiryapman: '260504003534'
+✅ Bemor topildi: O'bekova Maxliyo
+   ID: 3637
+   Sample ID: 260504003534
+   Kod yo'llanma: 
+   Natija kodi: 
+   ✅ Tug'ilgan sana topildi: '1996-01-01'
+
+✅ Bemor ma'lumotlari topildi:
+   F.I.SH: 'O'bekova Maxliyo' (fish bo'sh bo'lsa, kod_yollanma ishlatildi)
+   Yosh: 30
+   Tug'ilgan sana: '1996-01-01'
+   ID: 3637
+   Kod yo'llanma: 
+   Natija kodi: 
+   Sample ID: 260504003534
+
+📋 Poloskа turi: 11-parametrli
+   → 11-parametrli: MA, Ca, CR, ACR blankada ko'rinmaydi
+
+============================================================
+Blanka yaratishni boshlayapman...
+============================================================
+
+--- create_doc_from_data chaqirildi ---
+✅ ID topilmasa ham blanka HAR DOIM yaratiladi
+   patient_data: {'id': 3637, 'sample_id': '260504003534', 'kod_yollanma': '', 'fish': "O'bekova Maxliyo", 'yosh': 30, 'jins': 'Ayol', 'tugilgan_sana': datetime.date(1996, 1, 1), 'telefon': '992158770', 'shifokor': '777', 'natija_kodi': ''}
+   fish: 'O'bekova Maxliyo', yosh: '30', tugilgan_sana: '1996-01-01'
+TEMPLATE_PATH: G:\DASTUR\URIT 50\blank.docx
+Shablon fayl mavjudmi: True
+Shablonni ochayapman: G:\DASTUR\URIT 50\blank.docx
+OK: Shablon ochildi
+
+🔢 Nomeratsiya (ID raqam) aniqlash:
+   patient_data: True
+   Sample ID topildi: 260504003534
+✅ Yakuniy nomeratsiya: '534'
+
+🕐 Test vaqti (kompyuterdan, har safar yangi): 04.05.2026 10:58
+   ⚠️ URIT-50 dan kelgan vaqt e'tiborsiz qoldirildi (analizator vaqti xato bo'lishi mumkin)
+   ✅ № o'rniga to'liq ID raqami ko'rsatiladi: '3637'
+
+📝 Placeholderlarni almashtiryapman:
+   {SAMPLE}: '000022'
+   {DATE_TIME}: '04.05.2026 10:58'
+   {FISH}: 'O'bekova Maxliyo'
+   {YOSH}: '30'
+   {NOMERATSIYA}: '534'
+   Bemor ID (№ o'rniga): '3637'
+   ✅ {FISH} almashtirildi: 'O'bekova Maxliyo'
+   ✅ {ID} almashtirildi: '3637' (to'liq ID)
+   ✅ № almashtirildi: '3637' (to'liq ID raqami)
+✅ Placeholderlar almashtirildi
+   Tug'ilgan yil: '1996' (sana: '1996-01-01')
+   📋 Sarlavha qatori topildi va saqlandi: '№  534Siydikning umumiy taxlili №  534Siydikning umumiy taxlili №  534Siydikning umumiy taxlili №  534Siydikning umumiy taxlili №  534Siydikning umumiy taxlili №  534Siydikning umumiy taxlili №  534Siydikning umumiy taxlili №  534Siydikning umumiy taxlili №  534Siydikning umumiy taxlili'
+   📋 Sarlavha qatori topildi va saqlandi: 'FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI'
+   📋 Sarlavha qatori topildi va saqlandi: 'Ko‘rsatkich Kod Kod Natija Natija Natija Norma Norma O‘lchov birligi'
+   📋 Sarlavha qatori topildi va saqlandi: 'Urobilinogen  URO URO    (3.2-16)  normal (3.2-16)  normal Mkmol/l'
+   📋 Sarlavha qatori topildi va saqlandi: 'SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI'
+
+============================================================
+MIKROSKOPIYA qismini to'ldirish...
+============================================================
+LEU (biokimyo): 0 CELL/µL
+BLD (biokimyo): 0 CELL/µL
+
+Mikroskopiya natijalari:
+  WBC: 4-5 (QORA)
+  RBC-D: 1-2 (QORA)
+  RBC-U: 0-1 (QORA)
+  SEC: 2-3 (QORA)
+  TEC: - (QORA)
+  RTEC: - (QORA)
+✅ Mikroskopiya qismi topildi
+  ✅ WBC: 4-5 yozildi
+  ✅ RBC-D: 1-2 yozildi
+  ✅ RBC-U: 0-1 yozildi
+============================================================
+✅ Mikroskopiya to'ldirildi!
+============================================================
+
+🔬 Mikroskopiya qismini to'ldiryapman...
+   LEU: '0 CELL/µL' -> format: '0', value: 0
+   📋 Mikroskopiya jadvali topildi, WBC qatorini qidiryapman...
+   ✅ WBC qatori topildi (mikroskopiya): Ko'rsatkich='Leykotsitlar', Kod='WBC'
+   ✅ WBC qatori topildi, 9 ta katak
+      Katak 0: 'Leykotsitlar'
+      Katak 1: 'WBC'
+      Katak 2: '4-5'
+      Katak 3: '4-5'
+      Katak 4: '4-5'
+      Katak 0 tekshirilmoqda: 'Leykotsitlar'
+      Katak 1 tekshirilmoqda: 'WBC'
+      ✅ WBC kod topildi: ustun 1 ('WBC')
+      ✅ Natija ustuni topildi: ustun 2 (koddan keyingi)
+   ✅ WBC (Leykotsitlar) natija yozildi: '4-5' -> '4-5' (qora, ustun 2)
+   BLD: '0 CELL/µL' -> mikroskopiya qiymatlari hisoblandi
+   📋 Mikroskopiya jadvali topildi, RBC kodlarini qidiryapman...
+   ✅ RBC-D kodi topildi: Kod ustuni='RBC-D'
+   ✅ RBC-D (o'zgargan) natija yozildi: '1-2' -> '1-2' (qora, 2-ustun)
+   ✅ RBC-U kodi topildi: Kod ustuni='RBC-U'
+   ✅ RBC-U (o'zgarmagan) natija yozildi: '0-1' -> '0-1' (qora, 2-ustun)
+✅ Eritrositlar qismi to'ldirildi!
+✅ Mikroskopiya qismi to'ldirildi
+
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+
+Saqlash papkasi: G:\Қилинган анализлар\04.05.2026
+OK: Papka yaratildi yoki mavjud: G:\Қилинган анализлар\04.05.2026
+
+Blanka faylni saqlayapman: G:\Қилинган анализлар\04.05.2026\SIYDIK TAHLILI - 260504003534 O'bekova Maxliyo 1996.docx
+   Papka: G:\Қилинган анализлар\04.05.2026
+   Fayl nomi: SIYDIK TAHLILI - 260504003534 O'bekova Maxliyo 1996.docx
+✅ OK: Word blank saqlandi: G:\Қилинган анализлар\04.05.2026\SIYDIK TAHLILI - 260504003534 O'bekova Maxliyo 1996.docx
+   Fayl mavjudmi: True
+   Fayl o'lchami: 227019 bayt
+
+✅ OK: Blanka saqlandi:
+G:\Қилинган анализлар\04.05.2026\SIYDIK TAHLILI - 260504003534 O'bekova Maxliyo 1996.docx
+
+💾 Bazaga saqlayapman...
+💾 Natijalarni bazaga saqlayapman...
+   Bemor ID: 3637
+   Order ID: 3534
+❌ Bazaga saqlashda xatolik: 1054 (42S22): Unknown column 'test_turi' in 'where clause'
+✅ Bazaga saqlandi
+
+============================================================
+OK: Tahlil yakunlandi. Keyingi tahlil uchun barcode skanerlang...
+============================================================
+
+============================================================
+📡 Yangi tahlilni yuborish uchun URIT'da RS232 tugmasini bosing...
+📷 Yoki avval barcode skanerlang (kod_yollanma yoki natija_kodi)
+============================================================
+
+======= #9-TAHLIL RAW BLOK =======
+  
+ID:260504003535
+NO.000023 2000-01-01
+            02:51:13
+
+*LEU +3    500 CELL/uL
+ KET -        0 mmol/L
+ NIT -   
+*URO +1      33 umol/L
+*BIL +1     8.6 umol/L
+ GLU -        0 mmol/L
+ PRO -           0 g/L
+ SG         1.020     
+ pH         5.5       
+ BLD -       0 CELL/uL
+ Vc  -        0 mmol/L
+*MA            30 mg/L
+ Ca         2.5 mmol/L
+ CR         8.8 mmol/L
+*ACR   3.4-33.9mg/mmol
+ 
+
+
+
+
+
+=======================================
+📝 RAW saqlandi: G:\DASTUR\URIT 50\Urit\RAW_LOGS\202605\urit_raw_20260504_105927.txt
+🆔 URIT-50 dan ID (sample_id) topildi: 260504003535
+📅 URIT-50 dan DATE topildi: 2000-01-01
+🕐 URIT-50 dan TIME topildi: 02:51:13
+
+--- PARSE QILINGAN NATIJA ---
+{'NO': '000023', 'ID': '260504003535', 'DATE': '2000-01-01', 'TIME': '02:51:13', 'LEU': '+3    500 CELL/µL', 'KET': '0 mmol/L', 'NIT': '-', 'URO': '+1      33 umol/L', 'BIL': '+1     8.6 umol/L', 'GLU': '0 mmol/L', 'PRO': '0 g/L', 'SG': '1.020', 'pH': '5.5', 'BLD': '0 CELL/µL', 'Vc': '0 mmol/L', 'MA': '30 mg/L', 'Ca': '2.5 mmol/L', 'CR': '8.8 mmol/L', 'ACR': '3.4-33.9mg/mmol', 'ABNORMAL': ['BIL', 'ACR', 'URO', 'LEU', 'MA']}
+🆔 URIT-50 dan kelgan sample_id: 260504003535
+
+🔍 Bemor qidiryapman - Barcode: '260504003535'
+✅ Database ulanishi yaratildi (Connection Pooling)
+🔍 Barcode qidiryapman: '260504003535'
+✅ Bemor topildi: Bo'rotoshova Dilnoza
+   ID: 3638
+   Sample ID: 260504003535
+   Kod yo'llanma: 
+   Natija kodi: 
+   ✅ Tug'ilgan sana topildi: '2014-01-01'
+
+✅ Bemor ma'lumotlari topildi:
+   F.I.SH: 'Bo'rotoshova Dilnoza' (fish bo'sh bo'lsa, kod_yollanma ishlatildi)
+   Yosh: 12
+   Tug'ilgan sana: '2014-01-01'
+   ID: 3638
+   Kod yo'llanma: 
+   Natija kodi: 
+   Sample ID: 260504003535
+
+📋 Poloskа turi: 11-parametrli
+   → 11-parametrli: MA, Ca, CR, ACR blankada ko'rinmaydi
+
+============================================================
+Blanka yaratishni boshlayapman...
+============================================================
+
+--- create_doc_from_data chaqirildi ---
+✅ ID topilmasa ham blanka HAR DOIM yaratiladi
+   patient_data: {'id': 3638, 'sample_id': '260504003535', 'kod_yollanma': '', 'fish': "Bo'rotoshova Dilnoza", 'yosh': 12, 'jins': 'Ayol', 'tugilgan_sana': datetime.date(2014, 1, 1), 'telefon': '940650880', 'shifokor': 'Rasulova Oyimsora', 'natija_kodi': ''}
+   fish: 'Bo'rotoshova Dilnoza', yosh: '12', tugilgan_sana: '2014-01-01'
+TEMPLATE_PATH: G:\DASTUR\URIT 50\blank.docx
+Shablon fayl mavjudmi: True
+Shablonni ochayapman: G:\DASTUR\URIT 50\blank.docx
+OK: Shablon ochildi
+
+🔢 Nomeratsiya (ID raqam) aniqlash:
+   patient_data: True
+   Sample ID topildi: 260504003535
+✅ Yakuniy nomeratsiya: '535'
+
+🕐 Test vaqti (kompyuterdan, har safar yangi): 04.05.2026 10:59
+   ⚠️ URIT-50 dan kelgan vaqt e'tiborsiz qoldirildi (analizator vaqti xato bo'lishi mumkin)
+   ✅ № o'rniga to'liq ID raqami ko'rsatiladi: '3638'
+
+📝 Placeholderlarni almashtiryapman:
+   {SAMPLE}: '000023'
+   {DATE_TIME}: '04.05.2026 10:59'
+   {FISH}: 'Bo'rotoshova Dilnoza'
+   {YOSH}: '12'
+   {NOMERATSIYA}: '535'
+   Bemor ID (№ o'rniga): '3638'
+   ✅ {FISH} almashtirildi: 'Bo'rotoshova Dilnoza'
+   ✅ {ID} almashtirildi: '3638' (to'liq ID)
+   ✅ № almashtirildi: '3638' (to'liq ID raqami)
+✅ Placeholderlar almashtirildi
+   Tug'ilgan yil: '2014' (sana: '2014-01-01')
+   📋 Sarlavha qatori topildi va saqlandi: '№  535Siydikning umumiy taxlili №  535Siydikning umumiy taxlili №  535Siydikning umumiy taxlili №  535Siydikning umumiy taxlili №  535Siydikning umumiy taxlili №  535Siydikning umumiy taxlili №  535Siydikning umumiy taxlili №  535Siydikning umumiy taxlili №  535Siydikning umumiy taxlili'
+   📋 Sarlavha qatori topildi va saqlandi: 'FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI'
+   📋 Sarlavha qatori topildi va saqlandi: 'Ko‘rsatkich Kod Kod Natija Natija Natija Norma Norma O‘lchov birligi'
+   📋 Sarlavha qatori topildi va saqlandi: 'Urobilinogen  URO URO    (3.2-16)  normal (3.2-16)  normal Mkmol/l'
+   📋 Sarlavha qatori topildi va saqlandi: 'SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI'
+
+============================================================
+MIKROSKOPIYA qismini to'ldirish...
+============================================================
+LEU (biokimyo): +3    500 CELL/µL
+BLD (biokimyo): 0 CELL/µL
+
+Mikroskopiya natijalari:
+  WBC: 4-5 (QORA)
+  RBC-D: 1-2 (QORA)
+  RBC-U: 0-1 (QORA)
+  SEC: 2-3 (QORA)
+  TEC: - (QORA)
+  RTEC: - (QORA)
+✅ Mikroskopiya qismi topildi
+  ✅ WBC: 4-5 yozildi
+  ✅ RBC-D: 1-2 yozildi
+  ✅ RBC-U: 0-1 yozildi
+============================================================
+✅ Mikroskopiya to'ldirildi!
+============================================================
+
+🔬 Mikroskopiya qismini to'ldiryapman...
+   LEU: '+3    500 CELL/µL' -> format: '+1', value: 3
+   📋 Mikroskopiya jadvali topildi, WBC qatorini qidiryapman...
+   ✅ WBC qatori topildi (mikroskopiya): Ko'rsatkich='Leykotsitlar', Kod='WBC'
+   ✅ WBC qatori topildi, 9 ta katak
+      Katak 0: 'Leykotsitlar'
+      Katak 1: 'WBC'
+      Katak 2: '4-5'
+      Katak 3: '4-5'
+      Katak 4: '4-5'
+      Katak 0 tekshirilmoqda: 'Leykotsitlar'
+      Katak 1 tekshirilmoqda: 'WBC'
+      ✅ WBC kod topildi: ustun 1 ('WBC')
+      ✅ Natija ustuni topildi: ustun 2 (koddan keyingi)
+   ✅ WBC (Leykotsitlar) natija yozildi: '4-5' -> '50-60' (qizil, ustun 2)
+   BLD: '0 CELL/µL' -> mikroskopiya qiymatlari hisoblandi
+   📋 Mikroskopiya jadvali topildi, RBC kodlarini qidiryapman...
+   ✅ RBC-D kodi topildi: Kod ustuni='RBC-D'
+   ✅ RBC-D (o'zgargan) natija yozildi: '1-2' -> '1-2' (qora, 2-ustun)
+   ✅ RBC-U kodi topildi: Kod ustuni='RBC-U'
+   ✅ RBC-U (o'zgarmagan) natija yozildi: '0-1' -> '0-1' (qora, 2-ustun)
+✅ Eritrositlar qismi to'ldirildi!
+✅ Mikroskopiya qismi to'ldirildi
+
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+   ⚠️ Jadval qator balandligini o'rnatishda xato: 'CT_Row' object has no attribute 'tr'
+
+Saqlash papkasi: G:\Қилинган анализлар\04.05.2026
+OK: Papka yaratildi yoki mavjud: G:\Қилинган анализлар\04.05.2026
+
+Blanka faylni saqlayapman: G:\Қилинган анализлар\04.05.2026\SIYDIK TAHLILI - 260504003535 Bo'rotoshova Dilnoza 2014.docx
+   Papka: G:\Қилинган анализлар\04.05.2026
+   Fayl nomi: SIYDIK TAHLILI - 260504003535 Bo'rotoshova Dilnoza 2014.docx
+✅ OK: Word blank saqlandi: G:\Қилинган анализлар\04.05.2026\SIYDIK TAHLILI - 260504003535 Bo'rotoshova Dilnoza 2014.docx
+   Fayl mavjudmi: True
+   Fayl o'lchami: 227035 bayt
+
+✅ OK: Blanka saqlandi:
+G:\Қилинган анализлар\04.05.2026\SIYDIK TAHLILI - 260504003535 Bo'rotoshova Dilnoza 2014.docx
+
+💾 Bazaga saqlayapman...
+💾 Natijalarni bazaga saqlayapman...
+   Bemor ID: 3638
+   Order ID: 3535
+❌ Bazaga saqlashda xatolik: 1054 (42S22): Unknown column 'test_turi' in 'where clause'
+✅ Bazaga saqlandi
+
+============================================================
+OK: Tahlil yakunlandi. Keyingi tahlil uchun barcode skanerlang...
+============================================================
+
+============================================================
+📡 Yangi tahlilni yuborish uchun URIT'da RS232 tugmasini bosing...
+📷 Yoki avval barcode skanerlang (kod_yollanma yoki natija_kodi)
+============================================================
+
+======= #10-TAHLIL RAW BLOK =======
+  
+ID:260504003536
+NO.000024 2000-01-01
+            02:52:26
+
+*LEU +-     15 CELL/uL
+ KET -        0 mmol/L
+ NIT -   
+ URO            Normal
+ BIL -        0 umol/L
+ GLU -        0 mmol/L
+*PRO +-       0.15 g/L
+ SG         1.020     
+ pH         6.5       
+ BLD -       0 CELL/uL
+ Vc  -        0 mmol/L
+*MA            80 mg/L
+ Ca         2.5 mmol/L
+ CR        17.6 mmol/L
+*ACR   3.4-33.9mg/mmol
+ 
+
+
+
+
+
+=======================================
+📝 RAW saqlandi: G:\DASTUR\URIT 50\Urit\RAW_LOGS\202605\urit_raw_20260504_110040.txt
+🆔 URIT-50 dan ID (sample_id) topildi: 260504003536
+📅 URIT-50 dan DATE topildi: 2000-01-01
+🕐 URIT-50 dan TIME topildi: 02:52:26
+
+--- PARSE QILINGAN NATIJA ---
+{'NO': '000024', 'ID': '260504003536', 'DATE': '2000-01-01', 'TIME': '02:52:26', 'LEU': '+-     15 CELL/µL', 'KET': '0 mmol/L', 'NIT': '-', 'URO': 'Normal', 'BIL': '0 umol/L', 'GLU': '0 mmol/L', 'PRO': '+-       0.15 g/L', 'SG': '1.020', 'pH': '6.5', 'BLD': '0 CELL/µL', 'Vc': '0 mmol/L', 'MA': '80 mg/L', 'Ca': '2.5 mmol/L', 'CR': '17.6 mmol/L', 'ACR': '3.4-33.9mg/mmol', 'ABNORMAL': ['PRO', 'MA', 'ACR', 'LEU']}
+🆔 URIT-50 dan kelgan sample_id: 260504003536
+
+🔍 Bemor qidiryapman - Barcode: '260504003536'
+✅ Database ulanishi yaratildi (Connection Pooling)
+🔍 Barcode qidiryapman: '260504003536'
+✅ Bemor topildi: Jalilova Shaxlo
+   ID: 3639
+   Sample ID: 260504003536
+   Kod yo'llanma: 
+   Natija kodi: 
+   ✅ Tug'ilgan sana topildi: '1999-01-01'
+
+✅ Bemor ma'lumotlari topildi:
+   F.I.SH: 'Jalilova Shaxlo' (fish bo'sh bo'lsa, kod_yollanma ishlatildi)
+   Yosh: 27
+   Tug'ilgan sana: '1999-01-01'
+   ID: 3639
+   Kod yo'llanma: 
+   Natija kodi: 
+   Sample ID: 260504003536
+
+📋 Poloskа turi: 11-parametrli
+   → 11-parametrli: MA, Ca, CR, ACR blankada ko'rinmaydi
+
+============================================================
+Blanka yaratishni boshlayapman...
+============================================================
+
+--- create_doc_from_data chaqirildi ---
+✅ ID topilmasa ham blanka HAR DOIM yaratiladi
+   patient_data: {'id': 3639, 'sample_id': '260504003536', 'kod_yollanma': '', 'fish': 'Jalilova Shaxlo', 'yosh': 27, 'jins': 'Ayol', 'tugilgan_sana': datetime.date(1999, 1, 1), 'telefon': '770661550', 'shifokor': 'Mavlonova Shoira', 'natija_kodi': ''}
+   fish: 'Jalilova Shaxlo', yosh: '27', tugilgan_sana: '1999-01-01'
+TEMPLATE_PATH: G:\DASTUR\URIT 50\blank.docx
+Shablon fayl mavjudmi: True
+Shablonni ochayapman: G:\DASTUR\URIT 50\blank.docx
+OK: Shablon ochildi
+
+🔢 Nomeratsiya (ID raqam) aniqlash:
+   patient_data: True
+   Sample ID topildi: 260504003536
+✅ Yakuniy nomeratsiya: '536'
+
+🕐 Test vaqti (kompyuterdan, har safar yangi): 04.05.2026 11:00
+   ⚠️ URIT-50 dan kelgan vaqt e'tiborsiz qoldirildi (analizator vaqti xato bo'lishi mumkin)
+   ✅ № o'rniga to'liq ID raqami ko'rsatiladi: '3639'
+
+📝 Placeholderlarni almashtiryapman:
+   {SAMPLE}: '000024'
+   {DATE_TIME}: '04.05.2026 11:00'
+   {FISH}: 'Jalilova Shaxlo'
+   {YOSH}: '27'
+   {NOMERATSIYA}: '536'
+   Bemor ID (№ o'rniga): '3639'
+   ✅ {FISH} almashtirildi: 'Jalilova Shaxlo'
+   ✅ {ID} almashtirildi: '3639' (to'liq ID)
+   ✅ № almashtirildi: '3639' (to'liq ID raqami)
+✅ Placeholderlar almashtirildi
+   Tug'ilgan yil: '1999' (sana: '1999-01-01')
+   📋 Sarlavha qatori topildi va saqlandi: '№  536Siydikning umumiy taxlili №  536Siydikning umumiy taxlili №  536Siydikning umumiy taxlili №  536Siydikning umumiy taxlili №  536Siydikning umumiy taxlili №  536Siydikning umumiy taxlili №  536Siydikning umumiy taxlili №  536Siydikning umumiy taxlili №  536Siydikning umumiy taxlili'
+   📋 Sarlavha qatori topildi va saqlandi: 'FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI FIZIK–KIMYOVIY XOSSALARI'
+   📋 Sarlavha qatori topildi va saqlandi: 'Ko‘rsatkich Kod Kod Natija Natija Natija Norma Norma O‘lchov birligi'
+   📋 Sarlavha qatori topildi va saqlandi: 'Urobilinogen  URO URO    (3.2-16)  normal (3.2-16)  normal Mkmol/l'
+   📋 Sarlavha qatori topildi va saqlandi: 'SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI SIYDIK CHO‘KMASI MIKROSKOPIYASI'
+
+============================================================
+MIKROSKOPIYA qismini to'ldirish...
+============================================================
+LEU (biokimyo): +-     15 CELL/µL
+BLD (biokimyo): 0 CELL/µL
+
+Mikroskopiya natijalari:
+  WBC: 10-15 (QORA)
+  RBC-D: 1-2 (QORA)
+  RBC-U: 0-1 (QORA)
+  SEC: 2-3 (QORA)
+  TEC: - (QORA)
+  RTEC: - (QORA)
+✅ Mikroskopiya qismi topildi
+  ✅ WBC: 10-15 yozildi
+  ✅ RBC-D: 1-2 yozildi
+  ✅ RBC-U: 0-1 yozildi
+============================================================
+✅ Mikroskopiya to'ldirildi!
+============================================================
+
+🔬 Mikroskopiya qismini to'ldiryapman...
+   LEU: '+-     15 CELL/µL' -> format: ' +/-', value: 15
+   📋 Mikroskopiya jadvali topildi, WBC qatorini qidiryapman...
+   ✅ WBC qatori topildi (mikroskopiya): Ko'rsatkich='Leykotsitlar', Kod='WBC'
+   ✅ WBC qatori topildi, 9 ta katak
+      Katak 0: 'Leykotsitlar'
+      Katak 1: 'WBC'
+      Katak 2: '10-15'
+      Katak 3: '10-15'
+      Katak 4: '10-15'
+      Katak 0 tekshirilmoqda: 'Leykotsitlar'
+      Katak 1 tekshirilmoqda: 'WBC'
+      ✅ WBC kod topildi: ustun 1 ('WBC')

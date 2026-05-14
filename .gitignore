@@ -1,24 +1,18 @@
-# Maxfiy — GitHub ga chiqmasin
-db_config.txt
+nul
 
-# Har kompyuterga xos launcher fayllar — GitHub ga chiqmasin
-monoblok_run.bat
-monoblok_start.vbs
-monoblok_start.pyw
-UY_LAUNCHER.bat
+# Loglar git ga chiqmasin
+logs/
+*.log
 
-# Katta fayllar
-lab_backup.sql
-*.sql
-cloudflared.exe
-*.exe
-
-# Python cache
+# Lokal sozlamalar
 __pycache__/
 *.pyc
-*.pyo
-.idea/
+monoblok_db_config.py
+db_config.txt
+last_login.txt
+*.key
+*.pem
 
-# Log fayllar
-*.log
-logs/
+# Build/cache
+.idea/
+out/

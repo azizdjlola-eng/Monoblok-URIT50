@@ -1,4 +1,17 @@
 {
+  "header_type": "premium",
   "blanka_ustuni_path": "g:\\DASTUR\\URIT 50\\Standart shablaonlar\\blanka ustuni.docx",
-  "logo_path": "G:\\DASTUR\\URIT 50\\logo.jpg"
+  "logo_path": "G:\\DASTUR\\URIT 50\\logo.jpg",
+  "logo_width": 3.2,
+  "logo_height": 3.2,
+  "chap_panel": "barcode",
+  "ong_panel": "logo",
+  "qr_link_template": "",
+  "klinika_nomi": "AZIZ MEDLINE",
+  "klinika_sub": "xususiy laboratoriyasi",
+  "klinika_manzil": "Surxondaryo vil., Sherobod tumani, Qo'rg'on MFY,\nY. Oxunboboev ko'chasi, 57E-uy",
+  "klinika_tel": "Tel.: (998) 99-673-13-42",
+  "klinika_rang": "1E9943",
+  "header_bg_color": "D609DB",
+  "bemor_row_color": "EAED7E"
 }

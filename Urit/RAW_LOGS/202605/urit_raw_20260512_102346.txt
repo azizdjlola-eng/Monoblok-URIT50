@@ -1,0 +1,25 @@
+  
+ID:260512003777
+NO.000020 2000-01-01
+            01:56:07
+
+*LEU +2    125 CELL/uL
+ KET -        0 mmol/L
+ NIT -   
+*URO +2      66 umol/L
+*BIL +1     8.6 umol/L
+ GLU -        0 mmol/L
+*PRO +2        1.0 g/L
+ SG         1.025     
+ pH         6.5       
+ BLD -       0 CELL/uL
+ Vc  -        0 mmol/L
+*MA         >=150 mg/L
+ Ca         2.5 mmol/L
+*CR       >=26.4mmol/L
+*ACR   3.4-33.9mg/mmol
+ 
+
+
+
+
