@@ -1,1 +1,18 @@
 nul
+
+# Loglar git ga chiqmasin
+logs/
+*.log
+
+# Lokal sozlamalar
+__pycache__/
+*.pyc
+monoblok_db_config.py
+db_config.txt
+last_login.txt
+*.key
+*.pem
+
+# Build/cache
+.idea/
+out/
