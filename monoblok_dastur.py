@@ -9205,7 +9205,19 @@ class MonoblokApp:
             ttk.Button(top_bar, text="Qidirish", command=self.on_search_clicked, width=9).pack(side=tk.LEFT, padx=2)
             ttk.Button(top_bar, text="Tozalash", command=self.clear_patient_data, width=9).pack(side=tk.LEFT, padx=2)
             ttk.Button(top_bar, text="Qidirish oynasi", command=self.open_patient_search, width=13).pack(side=tk.LEFT, padx=2)
-            
+
+            # Ajratuvchi (TV Boshqaruvi oldidan)
+            ttk.Separator(top_bar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
+
+            # TV Boshqaruvi tugmasi (binafsha rang — markazlashgan TV jadval+ticker boshqaruv)
+            tv_boshqaruv_btn = tk.Button(
+                top_bar, text="📺 TV Boshqaruvi",
+                command=self.open_tv_boshqaruv,
+                bg="#6C5CE7", fg="white", font=("Arial", 10, "bold"),
+                padx=12, pady=3, relief=tk.RAISED, bd=2, cursor="hand2"
+            )
+            tv_boshqaruv_btn.pack(side=tk.LEFT, padx=3)
+
             # Ajratuvchi
             ttk.Separator(top_bar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
             
@@ -9530,7 +9542,28 @@ class MonoblokApp:
     def on_search_clicked(self):
         """Qidirish tugmasi"""
         self.on_barcode_entered()
-    
+
+    def open_tv_boshqaruv(self):
+        """📺 TV Boshqaruvi oynasini ochish (tv_boshqaruv.py).
+
+        TV jadvali (kunlik media dastur) + Ticker matnini boshqarish uchun.
+        tv_server.py http://127.0.0.1:8765 da ishlayotgan bo'lishi kerak.
+        """
+        try:
+            from tv_boshqaruv import TvBoshqaruvOynasi
+            TvBoshqaruvOynasi(self.root)
+        except ImportError as e:
+            messagebox.showerror(
+                "Modul topilmadi",
+                f"tv_boshqaruv.py faylini topib bo'lmadi:\n\n{e}\n\n"
+                f"LIMS asosiy papkasida bo'lishi kerak.",
+                parent=self.root)
+        except Exception as e:
+            messagebox.showerror(
+                "TV Boshqaruv xatosi",
+                f"Oyna ochilmadi:\n\n{e}",
+                parent=self.root)
+
     def open_patient_search(self):
         """Bemorlarni qidirish oynasini ochish"""
         search_win = tk.Toplevel(self.root)
@@ -17646,7 +17679,7 @@ Sana: {_sana_fmt}"""
 
             # ── VPS GA SINXRONLASH (alohida threadda — UI bloklanmaydi) ──
             try:
-                from vps_sync import sync_from_db
+                from baza_sinxron import sync_from_db
                 _sid = getattr(self, 'current_bemor_data', {}).get('sample_id', '')
                 sync_from_db(conn, self.current_order_id, _sid)
                 print(f"[SYNC] VPS ga yuborilmoqda: {_sid}")
