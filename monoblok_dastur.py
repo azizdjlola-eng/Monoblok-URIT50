@@ -336,6 +336,8 @@ TEST_NORMAS = {
     "Ishqoriy Fosfataza": {"norma": "Э: <115, А: <105", "unit": "Ед/л", "type": "numeric_gender", "min_m": 0, "max_m": 115, "min_f": 0, "max_f": 105},
     "Timol": {"norma": "0-4", "unit": "Ед/л", "type": "numeric", "min": 0, "max": 4},
     "Тимол": {"norma": "0-4", "unit": "Ед/л", "type": "numeric", "min": 0, "max": 4},
+    "Xolinesteraza (CHE)": {"norma": "Э: 4620-11500, А: 3930-10800", "unit": "Ед/л", "type": "numeric_gender", "min_m": 4620, "max_m": 11500, "min_f": 3930, "max_f": 10800},
+    "Холинэстераза (ХЭ)": {"norma": "Э: 4620-11500, А: 3930-10800", "unit": "Ед/л", "type": "numeric_gender", "min_m": 4620, "max_m": 11500, "min_f": 3930, "max_f": 10800},
     "Magniy": {"norma": "1.7-2.4", "unit": "мг/дл", "type": "numeric", "min": 1.7, "max": 2.4},
     "Magniy Mg": {"norma": "1.7-2.4", "unit": "мг/дл", "type": "numeric", "min": 1.7, "max": 2.4},
     "Магний": {"norma": "1.7-2.4", "unit": "мг/дл", "type": "numeric", "min": 1.7, "max": 2.4},

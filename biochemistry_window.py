@@ -54,6 +54,7 @@ LIS_TO_TAHLIL_ID = {
     '310': 50,   # Siydik kislotasi
     '316': 50,   # Siydik kislotasi (zaxira kod)
     '233': 35,   # Albumin
+    '253': 128,  # Xolinesteraza (CHE)
     # Boshqa asosiy tahlillar
     '272': 37,   # Glyukoza
     # Qolganlar load_db_names() da DB dan avtomatik to'ldiriladi
@@ -100,6 +101,7 @@ LIS_CODE_MAP = {
     '271': 'CRB',
     '230': 'Timol',
     '275': 'HbA1c',
+    '253': 'Xolinesteraza (CHE)',
 }
 
 # Kalit so'z → LIS kodlar(i): DB nomida ushbu so'z bo'lsa shu kod yangilanadi
@@ -126,6 +128,9 @@ _EXTRA_ALIASES = {
     'ldl-xolesterin':               ['289'],
     # Trigliseridlar (LIS 308)
     'trigliserid':      ['308'],
+    # Xolinesteraza — turli yozuvlar
+    'xolinesteraza':    ['253'],
+    'che':              ['253'],
     # Siydik kislotasi — turli yozuvlar
     'siydik kislot':    ['310', '316'],
     # Bilirubin
@@ -194,6 +199,10 @@ ANALYZER_TO_DB = {
     'CRP':              'CRB',
     'TIMOL':            'Timol',
     'HBA1C':            'HbA1c',
+    'CHE':              'Xolinesteraza (CHE)',
+    'XOLINESTERAZA':    'Xolinesteraza (CHE)',
+    'CHOLINESTERASE':   'Xolinesteraza (CHE)',
+    'PSEUDOCHOLINEST':  'Xolinesteraza (CHE)',
 }
 
 
