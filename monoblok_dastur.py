@@ -171,8 +171,7 @@ STANDART_SHABLON_MAPPING = {
     'torch': 'TORCH INFEKSIYASIGA IgM VA IgG.docx',
     'troponin': 'TROPONIN (KOMBO).docx',
     'najas': 'NAJAS TAHLILI.docx',
-    'qon guruhi': 'QON GURUHI VA REZUS-OMILINI ANIQLASH.docx',
-    'rezus': 'QON GURUHI VA REZUS-OMILINI ANIQLASH.docx',
+    # 'qon guruhi' va 'rezus' — shablon emas, _create_blood_group_table orqali chiqadi
     'revmoprobe': 'REVMOPROBA.docx',
     'revmoprob': 'REVMOPROBA.docx',
     'pepsinogen': 'Pepsinogen 1 va Pepsinogen 2   IFA usulida aniqlash.docx',
@@ -2471,10 +2470,38 @@ def _get_ifa_result_color(result_str, norma_text):
     return None  # Moslik topilmadi — qora
 
 
+def _blood_group_word(symbol: str) -> str:
+    """Qon guruhi belgisidan so'z ko'rinishini qaytaradi.
+    Eng uzun/aniq pattern avval tekshiriladi (substring collision oldini oladi).
+    """
+    s = (symbol or '').strip().upper().replace(' ', '')
+    # AB(IV) — avval (chunki 'B' va 'IV' ichida 'I' bor)
+    if any(x in s for x in ['AB(IV)', 'IV(AB)', 'AB(4)', '4(AB)', 'ABIV']):
+        return "To'rtinchi"
+    # B(III) — keyin
+    if any(x in s for x in ['B(III)', 'III(B)', 'B(3)', '3(B)', 'BIII']):
+        return 'Uchinchi'
+    # A(II) — keyin
+    if any(x in s for x in ['A(II)', 'II(A)', 'A(2)', '2(A)', 'AII']):
+        return 'Ikkinchi'
+    # O(I) — eng oxirida
+    if any(x in s for x in ['O(I)', 'I(0)', 'I(O)', 'O(1)', '1(O)', 'OI']):
+        return 'Birinchi'
+    return ''
+
+def _rezus_word(symbol: str) -> str:
+    """Rezus belgisidan so'z ko'rinishini qaytaradi."""
+    s = (symbol or '').strip().upper()
+    if 'RH+' in s or 'RH +' in s or s == 'RH+':
+        return 'Rezus musbat'
+    if 'RH-' in s or 'RH -' in s or s == 'RH-':
+        return 'Rezus manfiy'
+    return ''
+
 def _create_blood_group_table(doc, raw_value):
     """
-    QON GURUHI VA REZUS FAKTOR uchun 2 ustunli jadval yaratish.
-    Jadval kengligi: 19 sm (9.5 + 9.5), boshqa jadvallar bilan mos.
+    QON GURUHI VA REZUS FAKTOR uchun 3 ustunli jadval yaratish.
+    Ustunlar: Tahlil nomi (8.5) | Belgi (4.5) | So'z bilan (6.0) = 19 sm
     """
     heading = doc.add_paragraph()
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -2487,32 +2514,54 @@ def _create_blood_group_table(doc, raw_value):
             rd = json.loads(str(raw_value)) if str(raw_value).strip().startswith('{') else {}
             qg = rd.get('qon_guruhi', '')
             ro = rd.get('rezus_omil', '')
+            # "result" formatida saqlangan bo'lsa (masalan "A(II) Rh+" yoki "AB (IV) Rh+")
+            if not qg and not ro and rd.get('result'):
+                result_str = str(rd['result']).strip()
+                if 'Rh+' in result_str:
+                    ro = 'Rh+'
+                    qg = result_str.replace('Rh+', '').strip()
+                elif 'Rh-' in result_str:
+                    ro = 'Rh-'
+                    qg = result_str.replace('Rh-', '').strip()
+                else:
+                    qg = result_str
         except Exception:
             qg = str(raw_value)
     HEADER_COLOR = "9DC3E6"
-    table = doc.add_table(rows=1, cols=2)
+    WORD_BG_COLOR = "FFF2CC"
+    table = doc.add_table(rows=1, cols=3)
     table.style = 'Table Grid'
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    _apply_table_widths(table, [9.5, 9.5])
+    _apply_table_widths(table, [8.5, 4.5, 6.0])
     hdr_cells = table.rows[0].cells
-    _set_cell_shading(hdr_cells[0], HEADER_COLOR)
-    _set_cell_shading(hdr_cells[1], HEADER_COLOR)
-    for hdr_cell, hdr_text in zip(hdr_cells, ["Tahlil nomi", "Natija"]):
+    for cell in hdr_cells:
+        _set_cell_shading(cell, HEADER_COLOR)
+    for hdr_cell, hdr_text in zip(hdr_cells, ["Tahlil nomi", "Belgi (ramziy)", "So'z bilan"]):
         ph = hdr_cell.paragraphs[0]
         ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_para_spacing(ph, 0, 0, line_spacing=1)
         _add_run_tnr(ph, hdr_text, 11, bold=True)
-    for label, value in [("Qon guruhi:", qg or '-'), ("Rezus omil:", ro or '-')]:
+    rows_data = [
+        ("Qon guruhi:", qg or '-', _blood_group_word(qg) or '-'),
+        ("Rezus omil:",  ro or '-', _rezus_word(ro)        or '-'),
+    ]
+    for label, belgi, soz in rows_data:
         row = table.add_row()
         _keep_row_together(row)
         p_lbl = row.cells[0].paragraphs[0]
         p_lbl.alignment = WD_ALIGN_PARAGRAPH.LEFT
         _set_para_spacing(p_lbl, 0, 0, line_spacing=1)
         _add_run_tnr(p_lbl, label, 11, bold=True)
-        p_val = row.cells[1].paragraphs[0]
-        p_val.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        _set_para_spacing(p_val, 0, 0, line_spacing=1)
-        _add_run_tnr(p_val, value, 11, bold=True)
+        p_belgi = row.cells[1].paragraphs[0]
+        p_belgi.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(p_belgi, 0, 0, line_spacing=1)
+        _add_run_tnr(p_belgi, belgi, 12, bold=True,
+                     color_rgb=RGBColor(0x27, 0xae, 0x60))
+        _set_cell_shading(row.cells[2], WORD_BG_COLOR)
+        p_soz = row.cells[2].paragraphs[0]
+        p_soz.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(p_soz, 0, 0, line_spacing=1)
+        _add_run_tnr(p_soz, soz, 11, bold=True)
 
 # Umumiy qon tahlili (BC-20S) — Ko'rsatkich, Qisqa nom, Birlik, Norma, Natija (jami 19 sm)
 CBC_HEMA_ROWS = [
@@ -4706,7 +4755,7 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
         if has_urine:
             create_urine_full_table_in_doc(doc, raw_value, order_info)
 
-    # ── QON GURUHI VA REZUS FAKTOR - 2 ustunli jadval ───────────────
+    # ── QON GURUHI VA REZUS FAKTOR - 3 ustunli jadval (belgi + so'z) ──
     for test in blood_tests:
         test_id = test.get('id')
         raw_value = (test_results.get(test_id, '') if test_results else '') or ''
@@ -4823,7 +4872,7 @@ def create_simple_table_for_tests(doc: Document, tests: list, order_info: dict, 
             _set_para_spacing(p3, 0, 0, line_spacing=1)
             _add_run_tnr(p3, unit_text, 11)
 
-    # Qon guruhi - 2 ustunli jadval
+    # Qon guruhi - 3 ustunli jadval (belgi + so'z)
     for test in blood_tests:
         test_id = test.get('id')
         raw_value = (test_results.get(test_id, '') if test_results else '') or ''
@@ -8925,8 +8974,32 @@ class MonoblokApp:
         """URIT-50 siydik analizatori dasturini ishga tushirish"""
         # Avval mavjud jarayonlarni to'xtatish
         self.stop_existing_urit50_processes()
-        
-        # URIT-50 dasturining yo'li
+
+        # FROZEN (EXE): python skript yo'q — o'zini --urit-service bilan ishga tushiradi
+        if getattr(sys, "frozen", False):
+            try:
+                # Eski URIT child'ni to'xtatish (frozen'da stop_existing topa olmaydi — to'planmasin)
+                try:
+                    if getattr(self, "urit_process", None) and self.urit_process.poll() is None:
+                        self.urit_process.terminate()
+                except Exception:
+                    pass
+                self.urit_process = subprocess.Popen(
+                    [sys.executable, "--urit-service"],
+                    creationflags=subprocess.CREATE_NO_WINDOW)
+                time.sleep(1)
+                msg = f"[OK] URIT-50 xizmati ishga tushdi (EXE, PID: {self.urit_process.pid})"
+                print(msg)
+                try:
+                    self.root.after(0, lambda: self.status_var.set(msg))
+                except Exception:
+                    pass
+                return True
+            except Exception as e:
+                print(f"[OGOHLANTIRISH] URIT-50 (EXE) ishga tushmadi: {e}")
+                return False
+
+        # URIT-50 dasturining yo'li (dev rejimi)
         script_dir = os.path.dirname(os.path.abspath(__file__))
         
         # Bir nechta mumkin bo'lgan fayl nomlarini tekshirish
@@ -9432,6 +9505,77 @@ class MonoblokApp:
         self.result_entry = None
         self.editing_item = None
     
+    def open_analizator_settings(self):
+        """Analizator sozlamalari (IP/port/COM) — istalgan vaqt tahrirlanadi, %ProgramData% da saqlanadi."""
+        try:
+            import analizator_config as ac
+        except Exception as e:
+            messagebox.showerror("Xato", f"analizator_config yuklanmadi: {e}")
+            return
+        cfg = ac.oqi()
+        coms = []
+        try:
+            import serial.tools.list_ports as _lp
+            coms = [p.device for p in _lp.comports()]
+        except Exception:
+            pass
+        if not coms:
+            coms = [f"COM{i}" for i in range(1, 11)]
+
+        BG = "#0f1422"; FG = "#e6e9f2"; MUTED = "#9aa3bd"
+        win = tk.Toplevel(self.root)
+        win.title("Analizator sozlamalari")
+        win.configure(bg=BG)
+        win.geometry("460x440")
+        win.transient(self.root)
+        win.grab_set()
+
+        tk.Label(win, text="🔬 Analizator sozlamalari", bg=BG, fg=FG,
+                 font=("Segoe UI Semibold", 14)).grid(row=0, column=0, columnspan=2, pady=(14, 4))
+        tk.Label(win, text="Mijozda IP/port/COM farq qilsa shu yerdan o'zgartiring",
+                 bg=BG, fg=MUTED, font=("Segoe UI", 9)).grid(row=1, column=0, columnspan=2, pady=(0, 10))
+
+        def qator(t, r):
+            tk.Label(win, text=t, bg=BG, fg=MUTED, font=("Segoe UI", 10)
+                     ).grid(row=r, column=0, sticky="w", padx=14, pady=7)
+
+        def entry(r, val, w=22):
+            e = tk.Entry(win, font=("Consolas", 11), bg="#1a2236", fg=FG, relief="flat", width=w)
+            e.insert(0, str(val))
+            e.grid(row=r, column=1, sticky="we", padx=12, pady=7, ipady=4)
+            return e
+
+        qator("BC-20S (gemo) IP:", 2);    e_ip = entry(2, cfg.get("bc20s_ip", "192.168.0.2"))
+        qator("BC-20S port:", 3);         e_bp = entry(3, cfg.get("bc20s_port", 5100))
+        qator("BK-280 port:", 4);         e_kp = entry(4, cfg.get("bk280_port", 8087))
+        qator("URIT COM port:", 5)
+        cb_com = ttk.Combobox(win, values=coms, width=20)
+        cb_com.set(cfg.get("urit_com", "COM4"))
+        cb_com.grid(row=5, column=1, sticky="we", padx=12, pady=7)
+        qator("URIT strip:", 6);          e_st = entry(6, cfg.get("urit_strip", 14))
+
+        win.columnconfigure(1, weight=1)
+
+        def saqla():
+            try:
+                ac.saqla({
+                    "bc20s_ip": e_ip.get().strip() or "192.168.0.2",
+                    "bc20s_port": int(e_bp.get() or 5100),
+                    "bk280_port": int(e_kp.get() or 8087),
+                    "urit_com": cb_com.get().strip() or "COM4",
+                    "urit_strip": int(e_st.get() or 14),
+                })
+            except Exception as ex:
+                messagebox.showerror("Xato", str(ex)); return
+            messagebox.showinfo("Saqlandi",
+                                "Analizator sozlamalari saqlandi.\n\nO'zgarish dasturni qayta ochganda "
+                                "yoki analizatorni qayta ulaganda kuchga kiradi.")
+            win.destroy()
+
+        tk.Button(win, text="💾 Saqlash", command=saqla, bg="#1f8a4c", fg="white",
+                  relief="flat", font=("Segoe UI Semibold", 11), cursor="hand2"
+                  ).grid(row=7, column=0, columnspan=2, sticky="we", padx=14, pady=16, ipady=7)
+
     def create_results_panel(self, parent):
         """Natijalar va tugmalar paneli"""
         # Tugmalar
@@ -9443,15 +9587,22 @@ class MonoblokApp:
         left_buttons.pack(side=tk.LEFT, padx=2)
         
         ttk.Button(
-            left_buttons, 
-            text="Sozlamalar", 
+            left_buttons,
+            text="Sozlamalar",
             command=self.open_blanka_settings,
             width=11
         ).pack(side=tk.LEFT, padx=2)
-        
+
         ttk.Button(
-            left_buttons, 
-            text="DB Test (Ctrl+Shift+D)", 
+            left_buttons,
+            text="🔬 Analizator",
+            command=self.open_analizator_settings,
+            width=12
+        ).pack(side=tk.LEFT, padx=2)
+
+        ttk.Button(
+            left_buttons,
+            text="DB Test (Ctrl+Shift+D)",
             command=self.test_database_read,
             width=20
         ).pack(side=tk.LEFT, padx=2)
@@ -18874,5 +19025,25 @@ def main():
         input("\nDasturni yopish uchun Enter bosing...")
 
 if __name__ == "__main__":
+    import sys as _sys
+    # URIT-50 (siydik) xizmati — alohida jarayon (frozen EXE'da o'zini --urit-service bilan qayta ishga tushiradi)
+    if "--urit-service" in _sys.argv:
+        try:
+            import urit50_service
+            urit50_service.main()
+        except Exception as _e:
+            print(f"[URIT] xato: {_e}")
+        _sys.exit(0)
+    # Litsenziya darvozasi
+    try:
+        import os as _os
+        _here = _os.path.dirname(_os.path.abspath(__file__))
+        if _here not in _sys.path:
+            _sys.path.insert(0, _here)
+        from litsenziya import litsenziya_gate as _gate
+        if not _gate.darvoza("AzizMedLine — Natija (Monoblok)"):
+            _sys.exit(0)
+    except ImportError:
+        pass
     main()
  

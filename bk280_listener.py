@@ -22,10 +22,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from monoblok_db_config import DB_CONFIG
 
 SERVER_IP = "0.0.0.0"
-SERVER_PORT = 8087
+try:
+    from analizator_config import oqi as _acfg
+    SERVER_PORT = int(_acfg().get("bk280_port", 8087))
+except Exception:
+    SERVER_PORT = 8087
 
-BASE_DIR = r"G:\DASTUR\URIT 50\BK280\RAW_LOGS"
-ERRORS_DIR = r"G:\DASTUR\URIT 50\BK280\ERRORS"
+# Frozen-aware yozish papkasi (mijozda G: bo'lmasligi mumkin)
+_BK_DATA = os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), "AzizMedLine", "BK280")
+BASE_DIR = os.path.join(_BK_DATA, "RAW_LOGS")
+ERRORS_DIR = os.path.join(_BK_DATA, "ERRORS")
 os.makedirs(BASE_DIR, exist_ok=True)
 os.makedirs(ERRORS_DIR, exist_ok=True)
 

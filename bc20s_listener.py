@@ -30,8 +30,15 @@ import time
 from datetime import datetime, date
 
 # ─────────────────────────── CONFIG ───────────────────────────
-ANALYZER_IP     = "192.168.0.2"    # BC-20S analizator IP manzili
-ANALYZER_PORT   = 5100             # BC-20S TCP server porti
+# IP/port analizator_config dan (mijozda farq qilishi mumkin), default = quyidagi
+try:
+    from analizator_config import oqi as _acfg
+    _c = _acfg()
+    ANALYZER_IP   = _c.get("bc20s_ip", "192.168.0.2")
+    ANALYZER_PORT = int(_c.get("bc20s_port", 5100))
+except Exception:
+    ANALYZER_IP     = "192.168.0.2"    # BC-20S analizator IP manzili
+    ANALYZER_PORT   = 5100             # BC-20S TCP server porti
 
 MLLP_START      = b"\x0b"         # <VT>  - Start Block
 MLLP_END        = b"\x1c\x0d"     # <FS><CR> - End Block
