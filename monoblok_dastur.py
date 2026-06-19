@@ -171,8 +171,7 @@ STANDART_SHABLON_MAPPING = {
     'torch': 'TORCH INFEKSIYASIGA IgM VA IgG.docx',
     'troponin': 'TROPONIN (KOMBO).docx',
     'najas': 'NAJAS TAHLILI.docx',
-    'qon guruhi': 'QON GURUHI VA REZUS-OMILINI ANIQLASH.docx',
-    'rezus': 'QON GURUHI VA REZUS-OMILINI ANIQLASH.docx',
+    # 'qon guruhi' va 'rezus' — shablon emas, _create_blood_group_table orqali chiqadi
     'revmoprobe': 'REVMOPROBA.docx',
     'revmoprob': 'REVMOPROBA.docx',
     'pepsinogen': 'Pepsinogen 1 va Pepsinogen 2   IFA usulida aniqlash.docx',
@@ -818,6 +817,22 @@ def get_test_norma(test_name: str, jins: str = "", guruh: str = "", yosh: int = 
                 result = cursor.fetchone()
             if not result and db_name:
                 cursor.execute("SELECT * FROM tahlillar_norma WHERE tahlil_nomi = %s", (db_name,))
+                result = cursor.fetchone()
+            # Nom variantini qidirish — order nomi DB nomidan qisqargan bo'lishi mumkin.
+            # Masalan order_items da 'Askarida IgG IFA' (tahlil_id=NULL) saqlangan, lekin
+            # tahlillar_norma da 'Askarida IgG IFA ИФА' bo'lishi mumkin. Bu blok faqat aniq
+            # moslik topilmaganda ishlaydi, shuning uchun mavjud xatti-harakatga ta'sir qilmaydi.
+            if not result and db_name:
+                # 1) DB nomi order nomi bilan boshlanadi (order nomi qisqaroq) — eng qisqa moslik
+                cursor.execute(
+                    "SELECT * FROM tahlillar_norma WHERE tahlil_nomi LIKE %s ORDER BY CHAR_LENGTH(tahlil_nomi) LIMIT 1",
+                    (db_name + '%',))
+                result = cursor.fetchone()
+            if not result and db_name:
+                # 2) order nomi DB nomi bilan boshlanadi (order nomi uzunroq) — eng uzun moslik
+                cursor.execute(
+                    "SELECT * FROM tahlillar_norma WHERE %s LIKE CONCAT(tahlil_nomi, '%%') ORDER BY CHAR_LENGTH(tahlil_nomi) DESC LIMIT 1",
+                    (db_name,))
                 result = cursor.fetchone()
             cursor.close()
             # conn.close() QILMAYMIZ - bu global db_conn() ulanishi
@@ -2471,10 +2486,38 @@ def _get_ifa_result_color(result_str, norma_text):
     return None  # Moslik topilmadi — qora
 
 
+def _blood_group_word(symbol: str) -> str:
+    """Qon guruhi belgisidan so'z ko'rinishini qaytaradi.
+    Eng uzun/aniq pattern avval tekshiriladi (substring collision oldini oladi).
+    """
+    s = (symbol or '').strip().upper().replace(' ', '')
+    # AB(IV) — avval (chunki 'B' va 'IV' ichida 'I' bor)
+    if any(x in s for x in ['AB(IV)', 'IV(AB)', 'AB(4)', '4(AB)', 'ABIV']):
+        return "To'rtinchi"
+    # B(III) — keyin
+    if any(x in s for x in ['B(III)', 'III(B)', 'B(3)', '3(B)', 'BIII']):
+        return 'Uchinchi'
+    # A(II) — keyin
+    if any(x in s for x in ['A(II)', 'II(A)', 'A(2)', '2(A)', 'AII']):
+        return 'Ikkinchi'
+    # O(I) — eng oxirida
+    if any(x in s for x in ['O(I)', 'I(0)', 'I(O)', 'O(1)', '1(O)', 'OI']):
+        return 'Birinchi'
+    return ''
+
+def _rezus_word(symbol: str) -> str:
+    """Rezus belgisidan so'z ko'rinishini qaytaradi."""
+    s = (symbol or '').strip().upper()
+    if 'RH+' in s or 'RH +' in s or s == 'RH+':
+        return 'Rezus musbat'
+    if 'RH-' in s or 'RH -' in s or s == 'RH-':
+        return 'Rezus manfiy'
+    return ''
+
 def _create_blood_group_table(doc, raw_value):
     """
-    QON GURUHI VA REZUS FAKTOR uchun 2 ustunli jadval yaratish.
-    Jadval kengligi: 19 sm (9.5 + 9.5), boshqa jadvallar bilan mos.
+    QON GURUHI VA REZUS FAKTOR uchun 3 ustunli jadval yaratish.
+    Ustunlar: Tahlil nomi (8.5) | Belgi (4.5) | So'z bilan (6.0) = 19 sm
     """
     heading = doc.add_paragraph()
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -2487,32 +2530,54 @@ def _create_blood_group_table(doc, raw_value):
             rd = json.loads(str(raw_value)) if str(raw_value).strip().startswith('{') else {}
             qg = rd.get('qon_guruhi', '')
             ro = rd.get('rezus_omil', '')
+            # "result" formatida saqlangan bo'lsa (masalan "A(II) Rh+" yoki "AB (IV) Rh+")
+            if not qg and not ro and rd.get('result'):
+                result_str = str(rd['result']).strip()
+                if 'Rh+' in result_str:
+                    ro = 'Rh+'
+                    qg = result_str.replace('Rh+', '').strip()
+                elif 'Rh-' in result_str:
+                    ro = 'Rh-'
+                    qg = result_str.replace('Rh-', '').strip()
+                else:
+                    qg = result_str
         except Exception:
             qg = str(raw_value)
     HEADER_COLOR = "9DC3E6"
-    table = doc.add_table(rows=1, cols=2)
+    WORD_BG_COLOR = "FFF2CC"
+    table = doc.add_table(rows=1, cols=3)
     table.style = 'Table Grid'
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    _apply_table_widths(table, [9.5, 9.5])
+    _apply_table_widths(table, [8.5, 4.5, 6.0])
     hdr_cells = table.rows[0].cells
-    _set_cell_shading(hdr_cells[0], HEADER_COLOR)
-    _set_cell_shading(hdr_cells[1], HEADER_COLOR)
-    for hdr_cell, hdr_text in zip(hdr_cells, ["Tahlil nomi", "Natija"]):
+    for cell in hdr_cells:
+        _set_cell_shading(cell, HEADER_COLOR)
+    for hdr_cell, hdr_text in zip(hdr_cells, ["Tahlil nomi", "Belgi (ramziy)", "So'z bilan"]):
         ph = hdr_cell.paragraphs[0]
         ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_para_spacing(ph, 0, 0, line_spacing=1)
         _add_run_tnr(ph, hdr_text, 11, bold=True)
-    for label, value in [("Qon guruhi:", qg or '-'), ("Rezus omil:", ro or '-')]:
+    rows_data = [
+        ("Qon guruhi:", qg or '-', _blood_group_word(qg) or '-'),
+        ("Rezus omil:",  ro or '-', _rezus_word(ro)        or '-'),
+    ]
+    for label, belgi, soz in rows_data:
         row = table.add_row()
         _keep_row_together(row)
         p_lbl = row.cells[0].paragraphs[0]
         p_lbl.alignment = WD_ALIGN_PARAGRAPH.LEFT
         _set_para_spacing(p_lbl, 0, 0, line_spacing=1)
         _add_run_tnr(p_lbl, label, 11, bold=True)
-        p_val = row.cells[1].paragraphs[0]
-        p_val.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        _set_para_spacing(p_val, 0, 0, line_spacing=1)
-        _add_run_tnr(p_val, value, 11, bold=True)
+        p_belgi = row.cells[1].paragraphs[0]
+        p_belgi.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(p_belgi, 0, 0, line_spacing=1)
+        _add_run_tnr(p_belgi, belgi, 12, bold=True,
+                     color_rgb=RGBColor(0x27, 0xae, 0x60))
+        _set_cell_shading(row.cells[2], WORD_BG_COLOR)
+        p_soz = row.cells[2].paragraphs[0]
+        p_soz.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(p_soz, 0, 0, line_spacing=1)
+        _add_run_tnr(p_soz, soz, 11, bold=True)
 
 # Umumiy qon tahlili (BC-20S) — Ko'rsatkich, Qisqa nom, Birlik, Norma, Natija (jami 19 sm)
 CBC_HEMA_ROWS = [
@@ -4706,7 +4771,7 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
         if has_urine:
             create_urine_full_table_in_doc(doc, raw_value, order_info)
 
-    # ── QON GURUHI VA REZUS FAKTOR - 2 ustunli jadval ───────────────
+    # ── QON GURUHI VA REZUS FAKTOR - 3 ustunli jadval (belgi + so'z) ──
     for test in blood_tests:
         test_id = test.get('id')
         raw_value = (test_results.get(test_id, '') if test_results else '') or ''
@@ -4823,7 +4888,7 @@ def create_simple_table_for_tests(doc: Document, tests: list, order_info: dict, 
             _set_para_spacing(p3, 0, 0, line_spacing=1)
             _add_run_tnr(p3, unit_text, 11)
 
-    # Qon guruhi - 2 ustunli jadval
+    # Qon guruhi - 3 ustunli jadval (belgi + so'z)
     for test in blood_tests:
         test_id = test.get('id')
         raw_value = (test_results.get(test_id, '') if test_results else '') or ''
@@ -9208,18 +9273,6 @@ class MonoblokApp:
             ttk.Button(top_bar, text="Tozalash", command=self.clear_patient_data, width=9).pack(side=tk.LEFT, padx=2)
             ttk.Button(top_bar, text="Qidirish oynasi", command=self.open_patient_search, width=13).pack(side=tk.LEFT, padx=2)
 
-            # Ajratuvchi (TV Boshqaruvi oldidan)
-            ttk.Separator(top_bar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
-
-            # TV Boshqaruvi tugmasi (binafsha rang — markazlashgan TV jadval+ticker boshqaruv)
-            tv_boshqaruv_btn = tk.Button(
-                top_bar, text="📺 TV Boshqaruvi",
-                command=self.open_tv_boshqaruv,
-                bg="#6C5CE7", fg="white", font=("Arial", 10, "bold"),
-                padx=12, pady=3, relief=tk.RAISED, bd=2, cursor="hand2"
-            )
-            tv_boshqaruv_btn.pack(side=tk.LEFT, padx=3)
-
             # Ajratuvchi
             ttk.Separator(top_bar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
             
@@ -9544,27 +9597,6 @@ class MonoblokApp:
     def on_search_clicked(self):
         """Qidirish tugmasi"""
         self.on_barcode_entered()
-
-    def open_tv_boshqaruv(self):
-        """📺 TV Boshqaruvi oynasini ochish (tv_boshqaruv.py).
-
-        TV jadvali (kunlik media dastur) + Ticker matnini boshqarish uchun.
-        tv_server.py http://127.0.0.1:8765 da ishlayotgan bo'lishi kerak.
-        """
-        try:
-            from tv_boshqaruv import TvBoshqaruvOynasi
-            TvBoshqaruvOynasi(self.root)
-        except ImportError as e:
-            messagebox.showerror(
-                "Modul topilmadi",
-                f"tv_boshqaruv.py faylini topib bo'lmadi:\n\n{e}\n\n"
-                f"LIMS asosiy papkasida bo'lishi kerak.",
-                parent=self.root)
-        except Exception as e:
-            messagebox.showerror(
-                "TV Boshqaruv xatosi",
-                f"Oyna ochilmadi:\n\n{e}",
-                parent=self.root)
 
     def open_patient_search(self):
         """Bemorlarni qidirish oynasini ochish"""
@@ -11123,6 +11155,26 @@ Sana: {_sana_fmt}"""
                         _bp = (_nr.get('standard_blank_path') or '').strip()
                         if _bp:
                             _blank_cache[_tn] = _bp
+                    # Aniq mos kelmagan nomlar uchun variant (prefiks) qidirish —
+                    # order_items da nom qisqargan bo'lishi mumkin (masalan ' ИФА'siz:
+                    # 'Askarida IgG IFA' vs 'Askarida IgG IFA ИФА'). ORDER nomi kaliti bilan saqlanadi.
+                    _missing_norma = [n for n in _all_test_names if n and n not in _norma_cache]
+                    for _mn in _missing_norma:
+                        try:
+                            cursor.execute(
+                                "SELECT tahlil_nomi, norma, birlik, type, "
+                                "standard_blank_path, response_options "
+                                "FROM tahlillar_norma WHERE tahlil_nomi LIKE %s "
+                                "ORDER BY CHAR_LENGTH(tahlil_nomi) LIMIT 1",
+                                (_mn + '%',))
+                            _vr = cursor.fetchone()
+                            if _vr:
+                                _norma_cache[_mn] = _vr
+                                _bp = (_vr.get('standard_blank_path') or '').strip()
+                                if _bp:
+                                    _blank_cache[_mn] = _bp
+                        except Exception:
+                            pass
                 except Exception as _e:
                     print(f"[OGOHLANTIRISH] Norma batch yuklashda xato: {_e}")
 
