@@ -71,9 +71,13 @@ class TvBoshqaruvOynasi(tk.Toplevel):
 
         self.jadval_tab = JadvalTab(self.notebook)
         self.ticker_tab = TickerTab(self.notebook)
+        self.navbat_vaqt_tab = NavbatVaqtTab(self.notebook)
+        self.tv_buyruq_tab = TvBuyruqlarTab(self.notebook)
 
         self.notebook.add(self.jadval_tab, text="  📅  Jadval  ")
         self.notebook.add(self.ticker_tab, text="  📢  Ticker  ")
+        self.notebook.add(self.navbat_vaqt_tab, text="  🕐  Navbat Vaqti  ")
+        self.notebook.add(self.tv_buyruq_tab, text="  📺  TV Buyruqlari  ")
 
         # Status bar (server URL ko'rsatadi)
         self.status_var = tk.StringVar(value=f"Server: {TV_SERVER_URL}")
@@ -613,6 +617,341 @@ class TickerTab(ttk.Frame):
                     parent=self))
 
         threading.Thread(target=worker, daemon=True).start()
+
+
+# ─────────────────────────────────────────────────────────────────
+# Tab 3: Navbat Vaqti (kechikish + qayta qo'yish)
+# ─────────────────────────────────────────────────────────────────
+
+class NavbatVaqtTab(ttk.Frame):
+    """Natija vaqtini boshqarish — global kechikish + individual bemor."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self._navbat_list = []  # [(order_id, ism, raqam, vaqt), ...]
+        self._build_ui()
+        self.after(300, self._load_navbat)
+
+    def _build_ui(self):
+        wrap = ttk.Frame(self, padding=16)
+        wrap.pack(fill=tk.BOTH, expand=True)
+
+        # ── Global kechikish ──
+        glob_frame = ttk.LabelFrame(wrap, text="⏱ Barcha kutayotganlarga kechikish qo'shish",
+                                    padding=14)
+        glob_frame.pack(fill=tk.X, pady=(0, 16))
+
+        btn_row = ttk.Frame(glob_frame)
+        btn_row.pack(fill=tk.X)
+
+        for mins in [15, 30, 60]:
+            tk.Button(btn_row, text=f"+{mins} min",
+                      command=lambda m=mins: self._global_kechikish(m),
+                      bg="#F59E0B", fg="white",
+                      font=("Arial", 12, "bold"),
+                      width=10, pady=6, cursor="hand2").pack(side=tk.LEFT, padx=6)
+
+        custom_row = ttk.Frame(glob_frame)
+        custom_row.pack(fill=tk.X, pady=(10, 0))
+        ttk.Label(custom_row, text="Boshqa:").pack(side=tk.LEFT)
+        self.glob_daqiqa = tk.IntVar(value=20)
+        ttk.Spinbox(custom_row, from_=1, to=480, textvariable=self.glob_daqiqa,
+                    width=6).pack(side=tk.LEFT, padx=6)
+        ttk.Label(custom_row, text="daqiqa").pack(side=tk.LEFT)
+        tk.Button(custom_row, text="Kechiktirish",
+                  command=lambda: self._global_kechikish(self.glob_daqiqa.get()),
+                  bg="#F59E0B", fg="white",
+                  font=("Arial", 11, "bold"),
+                  padx=12, pady=4, cursor="hand2").pack(side=tk.LEFT, padx=10)
+
+        self.glob_status = tk.StringVar(value="")
+        ttk.Label(glob_frame, textvariable=self.glob_status,
+                  foreground="#10B981", font=("Arial", 10)).pack(anchor="w", pady=(8, 0))
+
+        # ── Individual bemor ──
+        ind_frame = ttk.LabelFrame(wrap, text="👤 Alohida bemor uchun",
+                                   padding=14)
+        ind_frame.pack(fill=tk.BOTH, expand=True)
+
+        sel_row = ttk.Frame(ind_frame)
+        sel_row.pack(fill=tk.X, pady=(0, 10))
+        ttk.Label(sel_row, text="Bemor:").pack(side=tk.LEFT)
+        self.bemor_var = tk.StringVar()
+        self.bemor_combo = ttk.Combobox(sel_row, textvariable=self.bemor_var,
+                                        state="readonly", width=40)
+        self.bemor_combo.pack(side=tk.LEFT, padx=8)
+        ttk.Button(sel_row, text="↻", command=self._load_navbat, width=4).pack(side=tk.LEFT)
+
+        act_row = ttk.Frame(ind_frame)
+        act_row.pack(fill=tk.X)
+
+        for mins in [15, 30, 60]:
+            tk.Button(act_row, text=f"+{mins} min",
+                      command=lambda m=mins: self._ind_uzaytir(m),
+                      bg="#3B82F6", fg="white",
+                      font=("Arial", 11, "bold"),
+                      width=9, pady=5, cursor="hand2").pack(side=tk.LEFT, padx=4)
+
+        tk.Button(act_row, text="🔄 Qayta qo'yish",
+                  command=self._qayta_qoyish,
+                  bg="#8B5CF6", fg="white",
+                  font=("Arial", 11, "bold"),
+                  padx=14, pady=5, cursor="hand2").pack(side=tk.LEFT, padx=12)
+
+        self.ind_status = tk.StringVar(value="")
+        ttk.Label(ind_frame, textvariable=self.ind_status,
+                  foreground="#10B981", font=("Arial", 10)).pack(anchor="w", pady=(10, 0))
+
+    def _load_navbat(self):
+        def worker():
+            try:
+                r = requests.get(f"{TV_SERVER_URL}/navbat/all", timeout=HTTP_TIMEOUT)
+                r.raise_for_status()
+                rows = r.json().get("navbatlar", [])
+                kutmoqdalar = [
+                    row for row in rows
+                    if row.get("holat", "kutmoqda") not in ("ketdi", "bekor")
+                ]
+                self.after(0, lambda: self._populate_navbat(kutmoqdalar))
+            except Exception as e:
+                msg = str(e)
+                self.after(0, lambda: self.ind_status.set(f"⚠️ {msg}"))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _populate_navbat(self, rows):
+        self._navbat_list = []
+        labels = []
+        for r in rows:
+            oid = r.get("order_id") or r.get("id")
+            ism = r.get("bemor_ism") or r.get("ism") or "Noma'lum"
+            raqam = r.get("navbat_raqami") or r.get("raqam") or "?"
+            vaqt = r.get("kutilgan_vaqt") or r.get("vaqt") or "—"
+            if oid:
+                self._navbat_list.append((oid, ism, raqam, vaqt))
+                labels.append(f"#{raqam} — {ism}  ({vaqt})")
+        self.bemor_combo["values"] = labels
+        if labels:
+            self.bemor_combo.current(0)
+
+    def _selected_order_id(self):
+        idx = self.bemor_combo.current()
+        if idx < 0 or idx >= len(self._navbat_list):
+            messagebox.showwarning("Tanlang", "Bitta bemor tanlang", parent=self)
+            return None
+        return self._navbat_list[idx][0]
+
+    def _global_kechikish(self, daqiqa: int):
+        def worker():
+            try:
+                r = requests.post(f"{TV_SERVER_URL}/navbat/kechikish",
+                                  json={"daqiqa": daqiqa}, timeout=HTTP_TIMEOUT)
+                r.raise_for_status()
+                data = r.json()
+                n = data.get("navbatlar_soni", "?")
+                self.after(0, lambda: self.glob_status.set(
+                    f"✓ +{daqiqa} daqiqa — {n} ta bemorga qo'shildi"))
+                self.after(0, self._load_navbat)
+            except Exception as e:
+                msg = str(e)
+                self.after(0, lambda: self.glob_status.set(f"⚠️ {msg}"))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _ind_uzaytir(self, daqiqa: int):
+        order_id = self._selected_order_id()
+        if not order_id:
+            return
+        def worker():
+            try:
+                r = requests.post(
+                    f"{TV_SERVER_URL}/navbat/vaqt-uzaytir/{order_id}",
+                    json={"daqiqa": daqiqa}, timeout=HTTP_TIMEOUT)
+                r.raise_for_status()
+                data = r.json()
+                yangi = data.get("yangi_vaqt", "?")
+                self.after(0, lambda: self.ind_status.set(
+                    f"✓ +{daqiqa} daqiqa → yangi vaqt: {yangi}"))
+                self.after(0, self._load_navbat)
+            except Exception as e:
+                msg = str(e)
+                self.after(0, lambda: self.ind_status.set(f"⚠️ {msg}"))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _qayta_qoyish(self):
+        order_id = self._selected_order_id()
+        if not order_id:
+            return
+        ism = self._navbat_list[self.bemor_combo.current()][1]
+        if not messagebox.askyesno(
+                "Tasdiqlash",
+                f"{ism} — keyingi batch oynasiga qayta qo'yilsinmi?",
+                parent=self):
+            return
+        def worker():
+            try:
+                r = requests.post(f"{TV_SERVER_URL}/navbat/qayta-qoyish",
+                                  json={"order_id": order_id}, timeout=HTTP_TIMEOUT)
+                r.raise_for_status()
+                data = r.json()
+                yangi = data.get("yangi_vaqt", "?")
+                self.after(0, lambda: self.ind_status.set(
+                    f"✓ Qayta qo'yildi → yangi vaqt: {yangi}"))
+                self.after(0, self._load_navbat)
+            except Exception as e:
+                msg = str(e)
+                self.after(0, lambda: self.ind_status.set(f"⚠️ {msg}"))
+        threading.Thread(target=worker, daemon=True).start()
+
+
+# ─────────────────────────────────────────────────────────────────
+# Tab 4: TV Buyruqlari (layout, stop_all, reboot)
+# ─────────────────────────────────────────────────────────────────
+
+class TvBuyruqlarTab(ttk.Frame):
+    """TV ga tezkor buyruqlar yuborish — layout, stop_all, reboot."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self._build_ui()
+
+    def _build_ui(self):
+        wrap = ttk.Frame(self, padding=20)
+        wrap.pack(fill=tk.BOTH, expand=True)
+
+        # ── Layout ──
+        layout_frame = ttk.LabelFrame(wrap, text="📐 TV Layout (ekran nisbati)",
+                                      padding=14)
+        layout_frame.pack(fill=tk.X, pady=(0, 16))
+
+        lbl_row = ttk.Frame(layout_frame)
+        lbl_row.pack(fill=tk.X, pady=(0, 8))
+        ttk.Label(lbl_row,
+                  text="Media (chap) / Navbat (o'ng) nisbati — navbat paneli har doim ko'rinadi",
+                  foreground="#555").pack(anchor="w")
+
+        btn_row = ttk.Frame(layout_frame)
+        btn_row.pack(fill=tk.X)
+
+        presets = [("70 / 30", 70, 30), ("65 / 35", 65, 35),
+                   ("60 / 40", 60, 40), ("50 / 50", 50, 50)]
+        self._layout_btns = []
+        for lbl, m, n in presets:
+            b = tk.Button(btn_row, text=lbl,
+                          command=lambda mv=m, nv=n: self._set_layout(mv, nv),
+                          bg="#1D4ED8", fg="white",
+                          font=("Arial", 12, "bold"),
+                          width=10, pady=6, cursor="hand2")
+            b.pack(side=tk.LEFT, padx=6)
+            self._layout_btns.append(b)
+
+        custom_row = ttk.Frame(layout_frame)
+        custom_row.pack(fill=tk.X, pady=(10, 0))
+        ttk.Label(custom_row, text="Custom: Media").pack(side=tk.LEFT)
+        self.custom_media = tk.IntVar(value=70)
+        ttk.Spinbox(custom_row, from_=30, to=90, textvariable=self.custom_media,
+                    width=5).pack(side=tk.LEFT, padx=4)
+        ttk.Label(custom_row, text="% | Navbat").pack(side=tk.LEFT, padx=(8, 4))
+        self.custom_navbat = tk.IntVar(value=30)
+        ttk.Spinbox(custom_row, from_=10, to=70, textvariable=self.custom_navbat,
+                    width=5).pack(side=tk.LEFT, padx=4)
+        ttk.Label(custom_row, text="%").pack(side=tk.LEFT)
+        tk.Button(custom_row, text="Yuborish",
+                  command=lambda: self._set_layout(
+                      self.custom_media.get(), self.custom_navbat.get()),
+                  bg="#1D4ED8", fg="white",
+                  font=("Arial", 11), padx=12, pady=4, cursor="hand2").pack(
+            side=tk.LEFT, padx=10)
+
+        # ── Tezkor buyruqlar ──
+        cmd_frame = ttk.LabelFrame(wrap, text="⚡ Tezkor buyruqlar", padding=14)
+        cmd_frame.pack(fill=tk.X, pady=(0, 16))
+
+        row1 = ttk.Frame(cmd_frame)
+        row1.pack(fill=tk.X, pady=(0, 8))
+
+        tk.Button(row1, text="■  Hammasini to'xtatish",
+                  command=self._stop_all,
+                  bg="#DC2626", fg="white",
+                  font=("Arial", 13, "bold"),
+                  padx=20, pady=8, cursor="hand2").pack(side=tk.LEFT, padx=6)
+
+        tk.Button(row1, text="🔄  TV qayta yuklash",
+                  command=self._reboot_app,
+                  bg="#6B7280", fg="white",
+                  font=("Arial", 12, "bold"),
+                  padx=16, pady=8, cursor="hand2").pack(side=tk.LEFT, padx=6)
+
+        tk.Button(row1, text="📢  Ticker yangilash",
+                  command=self._reload_ticker,
+                  bg="#059669", fg="white",
+                  font=("Arial", 12, "bold"),
+                  padx=16, pady=8, cursor="hand2").pack(side=tk.LEFT, padx=6)
+
+        self.cmd_status = tk.StringVar(value="")
+        ttk.Label(cmd_frame, textvariable=self.cmd_status,
+                  foreground="#10B981", font=("Arial", 11)).pack(anchor="w", pady=(8, 0))
+
+        # ── Web Admin havolasi ──
+        web_frame = ttk.LabelFrame(wrap, text="🌐 Web Admin Panel", padding=14)
+        web_frame.pack(fill=tk.X)
+
+        ttk.Label(web_frame,
+                  text="To'liq boshqaruv (media yuklash, navbat sozlash, playlist) uchun:",
+                  foreground="#555").pack(anchor="w")
+        url_label = tk.Label(web_frame,
+                             text=f"{TV_SERVER_URL}/admin",
+                             fg="#1D4ED8", cursor="hand2",
+                             font=("Arial", 12, "underline"))
+        url_label.pack(anchor="w", pady=(4, 0))
+        url_label.bind("<Button-1>", lambda e: self._open_browser())
+        ttk.Label(web_frame,
+                  text="Tarmoqdagi har qanday kompyuter yoki planshetdan brauzerda ochsa bo'ladi.",
+                  foreground="#888", font=("Arial", 9)).pack(anchor="w", pady=(2, 0))
+
+    def _send_command(self, action: str, extra: dict = None):
+        payload = {"action": action, **(extra or {})}
+        def worker():
+            try:
+                r = requests.post(f"{TV_SERVER_URL}/command",
+                                  json=payload, timeout=HTTP_TIMEOUT)
+                r.raise_for_status()
+                self.after(0, lambda: self.cmd_status.set(f"✓ '{action}' TV ga yuborildi"))
+            except Exception as e:
+                msg = str(e)
+                self.after(0, lambda: self.cmd_status.set(f"⚠️ {msg}"))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _set_layout(self, media: int, navbat: int):
+        def worker():
+            try:
+                r = requests.post(f"{TV_SERVER_URL}/command",
+                                  json={"action": "set_layout",
+                                        "media": media, "navbat": navbat},
+                                  timeout=HTTP_TIMEOUT)
+                r.raise_for_status()
+                self.after(0, lambda: self.cmd_status.set(
+                    f"✓ Layout: {media}% media / {navbat}% navbat"))
+            except Exception as e:
+                msg = str(e)
+                self.after(0, lambda: self.cmd_status.set(f"⚠️ {msg}"))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _stop_all(self):
+        if messagebox.askyesno("Tasdiqlash",
+                               "TV dagi barcha media to'xtatilsinmi?\n"
+                               "(Navbat ko'rinib qoladi)",
+                               parent=self):
+            self._send_command("stop_all")
+
+    def _reboot_app(self):
+        if messagebox.askyesno("Tasdiqlash", "TV APK qayta yuklansinmi?", parent=self):
+            self._send_command("reboot_app")
+
+    def _reload_ticker(self):
+        self._send_command("ticker_reload")
+
+    def _open_browser(self):
+        import webbrowser
+        webbrowser.open(f"{TV_SERVER_URL}/admin")
 
 
 # ─────────────────────────────────────────────────────────────────

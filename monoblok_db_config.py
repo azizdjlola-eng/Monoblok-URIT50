@@ -8,7 +8,11 @@ def load_db_config():
         "database": "lab_tizim",
         "port": 3306
     }
-    config_file = os.path.join(os.path.dirname(__file__), "db_config.txt")
+    try:
+        from baza_sozlama import oqish_yoli as _db_yoli
+        config_file = _db_yoli()
+    except Exception:
+        config_file = os.path.join(os.path.dirname(__file__), "db_config.txt")
     if os.path.exists(config_file):
         try:
             with open(config_file, "r", encoding="utf-8") as f:
