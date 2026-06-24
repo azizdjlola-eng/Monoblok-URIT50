@@ -1645,11 +1645,22 @@ def create_brusellez_table_in_doc(doc, result_json, order_info):
         ("Reaksiya Xeddelsona", "xeddelson", "Manfiy (-)"),
         ("Reaksiya Rayta",      "rayta",     "< 1:40"),
     ]
+    PENDING = "Kutilmoqda..."
     for ko_rsatkich, kalit, me_yor in rows_data:
         row = table.add_row()
+        natija_val = data.get(f"{kalit}_natija", '')
+        titr_val   = data.get(f"{kalit}_titr", '')
         _cell_write(row.cells[0], ko_rsatkich, align=WD_ALIGN_PARAGRAPH.LEFT)
-        _cell_write(row.cells[1], data.get(f"{kalit}_natija", ''), bold=True)
-        _cell_write(row.cells[2], data.get(f"{kalit}_titr", ''), bold=True)
+        if natija_val == PENDING:
+            p = row.cells[1].paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _set_para_spacing(p, 0, 0, line_spacing=1)
+            _add_run_tnr(p, PENDING, 11, bold=False, italic=True,
+                         color_rgb=RGBColor(0xC7, 0x6E, 0x00))
+            _cell_write(row.cells[2], '', bold=False)
+        else:
+            _cell_write(row.cells[1], natija_val, bold=True)
+            _cell_write(row.cells[2], titr_val, bold=True)
         _cell_write(row.cells[3], me_yor)
     doc.add_paragraph()
 
@@ -15247,7 +15258,9 @@ Sana: {_sana_fmt}"""
             ("Reaksiya Rayta",      "rayta",      "< 1:40"),
         ]
 
-        natija_opts = ["Manfiy (-)", "Musbat (+)", "Musbat (++)", "Musbat (+++)"]
+        xeddelson_opts = ["Manfiy (-)", "Musbat (+)", "Musbat (++)", "Musbat (+++)"]
+        rayta_opts     = ["Manfiy (-)", "Musbat (+)", "Musbat (++)", "Musbat (+++)", "Kutilmoqda..."]
+        opts_by_kalit  = {"xeddelson": xeddelson_opts, "rayta": rayta_opts}
         natija_vars = {}
         titr_vars = {}
 
@@ -15255,9 +15268,13 @@ Sana: {_sana_fmt}"""
             tk.Label(table_frame, text=ko_rsatkich, font=("Arial", 9),
                      relief="groove", width=28, pady=6, anchor="w", padx=5).grid(
                 row=row_idx, column=0, sticky="nsew", padx=1, pady=1)
-            n_var = tk.StringVar(value=old_result.get(f"{kalit}_natija", natija_opts[0]))
+            cur_opts = opts_by_kalit[kalit]
+            default_val = old_result.get(f"{kalit}_natija", cur_opts[0])
+            if default_val not in cur_opts:
+                default_val = cur_opts[0]
+            n_var = tk.StringVar(value=default_val)
             natija_vars[kalit] = n_var
-            n_menu = tk.OptionMenu(table_frame, n_var, *natija_opts)
+            n_menu = tk.OptionMenu(table_frame, n_var, *cur_opts)
             n_menu.config(font=("Arial", 9), width=12)
             n_menu.grid(row=row_idx, column=1, sticky="nsew", padx=1, pady=1)
             t_var = tk.StringVar(value=old_result.get(f"{kalit}_titr", ''))
