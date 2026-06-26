@@ -1,0 +1,39 @@
+{
+  "database": {
+    "host": "192.168.0.40",
+    "user": "lims",
+    "password": "azizmed2026",
+    "database": "lab_tizim",
+    "port": 3306
+  },
+  "siydik": {
+    "enabled": true,
+    "name": "URIT-50 (Siydik)",
+    "connection_type": "serial",
+    "com_port": "COM4",
+    "baudrate": 9600,
+    "bytesize": 8,
+    "parity": "N",
+    "stopbits": 1,
+    "timeout": 1,
+    "encoding": "utf-8"
+  },
+  "gemotologiya": {
+    "enabled": true,
+    "name": "BC-20S (Gemotologiya)",
+    "connection_type": "tcp_client",
+    "ip": "192.168.0.2",
+    "port": 5100,
+    "reconnect_interval": 5,
+    "encoding": "utf-8"
+  },
+  "bioximiya": {
+    "enabled": true,
+    "name": "BK-280 (Bioximiya)",
+    "connection_type": "tcp_server",
+    "ip": "0.0.0.0",
+    "port": 8087,
+    "lis_port": 8088,
+    "encoding": "utf-8"
+  }
+}

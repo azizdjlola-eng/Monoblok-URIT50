@@ -21,8 +21,17 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='repla
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from monoblok_db_config import DB_CONFIG
 
-SERVER_IP = "0.0.0.0"
-SERVER_PORT = 8087
+# Sozlamalar analizator_config.json dan (Tizim Sozlamalari oynasi orqali)
+try:
+    from monoblok_db_config import get_analyzer
+    _bio_cfg = get_analyzer("bioximiya")
+except Exception as _e:
+    print(f"[OGOHLANTIRISH] bioximiya config yuklanmadi: {_e}")
+    _bio_cfg = {}
+
+SERVER_IP = _bio_cfg.get("ip", "0.0.0.0")
+SERVER_PORT = int(_bio_cfg.get("port", 8087))
+ENCODING = _bio_cfg.get("encoding", "utf-8")
 
 BASE_DIR = r"G:\DASTUR\URIT 50\BK280\RAW_LOGS"
 ERRORS_DIR = r"G:\DASTUR\URIT 50\BK280\ERRORS"
@@ -295,7 +304,7 @@ def start_bk280_listener(host=None, port=None, order_update_callback=None):
                                 print("🔶 BK-280 ga ACK yuborildi.")
 
                                 # Matnni decode qilish
-                                text = full_data.decode("utf-8", errors="ignore")
+                                text = full_data.decode(ENCODING, errors="ignore")
                                 print("📥 HL7 xabar qabul qilindi:")
                                 print(text[:200], " ..." if len(text) > 200 else "")
                                 

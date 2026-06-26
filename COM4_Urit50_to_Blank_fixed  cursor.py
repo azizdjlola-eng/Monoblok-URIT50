@@ -18,8 +18,30 @@ from monoblok_db_config import DB_CONFIG
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ====== SOZLAMALAR ======
-COM_PORT = "COM4"        # URIT-50 ulangan port
-BAUDRATE = 9600
+# analizator_config.json dan yuklanadi (Tizim Sozlamalari oynasi orqali
+# kod tegmasdan o'zgartiriladi). Modul yo'q bo'lsa — standart qiymatlar.
+try:
+    from monoblok_db_config import get_analyzer
+    _siydik_cfg = get_analyzer("siydik")
+except Exception as _e:
+    print(f"[OGOHLANTIRISH] siydik config yuklanmadi: {_e}")
+    _siydik_cfg = {}
+
+COM_PORT = _siydik_cfg.get("com_port", "COM4")        # URIT-50 ulangan port
+BAUDRATE = int(_siydik_cfg.get("baudrate", 9600))
+SERIAL_BYTESIZE = int(_siydik_cfg.get("bytesize", 8))
+SERIAL_PARITY   = _siydik_cfg.get("parity", "N")
+SERIAL_STOPBITS = int(_siydik_cfg.get("stopbits", 1))
+SERIAL_TIMEOUT  = float(_siydik_cfg.get("timeout", 1))
+SERIAL_ENCODING = _siydik_cfg.get("encoding", "utf-8")
+
+# Konfiguratsiya qiymatlarini pyserial konstantalariga moslash
+_BYTESIZE_MAP = {5: serial.FIVEBITS, 6: serial.SIXBITS,
+                 7: serial.SEVENBITS, 8: serial.EIGHTBITS}
+_PARITY_MAP   = {"N": serial.PARITY_NONE, "E": serial.PARITY_EVEN,
+                 "O": serial.PARITY_ODD,  "M": serial.PARITY_MARK,
+                 "S": serial.PARITY_SPACE}
+_STOPBITS_MAP = {1: serial.STOPBITS_ONE, 2: serial.STOPBITS_TWO}
 
 # Asosiy papkalar
 BASE_DIR    = r"G:\Қилинган анализлар"  # Siydik tahlillari papkasi olib tashlandi
@@ -2113,10 +2135,10 @@ def read_one_block() -> str:
         with serial.Serial(
             port=COM_PORT,
             baudrate=BAUDRATE,
-            bytesize=serial.EIGHTBITS,
-            parity=serial.PARITY_NONE,
-            stopbits=serial.STOPBITS_ONE,
-            timeout=1,
+            bytesize=_BYTESIZE_MAP.get(SERIAL_BYTESIZE, serial.EIGHTBITS),
+            parity=_PARITY_MAP.get(SERIAL_PARITY, serial.PARITY_NONE),
+            stopbits=_STOPBITS_MAP.get(SERIAL_STOPBITS, serial.STOPBITS_ONE),
+            timeout=SERIAL_TIMEOUT,
         ) as ser:
             buffer = ""
 
@@ -2125,7 +2147,7 @@ def read_one_block() -> str:
                 if not chunk:
                     continue
 
-                text = chunk.decode(errors="ignore")
+                text = chunk.decode(SERIAL_ENCODING, errors="ignore")
                 buffer += text
 
                 if "\x03" in buffer:

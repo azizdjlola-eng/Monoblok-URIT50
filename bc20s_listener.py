@@ -30,15 +30,25 @@ import time
 from datetime import datetime, date
 
 # ─────────────────────────── CONFIG ───────────────────────────
-ANALYZER_IP     = "192.168.0.2"    # BC-20S analizator IP manzili
-ANALYZER_PORT   = 5100             # BC-20S TCP server porti
+# Sozlamalar analizator_config.json dan yuklanadi (Tizim Sozlamalari oynasi
+# orqali kod tegmasdan o'zgartiriladi). Fayl/modul yo'q bo'lsa — standart.
+try:
+    from monoblok_db_config import get_analyzer
+    _gema_cfg = get_analyzer("gemotologiya")
+except Exception as _e:
+    print(f"[OGOHLANTIRISH] gemotologiya config yuklanmadi: {_e}")
+    _gema_cfg = {}
+
+ANALYZER_IP     = _gema_cfg.get("ip", "192.168.0.2")        # BC-20S analizator IP manzili
+ANALYZER_PORT   = int(_gema_cfg.get("port", 5100))          # BC-20S TCP server porti
+ENCODING        = _gema_cfg.get("encoding", "utf-8")        # Matn kodirovkasi
 
 MLLP_START      = b"\x0b"         # <VT>  - Start Block
 MLLP_END        = b"\x1c\x0d"     # <FS><CR> - End Block
 HEARTBEAT       = b"\x02"         # Analizator heartbeat bayti
 
 SOCKET_TIMEOUT  = 10.0            # Socket timeout
-RECONNECT_INTERVAL = 5            # Qayta ulanish orasidagi kutish (sek)
+RECONNECT_INTERVAL = int(_gema_cfg.get("reconnect_interval", 5))  # Qayta ulanish kutishi (sek)
 MAX_RECONNECT   = 0               # 0 = cheksiz qayta ulanish (siydik analizatori kabi)
 
 # BC-20S natijalar papkasi — oyma-oy tartibda: G:\DASTUR\URIT 50\BC-20s\YYYYMM\
@@ -59,7 +69,7 @@ def _log(msg):
 
 # ─────────────────────────── MLLP ─────────────────────────────
 def _wrap_mllp(hl7: str) -> bytes:
-    return MLLP_START + hl7.encode("utf-8", errors="replace") + MLLP_END
+    return MLLP_START + hl7.encode(ENCODING, errors="replace") + MLLP_END
 
 def _unwrap_mllp(buf: bytes):
     """buf dan HL7 xabarlar ro'yxati va qolgan qismni qaytaradi"""
@@ -74,7 +84,7 @@ def _unwrap_mllp(buf: bytes):
             e = buf.index(MLLP_END, s + 1)
         except ValueError:
             break
-        msg = buf[s + 1:e].decode("utf-8", errors="ignore")
+        msg = buf[s + 1:e].decode(ENCODING, errors="ignore")
         messages.append(msg)
         idx = e + len(MLLP_END)
     return messages, buf[idx:]
