@@ -262,6 +262,8 @@ def load_blanka_config() -> dict:
         "header_bg_color": "2E75B6",
         "klinika_rang": "1E9943",
         "bemor_row_color": "E6E6E6",
+        "table_header_bg": "9DC3E6",
+        "group_title_color": "27AE60",
         "qr_link_template": "",
     }
     if os.path.exists(CONFIG_FILE):
@@ -291,6 +293,43 @@ def save_blanka_config(config: dict = None):
             json.dump(config, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"[OGOHLANTIRISH] Sozlamalarni saqlashda xato: {e}")
+    # Saqlashdan keyin global blanka ranglarini yangilash
+    refresh_blanka_colors()
+
+# ----------------------------------------------------------------------------
+# BLANKA RANGLARI — config dan yuklanadigan markaziy ranglar (printer siyoh
+# balansi uchun sozlanadi). Bu ranglar kod bo'ylab qattiq yozilgan emas — bir
+# joydan o'zgartiriladi: "Blanka Sozlamalari → Ranglar" oynasi.
+#   TABLE_HEADER_HEX  — jadval ustun sarlavhasi foni (standart ko'k #9DC3E6 → C ko'p)
+#   GROUP_TITLE_HEX   — tahlil guruhi sarlavhasi matni (standart yashil #27AE60)
+# ----------------------------------------------------------------------------
+TABLE_HEADER_HEX = "9DC3E6"
+GROUP_TITLE_HEX  = "27AE60"
+
+def refresh_blanka_colors():
+    """Global blanka ranglarini config dan qayta yuklash."""
+    global TABLE_HEADER_HEX, GROUP_TITLE_HEX
+    try:
+        cfg = load_blanka_config()
+        th = str(cfg.get('table_header_bg', '9DC3E6')).strip().lstrip('#').upper()
+        gt = str(cfg.get('group_title_color', '27AE60')).strip().lstrip('#').upper()
+        if len(th) == 6:
+            TABLE_HEADER_HEX = th
+        if len(gt) == 6:
+            GROUP_TITLE_HEX = gt
+    except Exception as e:
+        print(f"[OGOHLANTIRISH] Blanka ranglarini yuklashda xato: {e}")
+
+def _group_title_rgb():
+    """Tahlil guruhi sarlavhasi rangini RGBColor sifatida qaytaradi (config dan)."""
+    h = GROUP_TITLE_HEX if len(GROUP_TITLE_HEX) == 6 else "27AE60"
+    try:
+        return RGBColor(int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+    except Exception:
+        return _group_title_rgb()
+
+# Import paytida bir marta yuklab qo'yamiz
+refresh_blanka_colors()
 
 # TEST_NORMAS dict (hardcoded fallback normas)
 TEST_NORMAS = {
@@ -1310,7 +1349,7 @@ def extract_tables_from_docx(source_path: str, target_doc: Document,
             title_run._element.rPr.rFonts.set(qn('w:eastAsia'), "Times New Roman")
             title_run.font.size = Pt(14)
             title_run.font.bold = True
-            title_run.font.color.rgb = RGBColor(0x27, 0xae, 0x60)
+            title_run.font.color.rgb = _group_title_rgb()
             target_doc.add_paragraph()
         
         # Faqat jadvallarni ko'chirish
@@ -1361,7 +1400,7 @@ def create_ginekologik_table_in_doc(doc: Document, result_json: str, order_info:
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _set_para_spacing(title, 0, 0, line_spacing=1)
     r = _add_run_tnr(title, "GINEKOLOGIK SURTMA", 13, bold=True,
-                     color_rgb=RGBColor(0x27, 0xae, 0x60))
+                     color_rgb=_group_title_rgb())
 
     # Jadval — 4 ustun
     table = doc.add_table(rows=1, cols=4)
@@ -1372,7 +1411,7 @@ def create_ginekologik_table_in_doc(doc: Document, result_json: str, order_info:
     _apply_table_widths(table, [9.0, 3.33, 3.34, 3.33])
 
     # Sarlavha qatori — och ko'k fon, qora matn (B&W printerda yaxshi ko'rinadi)
-    HEADER_COLOR = "9DC3E6"
+    HEADER_COLOR = TABLE_HEADER_HEX
     headers = ["Ko'rsatkich", "Qin (V)", "Bachadon bo'yni (C)", "Siydik yo'li (U)"]
     for cell, header in zip(table.rows[0].cells, headers):
         _set_cell_shading(cell, HEADER_COLOR)
@@ -1417,11 +1456,11 @@ def _add_section_title(doc, title_text):
     title = doc.add_paragraph()
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _set_para_spacing(title, 0, 0, line_spacing=1)
-    _add_run_tnr(title, title_text, 13, bold=True, color_rgb=RGBColor(0x27, 0xae, 0x60))
+    _add_run_tnr(title, title_text, 13, bold=True, color_rgb=_group_title_rgb())
 
 def _add_table_header(table, headers, widths):
     """Jadvalga sarlavha qatori (ko'k fon) qo'shish."""
-    HEADER_COLOR = "9DC3E6"
+    HEADER_COLOR = TABLE_HEADER_HEX
     _apply_table_widths(table, widths)
     for cell, hdr in zip(table.rows[0].cells, headers):
         _set_cell_shading(cell, HEADER_COLOR)
@@ -1742,9 +1781,9 @@ def create_pepsinogen_table_in_doc(doc, result_json, order_info):
     heading = doc.add_paragraph()
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _set_para_spacing(heading, 0, 0, line_spacing=1.0)
-    _add_run_tnr(heading, "PEPSINOGEN", 14, bold=True, color_rgb=RGBColor(0x27, 0xae, 0x60))
+    _add_run_tnr(heading, "PEPSINOGEN", 14, bold=True, color_rgb=_group_title_rgb())
 
-    HEADER_COLOR = "9DC3E6"
+    HEADER_COLOR = TABLE_HEADER_HEX
     table = doc.add_table(rows=1, cols=4)
     table.style = 'Table Grid'
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -1797,14 +1836,14 @@ def create_gtt_table_in_doc(doc, result_json, order_info):
     _set_para_spacing(heading, 0, 0, line_spacing=1.0)
     _add_run_tnr(heading,
                  "GLYUKOZAGA TOLERANTLIK TESTI (75 g glyukoza bilan)",
-                 14, bold=True, color_rgb=RGBColor(0x27, 0xae, 0x60))
+                 14, bold=True, color_rgb=_group_title_rgb())
 
     table = doc.add_table(rows=1, cols=4)
     table.style = 'Table Grid'
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     _apply_table_widths(table, [7.0, 4.0, 4.0, 4.0])
 
-    HEADER_COLOR = "9DC3E6"
+    HEADER_COLOR = TABLE_HEADER_HEX
     for cell, hdr in zip(table.rows[0].cells,
                           ["Tahlil nomi", "Natija", "Norma", "O\u2019lchov birligi"]):
         _set_cell_shading(cell, HEADER_COLOR)
@@ -2534,7 +2573,7 @@ def _create_blood_group_table(doc, raw_value):
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _set_para_spacing(heading, 0, 0, line_spacing=1.0)
     _add_run_tnr(heading, "QON GURUHI VA REZUS FAKTOR", 13, bold=True,
-                 color_rgb=RGBColor(0x27, 0xae, 0x60))
+                 color_rgb=_group_title_rgb())
     qg, ro = '', ''
     if raw_value:
         try:
@@ -2554,7 +2593,7 @@ def _create_blood_group_table(doc, raw_value):
                     qg = result_str
         except Exception:
             qg = str(raw_value)
-    HEADER_COLOR = "9DC3E6"
+    HEADER_COLOR = TABLE_HEADER_HEX
     WORD_BG_COLOR = "FFF2CC"
     table = doc.add_table(rows=1, cols=3)
     table.style = 'Table Grid'
@@ -2583,7 +2622,7 @@ def _create_blood_group_table(doc, raw_value):
         p_belgi.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_para_spacing(p_belgi, 0, 0, line_spacing=1)
         _add_run_tnr(p_belgi, belgi, 12, bold=True,
-                     color_rgb=RGBColor(0x27, 0xae, 0x60))
+                     color_rgb=_group_title_rgb())
         _set_cell_shading(row.cells[2], WORD_BG_COLOR)
         p_soz = row.cells[2].paragraphs[0]
         p_soz.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -2703,7 +2742,7 @@ def create_hematology_cbc_table_in_doc(doc: Document, result_data, order_info: d
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _set_para_spacing(heading, 0, 0, line_spacing=1.0)
     _add_run_tnr(heading, "UMUMIY QON TAHLILI", 14, bold=True,
-                 color_rgb=RGBColor(0x27, 0xae, 0x60))
+                 color_rgb=_group_title_rgb())
     sample_no = rd.get('sid') or rd.get('sno') or order_info.get('sample_id', '') or ''
     meta = f"Avtomatik gematologik analizator: Mindray BC-20S namuna sample № {sample_no}".strip()
     if meta:
@@ -2711,7 +2750,7 @@ def create_hematology_cbc_table_in_doc(doc: Document, result_data, order_info: d
         p_meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_para_spacing(p_meta, 0, 0, line_spacing=1.0)
         _add_run_tnr(p_meta, meta, 9)
-    HEADER_COLOR = "9DC3E6"
+    HEADER_COLOR = TABLE_HEADER_HEX
     table = doc.add_table(rows=1, cols=5)
     table.style = 'Table Grid'
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -2846,7 +2885,7 @@ def create_urine_full_table_in_doc(doc: Document, result_data, order_info: dict)
         tbl_fizik.alignment = WD_TABLE_ALIGNMENT.CENTER
         _apply_table_widths(tbl_fizik, [4.5, 2.0, 5.0, 3.5, 4.0])
         for cell, hdr in zip(tbl_fizik.rows[0].cells, ["Ko'rsatkich", "Kod", "Natija", "Norma", "O'lchov birligi"]):
-            _set_cell_shading(cell, "9DC3E6")
+            _set_cell_shading(cell, TABLE_HEADER_HEX)
             ph = cell.paragraphs[0]
             ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
             _set_para_spacing(ph, 0, 0, line_spacing=1)
@@ -2884,7 +2923,7 @@ def create_urine_full_table_in_doc(doc: Document, result_data, order_info: dict)
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER if i in (1, 2, 4) else WD_ALIGN_PARAGRAPH.LEFT
                 _set_para_spacing(p, 0, 0, line_spacing=1)
                 _add_run_tnr(p, txt, 11, bold=(i == 2 and bool(natija)), color_rgb=fizik_color if i == 2 else None)
-    HEADER_COLOR = "9DC3E6"
+    HEADER_COLOR = TABLE_HEADER_HEX
     table = doc.add_table(rows=1, cols=5)
     table.style = 'Table Grid'
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -3926,14 +3965,14 @@ def _create_bilirubin_section(doc, bili_tests: list, test_results: dict, order_i
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _set_para_spacing(heading, 0, 0, line_spacing=1.0)
     _add_run_tnr(heading, "BILIRUBIN  (umumiy, bog\u2018langan, erkin)", 14, bold=True,
-                 color_rgb=RGBColor(0x27, 0xae, 0x60))
+                 color_rgb=_group_title_rgb())
 
     BILI_ROWS = [
         ("Umumiy Bilirubin",        "umumiy",     "3,4 \u2013 20,5", "mkmol/l"),
         ("Bog\u2018langan Bilirubin", "bog_langan", "0,86 \u2013 5,3",  "mkmol/l"),
         ("Erkin Bilirubin",         "erkin",      "1,7 \u2013 17,1",  "mkmol/l"),
     ]
-    HEADER_COLOR = "9DC3E6"
+    HEADER_COLOR = TABLE_HEADER_HEX
     table = doc.add_table(rows=1, cols=4)
     table.style = 'Table Grid'
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -4098,9 +4137,9 @@ def _create_lipid_spektri_section(doc, lipid_tests: list, test_results: dict, or
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _set_para_spacing(heading, 0, 0, line_spacing=1.0)
     _add_run_tnr(heading, "LIPID SPEKTRI", 14, bold=True,
-                 color_rgb=RGBColor(0x27, 0xae, 0x60))
+                 color_rgb=_group_title_rgb())
 
-    HEADER_COLOR = "9DC3E6"
+    HEADER_COLOR = TABLE_HEADER_HEX
     table = doc.add_table(rows=1, cols=4)
     table.style = 'Table Grid'
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -4303,9 +4342,9 @@ def _create_buyrak_paneli_section(doc, buyrak_tests: list, test_results: dict, o
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _set_para_spacing(heading, 0, 0, line_spacing=1.0)
     _add_run_tnr(heading, "BUYRAK PANELI", 14, bold=True,
-                 color_rgb=RGBColor(0x27, 0xae, 0x60))
+                 color_rgb=_group_title_rgb())
 
-    HEADER_COLOR = "9DC3E6"
+    HEADER_COLOR = TABLE_HEADER_HEX
     table = doc.add_table(rows=1, cols=4)
     table.style = 'Table Grid'
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -4412,9 +4451,9 @@ def _create_revmoproba_auto_section(doc, revmo_tests: list, test_results: dict, 
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _set_para_spacing(heading, 0, 0, line_spacing=1.0)
     _add_run_tnr(heading, "REVMOPROBA to\u2018liq (avtomat)", 14, bold=True,
-                 color_rgb=RGBColor(0x27, 0xae, 0x60))
+                 color_rgb=_group_title_rgb())
 
-    HEADER_COLOR = "9DC3E6"
+    HEADER_COLOR = TABLE_HEADER_HEX
     table = doc.add_table(rows=1, cols=4)
     table.style = 'Table Grid'
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -4461,9 +4500,9 @@ def _create_revmoproba_qolda_section(doc, revmo_tests: list, test_results: dict,
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _set_para_spacing(heading, 0, 0, line_spacing=1.0)
     _add_run_tnr(heading, "REVMOPROBA to\u2018liq (qo\u02bblda)", 14, bold=True,
-                 color_rgb=RGBColor(0x27, 0xae, 0x60))
+                 color_rgb=_group_title_rgb())
 
-    HEADER_COLOR = "9DC3E6"
+    HEADER_COLOR = TABLE_HEADER_HEX
     table = doc.add_table(rows=1, cols=4)
     table.style = 'Table Grid'
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -4526,7 +4565,7 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
         table.style = 'Table Grid'
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
 
-        HEADER_COLOR = "9DC3E6"
+        HEADER_COLOR = TABLE_HEADER_HEX
         headers = ["Tahlil nomi", "Natija", "Norma", "O'lchov birligi"]
         for cell, hdr in zip(table.rows[0].cells, headers):
             _set_cell_shading(cell, HEADER_COLOR)
@@ -4557,7 +4596,7 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
                             hrow = table.add_row()
                             _keep_row_together(hrow)
                             hmerged = hrow.cells[0].merge(hrow.cells[3])
-                            _set_cell_shading(hmerged, "9DC3E6")
+                            _set_cell_shading(hmerged, TABLE_HEADER_HEX)
                             hph = hmerged.paragraphs[0]
                             hph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                             _set_para_spacing(hph, 0, 0, line_spacing=1)
@@ -4601,7 +4640,7 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
                     row = table.add_row()
                     _keep_row_together(row)
                     merged = row.cells[0].merge(row.cells[3])
-                    _set_cell_shading(merged, "9DC3E6")
+                    _set_cell_shading(merged, TABLE_HEADER_HEX)
                     ph = merged.paragraphs[0]
                     ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     _set_para_spacing(ph, 0, 0, line_spacing=1)
@@ -4634,7 +4673,7 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
                                 _hr = table.add_row()
                                 _keep_row_together(_hr)
                                 _hm = _hr.cells[0].merge(_hr.cells[3])
-                                _set_cell_shading(_hm, "9DC3E6")
+                                _set_cell_shading(_hm, TABLE_HEADER_HEX)
                                 _hph = _hm.paragraphs[0]
                                 _hph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                 _set_para_spacing(_hph, 0, 0, line_spacing=1)
@@ -4815,7 +4854,7 @@ def create_simple_table_for_tests(doc: Document, tests: list, order_info: dict, 
         table.style = 'Table Grid'
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
 
-        HEADER_COLOR = "9DC3E6"
+        HEADER_COLOR = TABLE_HEADER_HEX
         headers = ["Tahlil nomi", "Natija", "Norma", "O'lchov birligi"]
         for cell, hdr in zip(table.rows[0].cells, headers):
             _set_cell_shading(cell, HEADER_COLOR)
@@ -5070,7 +5109,7 @@ def create_unified_blank(order_id: int, order_info: dict, organized: dict, test_
             category_run._element.rPr.rFonts.set(qn('w:eastAsia'), "Times New Roman")
             category_run.font.size = Pt(14)
             category_run.font.bold = True
-            category_run.font.color.rgb = RGBColor(0x27, 0xae, 0x60)
+            category_run.font.color.rgb = _group_title_rgb()
             template_path = template_tests[0]['template_path']
             tests_for_template = [item['test'] for item in template_tests]
             try:
@@ -5098,7 +5137,7 @@ def create_unified_blank(order_id: int, order_info: dict, organized: dict, test_
             run._element.rPr.rFonts.set(qn('w:eastAsia'), "Times New Roman")
             run.font.size = Pt(14)
             run.font.bold = True
-            run.font.color.rgb = RGBColor(0x27, 0xae, 0x60)
+            run.font.color.rgb = _group_title_rgb()
             create_results_table(doc, express_tests, "EXPRESS", order_info, test_results)
             is_first_section = False
 
@@ -5146,7 +5185,7 @@ def create_unified_blank(order_id: int, order_info: dict, organized: dict, test_
                         run._element.rPr.rFonts.set(qn('w:eastAsia'), "Times New Roman")
                         run.font.size = Pt(14)
                         run.font.bold = True
-                        run.font.color.rgb = RGBColor(0x27, 0xae, 0x60)
+                        run.font.color.rgb = _group_title_rgb()
                         create_results_table(doc, bio_only, group, order_info, test_results)
                         is_first_section = False
 
@@ -5210,7 +5249,7 @@ def create_unified_blank(order_id: int, order_info: dict, organized: dict, test_
                         run._element.rPr.rFonts.set(qn('w:eastAsia'), "Times New Roman")
                         run.font.size = Pt(14)
                         run.font.bold = True
-                        run.font.color.rgb = RGBColor(0x27, 0xae, 0x60)
+                        run.font.color.rgb = _group_title_rgb()
                         create_results_table(doc, test_only, group, order_info, test_results)
                         is_first_section = False
 
@@ -5281,7 +5320,7 @@ def create_unified_blank(order_id: int, order_info: dict, organized: dict, test_
                         run._element.rPr.rFonts.set(qn('w:eastAsia'), "Times New Roman")
                         run.font.size = Pt(14)
                         run.font.bold = True
-                        run.font.color.rgb = RGBColor(0x27, 0xae, 0x60)
+                        run.font.color.rgb = _group_title_rgb()
                         create_results_table(doc, urine_normal, group, order_info, test_results)
                         is_first_section = False
 
@@ -5315,7 +5354,7 @@ def create_unified_blank(order_id: int, order_info: dict, organized: dict, test_
                         run._element.rPr.rFonts.set(qn('w:eastAsia'), "Times New Roman")
                         run.font.size = Pt(14)
                         run.font.bold = True
-                        run.font.color.rgb = RGBColor(0x27, 0xae, 0x60)
+                        run.font.color.rgb = _group_title_rgb()
                         create_results_table(doc, ifa_regular, group, order_info, test_results)
                         is_first_section = False
 
@@ -5346,7 +5385,7 @@ def create_unified_blank(order_id: int, order_info: dict, organized: dict, test_
                         run._element.rPr.rFonts.set(qn('w:eastAsia'), "Times New Roman")
                         run.font.size = Pt(14)
                         run.font.bold = True
-                        run.font.color.rgb = RGBColor(0x27, 0xae, 0x60)
+                        run.font.color.rgb = _group_title_rgb()
                     create_results_table(doc, group_tests_list, group, order_info, test_results)
                     # GEM guruhida CBC bo'lsa qondan mazok morfologiyasini qo'shish
                     _has_cbc_in_group = any(_is_hematology_cbc_test(t.get('nomi', ''))
@@ -6195,12 +6234,12 @@ def generate_unified_blank(order_id):
             heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
             _set_para_spacing(heading, 0, 0, line_spacing=1.0)
             _add_run_tnr(heading, "EKSPRESS TESTLAR NATIJALARI", 14, bold=True,
-                         color_rgb=RGBColor(0x27, 0xae, 0x60))
+                         color_rgb=_group_title_rgb())
             table = doc.add_table(rows=1, cols=4)
             table.style = 'Table Grid'
             table.alignment = WD_TABLE_ALIGNMENT.CENTER
             _apply_table_widths(table, [1.5, 9.0, 4.5, 4.0])
-            HEADER_COLOR = "9DC3E6"
+            HEADER_COLOR = TABLE_HEADER_HEX
             for cell, hdr in zip(table.rows[0].cells, ["№", "Tahlil nomi", "Natija", "Norma"]):
                 _set_cell_shading(cell, HEADER_COLOR)
                 ph = cell.paragraphs[0]
@@ -6320,7 +6359,7 @@ def generate_unified_blank(order_id):
                                 hrow2 = table.add_row()
                                 _keep_row_together(hrow2)
                                 hm2 = hrow2.cells[0].merge(hrow2.cells[3])
-                                _set_cell_shading(hm2, "9DC3E6")
+                                _set_cell_shading(hm2, TABLE_HEADER_HEX)
                                 hp2 = hm2.paragraphs[0]
                                 hp2.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                 _set_para_spacing(hp2, 0, 0, line_spacing=1)
@@ -6388,7 +6427,7 @@ def generate_unified_blank(order_id):
                         row = table.add_row()
                         _keep_row_together(row)
                         merged = row.cells[0].merge(row.cells[3])
-                        _set_cell_shading(merged, "9DC3E6")
+                        _set_cell_shading(merged, TABLE_HEADER_HEX)
                         ph = merged.paragraphs[0]
                         ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                         _set_para_spacing(ph, 0, 0, line_spacing=1)
@@ -6446,7 +6485,7 @@ def generate_unified_blank(order_id):
                             hrow_rm = table.add_row()
                             _keep_row_together(hrow_rm)
                             hm_rm = hrow_rm.cells[0].merge(hrow_rm.cells[3])
-                            _set_cell_shading(hm_rm, "9DC3E6")
+                            _set_cell_shading(hm_rm, TABLE_HEADER_HEX)
                             hp_rm = hm_rm.paragraphs[0]
                             hp_rm.alignment = WD_ALIGN_PARAGRAPH.CENTER
                             _set_para_spacing(hp_rm, 0, 0, line_spacing=1)
@@ -6616,7 +6655,7 @@ def generate_unified_blank(order_id):
                 table.alignment = WD_TABLE_ALIGNMENT.CENTER
                 widths = [7.0, 3.0, 6.0, 3.0] if guruh_code == "IFA" else [7.0, 4.0, 4.0, 4.0]
                 _apply_table_widths(table, widths)
-                HEADER_COLOR = "9DC3E6"
+                HEADER_COLOR = TABLE_HEADER_HEX
                 for cell, hdr in zip(table.rows[0].cells, ["Tahlil nomi", "Natija", "Norma", "O'lchov birligi"]):
                     _set_cell_shading(cell, HEADER_COLOR)
                     ph = cell.paragraphs[0]
@@ -6649,7 +6688,7 @@ def generate_unified_blank(order_id):
                             heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
                             _set_para_spacing(heading, 0, 0, line_spacing=1.0)
                             _add_run_tnr(heading, guruh_nomi, 14, bold=True,
-                                         color_rgb=RGBColor(0x27, 0xae, 0x60))
+                                         color_rgb=_group_title_rgb())
                         table = _make_4col_table(doc, guruh_code)
                         for r in bio_only_r:
                             tn = (r.get('test_name') or 'N/A').strip()
@@ -6682,7 +6721,7 @@ def generate_unified_blank(order_id):
                         heading_b.alignment = WD_ALIGN_PARAGRAPH.CENTER
                         _set_para_spacing(heading_b, 0, 0, line_spacing=1.0)
                         _add_run_tnr(heading_b, "BILIRUBIN  (umumiy, bog\u2018langan, erkin)", 14, bold=True,
-                                     color_rgb=RGBColor(0x27, 0xae, 0x60))
+                                     color_rgb=_group_title_rgb())
 
                         # Bemorning aniq yoshini (kunlarda) hisoblash — chaqaloqlar uchun
                         _age_days_bili = None
@@ -6785,7 +6824,7 @@ def generate_unified_blank(order_id):
                         heading_rm.alignment = WD_ALIGN_PARAGRAPH.CENTER
                         _set_para_spacing(heading_rm, 0, 0, line_spacing=1.0)
                         _add_run_tnr(heading_rm, "REVMOPROBA to\u2018liq (avtomat)", 14, bold=True,
-                                     color_rgb=RGBColor(0x27, 0xae, 0x60))
+                                     color_rgb=_group_title_rgb())
                         tbl_rm = _make_4col_table(doc, "BIO")
                         for r in sub_r:
                             tn = (r.get('test_name') or 'N/A').strip()
@@ -6805,7 +6844,7 @@ def generate_unified_blank(order_id):
                             heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
                             _set_para_spacing(heading, 0, 0, line_spacing=1.0)
                             _add_run_tnr(heading, guruh_nomi, 14, bold=True,
-                                         color_rgb=RGBColor(0x27, 0xae, 0x60))
+                                         color_rgb=_group_title_rgb())
                         table = _make_4col_table(doc, guruh_code)
                         for r in other_only:
                             tn = (r.get('test_name') or 'N/A').strip()
@@ -6824,7 +6863,7 @@ def generate_unified_blank(order_id):
                         heading_rmo.alignment = WD_ALIGN_PARAGRAPH.CENTER
                         _set_para_spacing(heading_rmo, 0, 0, line_spacing=1.0)
                         _add_run_tnr(heading_rmo, "REVMOPROBA to\u2018liq (avtomat)", 14, bold=True,
-                                     color_rgb=RGBColor(0x27, 0xae, 0x60))
+                                     color_rgb=_group_title_rgb())
                         tbl_rmo = _make_4col_table(doc, "BIO")
                         for r in sub_o:
                             tn = (r.get('test_name') or 'N/A').strip()
@@ -6851,7 +6890,7 @@ def generate_unified_blank(order_id):
                             heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
                             _set_para_spacing(heading, 0, 0, line_spacing=1.0)
                             _add_run_tnr(heading, guruh_nomi, 14, bold=True,
-                                         color_rgb=RGBColor(0x27, 0xae, 0x60))
+                                         color_rgb=_group_title_rgb())
                         if urine_full_rd:
                             create_urine_full_table_in_doc(doc, urine_full_rd, order_info)
                         else:
@@ -6868,7 +6907,7 @@ def generate_unified_blank(order_id):
                             heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
                             _set_para_spacing(heading, 0, 0, line_spacing=1.0)
                             _add_run_tnr(heading, guruh_nomi, 14, bold=True,
-                                         color_rgb=RGBColor(0x27, 0xae, 0x60))
+                                         color_rgb=_group_title_rgb())
                         table = _make_4col_table(doc, guruh_code)
                         for r in group_results:
                             tn = (r.get('test_name') or 'N/A').strip()
@@ -12507,6 +12546,40 @@ Sana: {_sana_fmt}"""
             # Standart blanka yo'q - oddiy norma ko'rsatish
             messagebox.showinfo("Ma'lumot", f"Bu tahlil uchun standart blanka mavjud emas.\n\nTahlil: {test_name}")
     
+    def _get_analyzer_managed_type(self, test_id):
+        """Test analizator tomonidan to'ldiriladimi (siydik / gemotologiya) — turini qaytaradi yoki None.
+
+        Bunday testlar JSON natija sifatida saqlanadi. Ularni klaviatura yoki sichqoncha bilan
+        oddiy MATN sifatida tahrirlash MUMKIN EMAS — aks holda JSON buziladi va tahlil blankaga
+        tushmay qoladi (masalan: siydikning umumiy tahlili Sample ID matniga aylanib qoladi).
+        """
+        # 1) Saqlangan natija analizator JSON bo'lsa — eng ishonchli belgi
+        rj = self.test_results.get(test_id, '')
+        if rj and isinstance(rj, str) and rj.strip().startswith('{'):
+            try:
+                import json as _j
+                rd = _j.loads(rj)
+                if isinstance(rd, dict):
+                    jt = rd.get('type')
+                    if jt in ('urine', 'hematology', 'hematology_cbc'):
+                        return jt
+                    # Eski CBC format: 'type' yo'q, lekin 'source' bor va oddiy 'result' emas
+                    if not jt and rd.get('source') and 'result' not in rd:
+                        return 'hematology'
+            except Exception:
+                pass
+        # 2) Natija hali yo'q bo'lsa ham — nom bo'yicha aniqlash (analizator to'ldiradi)
+        test_name = ''
+        for t in self.current_tests:
+            if t['id'] == test_id:
+                test_name = t.get('nomi', '')
+                break
+        if _is_urine_umumiy_test(test_name):
+            return 'urine'
+        if _is_hematology_cbc_test(test_name):
+            return 'hematology_cbc'
+        return None
+
     def _show_analyzer_result_popup(self, test_id):
         """Analizator natijasini ko'rsatish popup oynasi (siydik / gemotologiya)"""
         import json as _json
@@ -13075,7 +13148,15 @@ Sana: {_sana_fmt}"""
         
         if not test_data:
             return
-        
+
+        # Analizator (siydik / gemotologiya) testlari oddiy matn sifatida tahrirlanmaydi.
+        # Natija bor bo'lsa — ko'rish oynasini ochamiz; yo'q bo'lsa — hech narsa qilmaymiz
+        # (analizator to'ldiradi). Bu JSON natija buzilishining oldini oladi.
+        if self._get_analyzer_managed_type(test_id):
+            if self.test_results.get(test_id):
+                self._show_analyzer_result_popup(test_id)
+            return
+
         # Test turini aniqlash (DB so'rovi YO'Q - test_data dan o'qish)
         test_type_from_db = test_data.get('type', '') if test_data else ''
         response_options = test_data.get('response_options', '') if test_data else ''
@@ -13404,7 +13485,19 @@ Sana: {_sana_fmt}"""
         
         result = self.result_entry.get().strip()
         test_id = self.editing_test_id
-        
+
+        # XAVFSIZLIK TO'SIG'I: analizator (siydik / gemotologiya) JSON natijasini
+        # oddiy matn bilan ALMASHTIRMASLIK. Aks holda tahlil blankaga tushmay qoladi.
+        if self._get_analyzer_managed_type(test_id):
+            try:
+                self.result_entry.destroy()
+            except Exception:
+                pass
+            self.result_entry = None
+            self.editing_item = None
+            self.editing_test_id = None
+            return
+
         # Test ma'lumotlarini olish
         test_data = None
         test_name = ""
@@ -13413,7 +13506,7 @@ Sana: {_sana_fmt}"""
                 test_data = test
                 test_name = test.get('nomi', '')
                 break
-        
+
         if not test_data:
             return
         
@@ -13589,11 +13682,34 @@ Sana: {_sana_fmt}"""
             self._open_edit_for_item(sel[0])
         return "break"
 
+    def _item_base_test_id(self, item):
+        """Qator tegidan asosiy test_id ni olish (multi-component sub-qatorlar uchun ham)."""
+        try:
+            tags = self.tests_tree.item(item).get('tags') or ()
+            if not tags:
+                return None
+            tag_str = str(tags[0])
+            base = tag_str.split("_", 1)[0] if "_" in tag_str else tag_str
+            return int(base)
+        except Exception:
+            return None
+
     def _navigate_to_item(self, item, direction='next', delay=80):
         """Keyingi (yoki oldingi) qatorga o'tib, tegishli edit ochish.
-        Barcha test turlari (express, qon guruhi, bilirubin, ginekologik) to'g'ri ochiladi."""
+        Barcha test turlari (express, qon guruhi, bilirubin, ginekologik) to'g'ri ochiladi.
+        Analizator (siydik / gemotologiya) qatorlari TASHLAB ketiladi — ular klaviatura
+        bilan tahrirlanmaydi, shu sababli Enter oqimi ularda to'xtab qolmaydi."""
         try:
             target = self.tests_tree.next(item) if direction == 'next' else self.tests_tree.prev(item)
+            # Analizator qatorlarini o'tkazib yuborish (cheksiz aylanmadan himoyalangan)
+            guard = 0
+            while target and guard < 500:
+                base_id = self._item_base_test_id(target)
+                if base_id is not None and self._get_analyzer_managed_type(base_id):
+                    target = self.tests_tree.next(target) if direction == 'next' else self.tests_tree.prev(target)
+                    guard += 1
+                    continue
+                break
             if target:
                 self.tests_tree.selection_set(target)
                 self.tests_tree.focus(target)
@@ -13656,6 +13772,14 @@ Sana: {_sana_fmt}"""
                 test_name = t.get('nomi', '')
                 break
         if not test_data:
+            return
+
+        # ── Analizator testi (siydik / gemotologiya) — oddiy edit OCHILMAYDI ──────
+        # Natija bor bo'lsa ko'rish oynasini ochamiz; aks holda hech narsa qilmaymiz.
+        # Bu JSON natijaning oddiy matnga aylanib buzilishini oldini oladi.
+        if self._get_analyzer_managed_type(test_id):
+            if self.test_results.get(test_id):
+                self._show_analyzer_result_popup(test_id)
             return
 
         tname_lower      = test_name.lower()
@@ -17351,9 +17475,11 @@ Sana: {_sana_fmt}"""
 
         color_vars = {}
         color_labels = [
-            ("klinika_rang",    "Klinika nomi rangi:",     config.get('klinika_rang', '1E9943')),
-            ("header_bg_color", "Bemor jadvali fon rangi:", config.get('header_bg_color', '2E75B6')),
-            ("bemor_row_color", "Bemor qator fon rangi:",   config.get('bemor_row_color', 'E6E6E6')),
+            ("klinika_rang",      "Klinika nomi rangi:",          config.get('klinika_rang', '1E9943')),
+            ("header_bg_color",   "Bemor jadvali fon rangi:",     config.get('header_bg_color', '2E75B6')),
+            ("bemor_row_color",   "Bemor qator fon rangi:",       config.get('bemor_row_color', 'E6E6E6')),
+            ("table_header_bg",   "Jadval sarlavha foni:",        config.get('table_header_bg', '9DC3E6')),
+            ("group_title_color", "Tahlil guruhi sarlavhasi:",    config.get('group_title_color', '27AE60')),
         ]
 
         for i, (key, label, default_hex) in enumerate(color_labels):
@@ -17388,6 +17514,37 @@ Sana: {_sana_fmt}"""
             ttk.Button(rang_lf, text="Tanlash...", command=_pick_color).grid(row=i, column=3, pady=3)
 
         rang_lf.columnconfigure(1, weight=0)
+
+        # ── Tayyor rang to'plamlari (presetlar) — siyoh balansini tezda o'zgartirish ──
+        # Har bir preset faqat jadval/guruh ranglarini o'zgartiradi (qora matn o'zgarmaydi).
+        # Maqsad: qaysi siyoh ortib qolsa, shu rangni ko'p ishlatadigan presetni tanlash.
+        presets = {
+            "Ko'k-yashil (standart)":   {"table_header_bg": "9DC3E6", "group_title_color": "27AE60"},
+            "Sariq-jigarrang (C tejash)": {"table_header_bg": "FCE4A6", "group_title_color": "B8860B"},
+            "To'q sariq (C tejash)":    {"table_header_bg": "FBD7B5", "group_title_color": "C76E00"},
+            "Pushti-magenta (LM/M)":    {"table_header_bg": "F4C7DC", "group_title_color": "B5179E"},
+        }
+
+        preset_row = len(color_labels)
+        ttk.Label(rang_lf, text="Tayyor to'plam:").grid(
+            row=preset_row, column=0, sticky=tk.W, pady=(8, 3), padx=(0, 5))
+        preset_var = tk.StringVar(value="")
+        preset_combo = ttk.Combobox(rang_lf, textvariable=preset_var,
+                                     values=list(presets.keys()),
+                                     state="readonly", width=24)
+        preset_combo.grid(row=preset_row, column=1, columnspan=2, sticky=tk.W, pady=(8, 3))
+
+        def _apply_preset(event=None):
+            name = preset_var.get()
+            p = presets.get(name)
+            if not p:
+                return
+            for k, hexv in p.items():
+                if k in color_vars:
+                    color_vars[k].set(hexv)
+        preset_combo.bind("<<ComboboxSelected>>", _apply_preset)
+        ttk.Button(rang_lf, text="Qo'llash", command=_apply_preset).grid(
+            row=preset_row, column=3, pady=(8, 3))
 
         # ══════════════════════════════════════════════════════════════
         # VISIBILITY TOGGLING
