@@ -17,13 +17,16 @@ from monoblok_db_config import DB_CONFIG
 # --- Fayl joylashgan papka ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# ====== SOZLAMALAR ======
+# ====== SOZLAMALAR (Tizim Sozlamalari oynasi orqali, analizator_config.json) ======
 try:
-    from analizator_config import oqi as _acfg
-    COM_PORT = _acfg().get("urit_com", "COM4")   # mijozda farq qilishi mumkin
-except Exception:
-    COM_PORT = "COM4"        # URIT-50 ulangan port
-BAUDRATE = 9600
+    from monoblok_db_config import get_analyzer
+    _siydik_cfg = get_analyzer("siydik")
+except Exception as _e:
+    print(f"[OGOHLANTIRISH] siydik config yuklanmadi: {_e}")
+    _siydik_cfg = {}
+
+COM_PORT = _siydik_cfg.get("com_port", "COM4")   # mijozda farq qilishi mumkin
+BAUDRATE = int(_siydik_cfg.get("baudrate", 9600))
 
 # Asosiy papkalar (frozen-aware — mijozda G: bo'lmasligi mumkin)
 BASE_DIR = os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), "AzizMedLine", "URIT_natijalar")

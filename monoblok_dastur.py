@@ -118,8 +118,8 @@ except ImportError as e:
     QC_AVAILABLE = False
     _open_qc_window = None
 
-# Database sozlamalari
-from monoblok_db_config import DB_CONFIG
+# Database sozlamalari + markaziy konfiguratsiya (analizator ulanishlari)
+from monoblok_db_config import DB_CONFIG, load_config, save_config, get_analyzer
 
 # Blanka Generator constants (from blanka_generator.py)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -817,6 +817,22 @@ def get_test_norma(test_name: str, jins: str = "", guruh: str = "", yosh: int = 
                 result = cursor.fetchone()
             if not result and db_name:
                 cursor.execute("SELECT * FROM tahlillar_norma WHERE tahlil_nomi = %s", (db_name,))
+                result = cursor.fetchone()
+            # Nom variantini qidirish — order nomi DB nomidan qisqargan bo'lishi mumkin.
+            # Masalan order_items da 'Askarida IgG IFA' (tahlil_id=NULL) saqlangan, lekin
+            # tahlillar_norma da 'Askarida IgG IFA ИФА' bo'lishi mumkin. Bu blok faqat aniq
+            # moslik topilmaganda ishlaydi, shuning uchun mavjud xatti-harakatga ta'sir qilmaydi.
+            if not result and db_name:
+                # 1) DB nomi order nomi bilan boshlanadi (order nomi qisqaroq) — eng qisqa moslik
+                cursor.execute(
+                    "SELECT * FROM tahlillar_norma WHERE tahlil_nomi LIKE %s ORDER BY CHAR_LENGTH(tahlil_nomi) LIMIT 1",
+                    (db_name + '%',))
+                result = cursor.fetchone()
+            if not result and db_name:
+                # 2) order nomi DB nomi bilan boshlanadi (order nomi uzunroq) — eng uzun moslik
+                cursor.execute(
+                    "SELECT * FROM tahlillar_norma WHERE %s LIKE CONCAT(tahlil_nomi, '%%') ORDER BY CHAR_LENGTH(tahlil_nomi) DESC LIMIT 1",
+                    (db_name,))
                 result = cursor.fetchone()
             cursor.close()
             # conn.close() QILMAYMIZ - bu global db_conn() ulanishi
@@ -1629,11 +1645,22 @@ def create_brusellez_table_in_doc(doc, result_json, order_info):
         ("Reaksiya Xeddelsona", "xeddelson", "Manfiy (-)"),
         ("Reaksiya Rayta",      "rayta",     "< 1:40"),
     ]
+    PENDING = "Kutilmoqda..."
     for ko_rsatkich, kalit, me_yor in rows_data:
         row = table.add_row()
+        natija_val = data.get(f"{kalit}_natija", '')
+        titr_val   = data.get(f"{kalit}_titr", '')
         _cell_write(row.cells[0], ko_rsatkich, align=WD_ALIGN_PARAGRAPH.LEFT)
-        _cell_write(row.cells[1], data.get(f"{kalit}_natija", ''), bold=True)
-        _cell_write(row.cells[2], data.get(f"{kalit}_titr", ''), bold=True)
+        if natija_val == PENDING:
+            p = row.cells[1].paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _set_para_spacing(p, 0, 0, line_spacing=1)
+            _add_run_tnr(p, PENDING, 11, bold=False, italic=True,
+                         color_rgb=RGBColor(0xC7, 0x6E, 0x00))
+            _cell_write(row.cells[2], '', bold=False)
+        else:
+            _cell_write(row.cells[1], natija_val, bold=True)
+            _cell_write(row.cells[2], titr_val, bold=True)
         _cell_write(row.cells[3], me_yor)
     doc.add_paragraph()
 
@@ -8972,6 +8999,13 @@ class MonoblokApp:
     
     def start_urit50_service(self):
         """URIT-50 siydik analizatori dasturini ishga tushirish"""
+        # Sozlamalarda o'chirilgan bo'lsa — ishga tushirmaymiz
+        try:
+            if not get_analyzer("siydik").get("enabled", True):
+                print("[INFO] URIT-50 (siydik) sozlamalarda o'chirilgan — ishga tushirilmadi")
+                return False
+        except Exception:
+            pass
         # Avval mavjud jarayonlarni to'xtatish
         self.stop_existing_urit50_processes()
 
@@ -9150,11 +9184,19 @@ class MonoblokApp:
                 except Exception as e:
                     print(f"[OGOHLANTIRISH] BK-280 callback da xato: {e}")
             
-            self.bk280_listener_thread = start_bk280_listener(host="0.0.0.0", port=8087, order_update_callback=on_bk280_result)
+            # Sozlamalardan IP/port olish (analizator_config.json)
+            bio_cfg = get_analyzer("bioximiya")
+            if not bio_cfg.get("enabled", True):
+                print("[INFO] BK-280 (bioximiya) sozlamalarda o'chirilgan — ishga tushirilmadi")
+                return False
+            bio_host = bio_cfg.get("ip", "0.0.0.0")
+            bio_port = int(bio_cfg.get("port", 8087))
+
+            self.bk280_listener_thread = start_bk280_listener(host=bio_host, port=bio_port, order_update_callback=on_bk280_result)
             if self.bk280_listener_thread:
-                self.status_var.set("[OK] BK-280 listener ishga tushdi (Port: 8087)")
-                print("[OK] BK-280 HL7 Listener ishga tushdi: 0.0.0.0:8087")
-                print("   Analizator IP: 0.0.0.0, Port: 8087, Protocol: HL7")
+                self.status_var.set(f"[OK] BK-280 listener ishga tushdi (Port: {bio_port})")
+                print(f"[OK] BK-280 HL7 Listener ishga tushdi: {bio_host}:{bio_port}")
+                print(f"   Analizator IP: {bio_host}, Port: {bio_port}, Protocol: HL7")
                 return True
             else:
                 print("[OGOHLANTIRISH] BK-280 listener ishga tushmadi")
@@ -9172,9 +9214,12 @@ class MonoblokApp:
             return False
 
         try:
-            self.bk280_lis_thread = start_bk280_lis(host="0.0.0.0", port=8088)
+            bio_cfg = get_analyzer("bioximiya")
+            lis_host = bio_cfg.get("ip", "0.0.0.0")
+            lis_port = int(bio_cfg.get("lis_port", 8088))
+            self.bk280_lis_thread = start_bk280_lis(host=lis_host, port=lis_port)
             if self.bk280_lis_thread:
-                print("[OK] BK-280 LIS Server ishga tushdi: 0.0.0.0:8088")
+                print(f"[OK] BK-280 LIS Server ishga tushdi: {lis_host}:{lis_port}")
                 print("   Barcode scan → bemor ma'lumotlari tayyor")
                 return True
             else:
@@ -9202,12 +9247,20 @@ class MonoblokApp:
                 except Exception as ex:
                     print(f"[OGOHLANTIRISH] BC-20S callback xatosi: {ex}")
 
+            # Sozlamalardan IP/port olish (analizator_config.json)
+            gema_cfg = get_analyzer("gemotologiya")
+            if not gema_cfg.get("enabled", True):
+                print("[INFO] BC-20S (gemotologiya) sozlamalarda o'chirilgan — ishga tushirilmadi")
+                return False
+            gema_ip = gema_cfg.get("ip", "192.168.0.2")
+            gema_port = int(gema_cfg.get("port", 5100))
+
             self.bc20s_listener = start_bc20s_listener(
-                analyzer_ip="192.168.0.2", port=5100,
+                analyzer_ip=gema_ip, port=gema_port,
                 result_callback=on_bc20s_result
             )
             if self.bc20s_listener:
-                print("[OK] BC-20S client ishga tushdi: -> 192.168.0.2:5100")
+                print(f"[OK] BC-20S client ishga tushdi: -> {gema_ip}:{gema_port}")
                 return True
             else:
                 print("[OGOHLANTIRISH] BC-20S client ishga tushmadi")
@@ -9280,18 +9333,6 @@ class MonoblokApp:
             ttk.Button(top_bar, text="Qidirish", command=self.on_search_clicked, width=9).pack(side=tk.LEFT, padx=2)
             ttk.Button(top_bar, text="Tozalash", command=self.clear_patient_data, width=9).pack(side=tk.LEFT, padx=2)
             ttk.Button(top_bar, text="Qidirish oynasi", command=self.open_patient_search, width=13).pack(side=tk.LEFT, padx=2)
-
-            # Ajratuvchi (TV Boshqaruvi oldidan)
-            ttk.Separator(top_bar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
-
-            # TV Boshqaruvi tugmasi (binafsha rang — markazlashgan TV jadval+ticker boshqaruv)
-            tv_boshqaruv_btn = tk.Button(
-                top_bar, text="📺 TV Boshqaruvi",
-                command=self.open_tv_boshqaruv,
-                bg="#6C5CE7", fg="white", font=("Arial", 10, "bold"),
-                padx=12, pady=3, relief=tk.RAISED, bd=2, cursor="hand2"
-            )
-            tv_boshqaruv_btn.pack(side=tk.LEFT, padx=3)
 
             # Ajratuvchi
             ttk.Separator(top_bar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
@@ -9505,77 +9546,6 @@ class MonoblokApp:
         self.result_entry = None
         self.editing_item = None
     
-    def open_analizator_settings(self):
-        """Analizator sozlamalari (IP/port/COM) — istalgan vaqt tahrirlanadi, %ProgramData% da saqlanadi."""
-        try:
-            import analizator_config as ac
-        except Exception as e:
-            messagebox.showerror("Xato", f"analizator_config yuklanmadi: {e}")
-            return
-        cfg = ac.oqi()
-        coms = []
-        try:
-            import serial.tools.list_ports as _lp
-            coms = [p.device for p in _lp.comports()]
-        except Exception:
-            pass
-        if not coms:
-            coms = [f"COM{i}" for i in range(1, 11)]
-
-        BG = "#0f1422"; FG = "#e6e9f2"; MUTED = "#9aa3bd"
-        win = tk.Toplevel(self.root)
-        win.title("Analizator sozlamalari")
-        win.configure(bg=BG)
-        win.geometry("460x440")
-        win.transient(self.root)
-        win.grab_set()
-
-        tk.Label(win, text="🔬 Analizator sozlamalari", bg=BG, fg=FG,
-                 font=("Segoe UI Semibold", 14)).grid(row=0, column=0, columnspan=2, pady=(14, 4))
-        tk.Label(win, text="Mijozda IP/port/COM farq qilsa shu yerdan o'zgartiring",
-                 bg=BG, fg=MUTED, font=("Segoe UI", 9)).grid(row=1, column=0, columnspan=2, pady=(0, 10))
-
-        def qator(t, r):
-            tk.Label(win, text=t, bg=BG, fg=MUTED, font=("Segoe UI", 10)
-                     ).grid(row=r, column=0, sticky="w", padx=14, pady=7)
-
-        def entry(r, val, w=22):
-            e = tk.Entry(win, font=("Consolas", 11), bg="#1a2236", fg=FG, relief="flat", width=w)
-            e.insert(0, str(val))
-            e.grid(row=r, column=1, sticky="we", padx=12, pady=7, ipady=4)
-            return e
-
-        qator("BC-20S (gemo) IP:", 2);    e_ip = entry(2, cfg.get("bc20s_ip", "192.168.0.2"))
-        qator("BC-20S port:", 3);         e_bp = entry(3, cfg.get("bc20s_port", 5100))
-        qator("BK-280 port:", 4);         e_kp = entry(4, cfg.get("bk280_port", 8087))
-        qator("URIT COM port:", 5)
-        cb_com = ttk.Combobox(win, values=coms, width=20)
-        cb_com.set(cfg.get("urit_com", "COM4"))
-        cb_com.grid(row=5, column=1, sticky="we", padx=12, pady=7)
-        qator("URIT strip:", 6);          e_st = entry(6, cfg.get("urit_strip", 14))
-
-        win.columnconfigure(1, weight=1)
-
-        def saqla():
-            try:
-                ac.saqla({
-                    "bc20s_ip": e_ip.get().strip() or "192.168.0.2",
-                    "bc20s_port": int(e_bp.get() or 5100),
-                    "bk280_port": int(e_kp.get() or 8087),
-                    "urit_com": cb_com.get().strip() or "COM4",
-                    "urit_strip": int(e_st.get() or 14),
-                })
-            except Exception as ex:
-                messagebox.showerror("Xato", str(ex)); return
-            messagebox.showinfo("Saqlandi",
-                                "Analizator sozlamalari saqlandi.\n\nO'zgarish dasturni qayta ochganda "
-                                "yoki analizatorni qayta ulaganda kuchga kiradi.")
-            win.destroy()
-
-        tk.Button(win, text="💾 Saqlash", command=saqla, bg="#1f8a4c", fg="white",
-                  relief="flat", font=("Segoe UI Semibold", 11), cursor="hand2"
-                  ).grid(row=7, column=0, columnspan=2, sticky="we", padx=14, pady=16, ipady=7)
-
     def create_results_panel(self, parent):
         """Natijalar va tugmalar paneli"""
         # Tugmalar
@@ -9595,9 +9565,9 @@ class MonoblokApp:
 
         ttk.Button(
             left_buttons,
-            text="🔬 Analizator",
-            command=self.open_analizator_settings,
-            width=12
+            text="⚙ Tizim Sozlamalari",
+            command=self.open_system_settings,
+            width=18
         ).pack(side=tk.LEFT, padx=2)
 
         ttk.Button(
@@ -9695,27 +9665,6 @@ class MonoblokApp:
     def on_search_clicked(self):
         """Qidirish tugmasi"""
         self.on_barcode_entered()
-
-    def open_tv_boshqaruv(self):
-        """📺 TV Boshqaruvi oynasini ochish (tv_boshqaruv.py).
-
-        TV jadvali (kunlik media dastur) + Ticker matnini boshqarish uchun.
-        tv_server.py http://127.0.0.1:8765 da ishlayotgan bo'lishi kerak.
-        """
-        try:
-            from tv_boshqaruv import TvBoshqaruvOynasi
-            TvBoshqaruvOynasi(self.root)
-        except ImportError as e:
-            messagebox.showerror(
-                "Modul topilmadi",
-                f"tv_boshqaruv.py faylini topib bo'lmadi:\n\n{e}\n\n"
-                f"LIMS asosiy papkasida bo'lishi kerak.",
-                parent=self.root)
-        except Exception as e:
-            messagebox.showerror(
-                "TV Boshqaruv xatosi",
-                f"Oyna ochilmadi:\n\n{e}",
-                parent=self.root)
 
     def open_patient_search(self):
         """Bemorlarni qidirish oynasini ochish"""
@@ -11274,6 +11223,26 @@ Sana: {_sana_fmt}"""
                         _bp = (_nr.get('standard_blank_path') or '').strip()
                         if _bp:
                             _blank_cache[_tn] = _bp
+                    # Aniq mos kelmagan nomlar uchun variant (prefiks) qidirish —
+                    # order_items da nom qisqargan bo'lishi mumkin (masalan ' ИФА'siz:
+                    # 'Askarida IgG IFA' vs 'Askarida IgG IFA ИФА'). ORDER nomi kaliti bilan saqlanadi.
+                    _missing_norma = [n for n in _all_test_names if n and n not in _norma_cache]
+                    for _mn in _missing_norma:
+                        try:
+                            cursor.execute(
+                                "SELECT tahlil_nomi, norma, birlik, type, "
+                                "standard_blank_path, response_options "
+                                "FROM tahlillar_norma WHERE tahlil_nomi LIKE %s "
+                                "ORDER BY CHAR_LENGTH(tahlil_nomi) LIMIT 1",
+                                (_mn + '%',))
+                            _vr = cursor.fetchone()
+                            if _vr:
+                                _norma_cache[_mn] = _vr
+                                _bp = (_vr.get('standard_blank_path') or '').strip()
+                                if _bp:
+                                    _blank_cache[_mn] = _bp
+                        except Exception:
+                            pass
                 except Exception as _e:
                     print(f"[OGOHLANTIRISH] Norma batch yuklashda xato: {_e}")
 
@@ -15346,7 +15315,9 @@ Sana: {_sana_fmt}"""
             ("Reaksiya Rayta",      "rayta",      "< 1:40"),
         ]
 
-        natija_opts = ["Manfiy (-)", "Musbat (+)", "Musbat (++)", "Musbat (+++)"]
+        xeddelson_opts = ["Manfiy (-)", "Musbat (+)", "Musbat (++)", "Musbat (+++)"]
+        rayta_opts     = ["Manfiy (-)", "Musbat (+)", "Musbat (++)", "Musbat (+++)", "Kutilmoqda..."]
+        opts_by_kalit  = {"xeddelson": xeddelson_opts, "rayta": rayta_opts}
         natija_vars = {}
         titr_vars = {}
 
@@ -15354,9 +15325,13 @@ Sana: {_sana_fmt}"""
             tk.Label(table_frame, text=ko_rsatkich, font=("Arial", 9),
                      relief="groove", width=28, pady=6, anchor="w", padx=5).grid(
                 row=row_idx, column=0, sticky="nsew", padx=1, pady=1)
-            n_var = tk.StringVar(value=old_result.get(f"{kalit}_natija", natija_opts[0]))
+            cur_opts = opts_by_kalit[kalit]
+            default_val = old_result.get(f"{kalit}_natija", cur_opts[0])
+            if default_val not in cur_opts:
+                default_val = cur_opts[0]
+            n_var = tk.StringVar(value=default_val)
             natija_vars[kalit] = n_var
-            n_menu = tk.OptionMenu(table_frame, n_var, *natija_opts)
+            n_menu = tk.OptionMenu(table_frame, n_var, *cur_opts)
             n_menu.config(font=("Arial", 9), width=12)
             n_menu.grid(row=row_idx, column=1, sticky="nsew", padx=1, pady=1)
             t_var = tk.StringVar(value=old_result.get(f"{kalit}_titr", ''))
@@ -16986,6 +16961,231 @@ Sana: {_sana_fmt}"""
         result_window = tk.Toplevel(self.root)
         NatijaKiritish(result_window, self.current_order_id)
     
+    def open_system_settings(self):
+        """Tizim sozlamalari oynasi — baza va analizatorlarning ulanishini
+        kodga tegmasdan o'zgartirish (IP, port, COM, parol va h.k.).
+        Sozlamalar analizator_config.json ga saqlanadi."""
+        import socket as _socket_mod
+
+        cfg = load_config()
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("⚙ Tizim Sozlamalari — Ulanish va Baza")
+        dialog.geometry("640x600")
+        dialog.transient(self.root)
+        try:
+            dialog.grab_set()
+        except Exception:
+            pass
+
+        # Barcha kiritish maydonlari shu yerda saqlanadi: vars[(bo'lim, kalit)] = var
+        vars_map = {}
+
+        ENC_OPTS = ["utf-8", "cp1251", "latin-1", "ascii"]
+        BAUD_OPTS = ["1200", "2400", "4800", "9600", "19200", "38400", "57600", "115200"]
+
+        def add_row(parent, r, label, section, key, *, value=None, options=None,
+                    show=None, width=26, readonly=False):
+            ttk.Label(parent, text=label).grid(row=r, column=0, sticky=tk.W, padx=8, pady=6)
+            v = tk.StringVar(value=str(value if value is not None else cfg.get(section, {}).get(key, "")))
+            if options is not None:
+                state = "readonly" if readonly else "normal"
+                w = ttk.Combobox(parent, textvariable=v, values=options, width=width - 3, state=state)
+            else:
+                w = ttk.Entry(parent, textvariable=v, width=width, show=show)
+            w.grid(row=r, column=1, sticky=tk.W, padx=8, pady=6)
+            vars_map[(section, key)] = v
+            return v
+
+        def add_enabled(parent, r, section):
+            bv = tk.BooleanVar(value=bool(cfg.get(section, {}).get("enabled", True)))
+            ttk.Checkbutton(parent, text="Yoqilgan (dastur ochilganda ishga tushsin)",
+                            variable=bv).grid(row=r, column=0, columnspan=2, sticky=tk.W, padx=8, pady=6)
+            vars_map[(section, "enabled")] = bv
+
+        nb = ttk.Notebook(dialog)
+        nb.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+
+        # ───────────────────────── BAZA (MySQL) ─────────────────────────
+        tab_db = ttk.Frame(nb)
+        nb.add(tab_db, text="🗄 Baza (MySQL)")
+        add_row(tab_db, 0, "Host (IP):", "database", "host")
+        add_row(tab_db, 1, "Foydalanuvchi:", "database", "user")
+        add_row(tab_db, 2, "Parol:", "database", "password", show="•")
+        add_row(tab_db, 3, "Baza nomi:", "database", "database")
+        add_row(tab_db, 4, "Port:", "database", "port")
+
+        def test_db():
+            try:
+                import mysql.connector as _mc
+                conn = _mc.connect(
+                    host=vars_map[("database", "host")].get().strip(),
+                    user=vars_map[("database", "user")].get().strip(),
+                    password=vars_map[("database", "password")].get(),
+                    database=vars_map[("database", "database")].get().strip(),
+                    port=int(vars_map[("database", "port")].get().strip() or 3306),
+                    connection_timeout=5,
+                )
+                conn.close()
+                messagebox.showinfo("Baza", "[OK] Bazaga muvaffaqiyatli ulanildi!", parent=dialog)
+            except Exception as e:
+                messagebox.showerror("Baza", f"[XATO] Ulanmadi:\n{e}", parent=dialog)
+
+        ttk.Button(tab_db, text="Ulanishni tekshirish", command=test_db).grid(
+            row=5, column=0, columnspan=2, pady=12)
+
+        # ───────────────────────── SIYDIK (URIT-50, Serial) ─────────────
+        tab_s = ttk.Frame(nb)
+        nb.add(tab_s, text="🟡 Siydik (URIT-50)")
+        add_enabled(tab_s, 0, "siydik")
+        add_row(tab_s, 1, "Ulanish turi:", "siydik", "connection_type",
+                options=["serial"], readonly=True)
+        add_row(tab_s, 2, "COM port:", "siydik", "com_port",
+                options=["COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8"])
+        add_row(tab_s, 3, "Baudrate:", "siydik", "baudrate", options=BAUD_OPTS)
+        add_row(tab_s, 4, "Bayt o'lchami:", "siydik", "bytesize",
+                options=["5", "6", "7", "8"], readonly=True)
+        add_row(tab_s, 5, "Parity (juftlik):", "siydik", "parity",
+                options=["N", "E", "O"], readonly=True)
+        add_row(tab_s, 6, "Stop bits:", "siydik", "stopbits",
+                options=["1", "2"], readonly=True)
+        add_row(tab_s, 7, "Timeout (sek):", "siydik", "timeout")
+        add_row(tab_s, 8, "Kodirovka:", "siydik", "encoding", options=ENC_OPTS)
+
+        def test_serial():
+            port = vars_map[("siydik", "com_port")].get().strip()
+            if serial is None:
+                messagebox.showwarning("Siydik", "pyserial moduli o'rnatilmagan.", parent=dialog)
+                return
+            try:
+                ser = serial.Serial(port=port,
+                                    baudrate=int(vars_map[("siydik", "baudrate")].get() or 9600),
+                                    timeout=1)
+                ser.close()
+                messagebox.showinfo("Siydik", f"[OK] {port} porti ochildi (analizator ulangan).",
+                                    parent=dialog)
+            except Exception as e:
+                messagebox.showerror("Siydik", f"[XATO] {port} portni ochib bo'lmadi:\n{e}",
+                                     parent=dialog)
+
+        ttk.Button(tab_s, text="Portni tekshirish", command=test_serial).grid(
+            row=9, column=0, columnspan=2, pady=12)
+
+        # ───────────────────── GEMOTOLOGIYA (BC-20S, TCP client) ─────────
+        tab_g = ttk.Frame(nb)
+        nb.add(tab_g, text="🔵 Gemotologiya (BC-20S)")
+        add_enabled(tab_g, 0, "gemotologiya")
+        add_row(tab_g, 1, "Ulanish turi:", "gemotologiya", "connection_type",
+                options=["tcp_client"], readonly=True)
+        add_row(tab_g, 2, "Analizator IP:", "gemotologiya", "ip")
+        add_row(tab_g, 3, "Port:", "gemotologiya", "port")
+        add_row(tab_g, 4, "Qayta ulanish (sek):", "gemotologiya", "reconnect_interval")
+        add_row(tab_g, 5, "Kodirovka:", "gemotologiya", "encoding", options=ENC_OPTS)
+        ttk.Label(tab_g, text="(Dastur analizatorga mijoz (client) sifatida ulanadi)",
+                  foreground="#666").grid(row=6, column=0, columnspan=2, sticky=tk.W, padx=8)
+
+        def test_tcp_client():
+            ip = vars_map[("gemotologiya", "ip")].get().strip()
+            port = int(vars_map[("gemotologiya", "port")].get().strip() or 0)
+            try:
+                s = _socket_mod.socket(_socket_mod.AF_INET, _socket_mod.SOCK_STREAM)
+                s.settimeout(3)
+                s.connect((ip, port))
+                s.close()
+                messagebox.showinfo("Gemotologiya", f"[OK] {ip}:{port} ga ulanildi!", parent=dialog)
+            except Exception as e:
+                messagebox.showerror("Gemotologiya",
+                                     f"[XATO] {ip}:{port} ga ulanib bo'lmadi:\n{e}", parent=dialog)
+
+        ttk.Button(tab_g, text="Ulanishni tekshirish", command=test_tcp_client).grid(
+            row=7, column=0, columnspan=2, pady=12)
+
+        # ───────────────────── BIOXIMIYA (BK-280, TCP server) ────────────
+        tab_b = ttk.Frame(nb)
+        nb.add(tab_b, text="🟢 Bioximiya (BK-280)")
+        add_enabled(tab_b, 0, "bioximiya")
+        add_row(tab_b, 1, "Ulanish turi:", "bioximiya", "connection_type",
+                options=["tcp_server"], readonly=True)
+        add_row(tab_b, 2, "Tinglash IP:", "bioximiya", "ip",
+                options=["0.0.0.0", "127.0.0.1"])
+        add_row(tab_b, 3, "Port (HL7 natija):", "bioximiya", "port")
+        add_row(tab_b, 4, "LIS port (barcode):", "bioximiya", "lis_port")
+        add_row(tab_b, 5, "Kodirovka:", "bioximiya", "encoding", options=ENC_OPTS)
+        ttk.Label(tab_b, text="(Analizator dasturga ulanadi. 0.0.0.0 = barcha tarmoq kartalari)",
+                  foreground="#666").grid(row=6, column=0, columnspan=2, sticky=tk.W, padx=8)
+
+        def test_tcp_server():
+            port = int(vars_map[("bioximiya", "port")].get().strip() or 0)
+            try:
+                s = _socket_mod.socket(_socket_mod.AF_INET, _socket_mod.SOCK_STREAM)
+                s.settimeout(2)
+                res = s.connect_ex(("127.0.0.1", port))
+                s.close()
+                if res == 0:
+                    messagebox.showinfo("Bioximiya",
+                                        f"[OK] Port {port} tinglanyapti (server ishlayapti).",
+                                        parent=dialog)
+                else:
+                    messagebox.showwarning("Bioximiya",
+                                           f"[INFO] Port {port} hozir tinglanmayapti.\n"
+                                           "Sozlamani saqlab, dasturni qayta ishga tushiring.",
+                                           parent=dialog)
+            except Exception as e:
+                messagebox.showerror("Bioximiya", f"[XATO] {e}", parent=dialog)
+
+        ttk.Button(tab_b, text="Port holatini tekshirish", command=test_tcp_server).grid(
+            row=7, column=0, columnspan=2, pady=12)
+
+        # ───────────────────────── Pastki tugmalar ──────────────────────
+        ttk.Label(dialog,
+                  text="ℹ Analizator/baza o'zgarishlari dastur qayta ishga tushgandan keyin to'liq kuchga kiradi.",
+                  foreground="#1565C0", wraplength=600).pack(padx=10, pady=(0, 4))
+
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(fill=tk.X, padx=10, pady=8)
+
+        def save_settings():
+            new_cfg = load_config()
+            int_keys = {"port", "baudrate", "bytesize", "stopbits", "reconnect_interval", "lis_port"}
+            float_keys = {"timeout"}
+            try:
+                for (section, key), var in vars_map.items():
+                    new_cfg.setdefault(section, {})
+                    val = var.get()
+                    if isinstance(var, tk.BooleanVar):
+                        new_cfg[section][key] = bool(val)
+                    elif key in int_keys:
+                        new_cfg[section][key] = int(str(val).strip() or 0)
+                    elif key in float_keys:
+                        new_cfg[section][key] = float(str(val).strip() or 1)
+                    else:
+                        new_cfg[section][key] = str(val).strip()
+            except ValueError as e:
+                messagebox.showerror("Xato", f"Raqamli maydon noto'g'ri: {e}", parent=dialog)
+                return
+
+            if save_config(new_cfg):
+                # Bazani jonli yangilash uchun pool ulanishini tiklaymiz
+                try:
+                    globals()["_db_connection"] = None
+                except Exception:
+                    pass
+                messagebox.showinfo(
+                    "Saqlandi",
+                    "[OK] Sozlamalar saqlandi.\n\n"
+                    "Baza o'zgarishi darhol qo'llanadi.\n"
+                    "Analizator ulanishlari to'liq kuchga kirishi uchun dasturni "
+                    "qayta ishga tushiring.",
+                    parent=dialog)
+                dialog.destroy()
+            else:
+                messagebox.showerror("Xato", "Sozlamalarni saqlab bo'lmadi!", parent=dialog)
+
+        tk.Button(btn_frame, text="💾 Saqlash", command=save_settings,
+                  bg="#2E7D32", fg="white", font=("Arial", 10, "bold"),
+                  padx=16, pady=5, cursor="hand2").pack(side=tk.RIGHT, padx=4)
+        ttk.Button(btn_frame, text="Bekor qilish", command=dialog.destroy).pack(side=tk.RIGHT, padx=4)
+
     def open_blanka_settings(self):
         """Blanka sozlamalari oynasini ochish — to'liq universal"""
         from tkinter import colorchooser
