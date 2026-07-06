@@ -39,10 +39,10 @@ CONFIG_PATH = os.path.join(_base_dir(), "analizator_config.json")
 # STANDART SOZLAMALAR (JSON yo'q bo'lsa shu ishlatiladi)
 # ---------------------------------------------------------------------------
 DEFAULT_CONFIG = {
-    # MySQL baza ulanishi
+    # MySQL baza ulanishi — Registratsiya bilan BIR XIL (umumiy db_config.txt)
     "database": {
-        "host": "192.168.0.40",
-        "user": "lims",
+        "host": "127.0.0.1",
+        "user": "root",
         "password": "azizmed2026",
         "database": "lab_tizim",
         "port": 3306,
@@ -105,8 +105,24 @@ def _deep_merge(default: dict, loaded: dict) -> dict:
     return result
 
 
+def _umumiy_db():
+    """
+    Registratsiya bilan UMUMIY baza sozlamasi (%ProgramData%\\AzizMedLine\\db_config.txt).
+    Mavjud bo'lsa — u ustuvor (ikkala ilova bir xil ulanadi). Yo'q bo'lsa None.
+    """
+    try:
+        import baza_sozlama
+        if os.path.exists(baza_sozlama.oqish_yoli()):
+            return baza_sozlama.oqi()
+    except Exception:
+        pass
+    return None
+
+
 def load_config() -> dict:
-    """analizator_config.json ni o'qiydi. Yo'q bo'lsa — yaratadi."""
+    """analizator_config.json ni o'qiydi. Yo'q bo'lsa — yaratadi.
+    Natija o'z config'ini ishlatadi (Registratsiyadan MUSTAQIL). FAQAT birinchi
+    o'rnatishda baza qismi umumiy db_config.txt dan olinadi (lokal parol mos bo'lsin)."""
     cfg = json.loads(json.dumps(DEFAULT_CONFIG))  # chuqur nusxa
     if os.path.exists(CONFIG_PATH):
         try:
@@ -117,13 +133,24 @@ def load_config() -> dict:
         except Exception as e:
             print(f"[OGOHLANTIRISH] analizator_config.json yuklashda xato: {e}")
     else:
-        # Birinchi marta — standart faylni yaratamiz
+        # BIRINCHI marta — lokal umumiy config bo'lsa, baza parolini undan olamiz
+        # (bir martalik urug'; keyin Natija mustaqil, umumiy faylga TEGMAYDI).
+        umumiy = _umumiy_db()
+        if umumiy:
+            cfg["database"] = {
+                "host": umumiy.get("host", "127.0.0.1"),
+                "user": umumiy.get("user", "root"),
+                "password": umumiy.get("password", "azizmed2026"),
+                "database": umumiy.get("database", "lab_tizim"),
+                "port": int(umumiy.get("port", 3306)),
+            }
         save_config(cfg)
     return cfg
 
 
 def save_config(cfg: dict) -> bool:
-    """Sozlamalarni analizator_config.json ga yozadi."""
+    """Sozlamalarni analizator_config.json ga yozadi (FAQAT Natija'ning o'z fayli).
+    UMUMIY db_config.txt ga TEGMAYDI — Registratsiya mustaqil, buzilmaydi."""
     try:
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(cfg, f, ensure_ascii=False, indent=2)

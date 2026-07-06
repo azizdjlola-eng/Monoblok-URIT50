@@ -17139,24 +17139,54 @@ Sana: {_sana_fmt}"""
         add_row(tab_db, 3, "Baza nomi:", "database", "database")
         add_row(tab_db, 4, "Port:", "database", "port")
 
+        def _db_cfg_form():
+            return {
+                "host": vars_map[("database", "host")].get().strip(),
+                "user": vars_map[("database", "user")].get().strip(),
+                "password": vars_map[("database", "password")].get(),
+                "database": vars_map[("database", "database")].get().strip(),
+                "port": int(vars_map[("database", "port")].get().strip() or 3306),
+            }
+
         def test_db():
             try:
-                import mysql.connector as _mc
-                conn = _mc.connect(
-                    host=vars_map[("database", "host")].get().strip(),
-                    user=vars_map[("database", "user")].get().strip(),
-                    password=vars_map[("database", "password")].get(),
-                    database=vars_map[("database", "database")].get().strip(),
-                    port=int(vars_map[("database", "port")].get().strip() or 3306),
-                    connection_timeout=5,
-                )
-                conn.close()
-                messagebox.showinfo("Baza", "[OK] Bazaga muvaffaqiyatli ulanildi!", parent=dialog)
+                import baza_sozlama as _bs
+                msg = _bs.ulanish_diagnostika(_db_cfg_form())
+                ok = msg.startswith("✅")
             except Exception as e:
-                messagebox.showerror("Baza", f"[XATO] Ulanmadi:\n{e}", parent=dialog)
+                ok, msg = False, f"Tekshirib bo'lmadi: {e}"
+            (messagebox.showinfo if ok else messagebox.showwarning)("Baza", msg, parent=dialog)
+
+        def mysql_start():
+            try:
+                import baza_sozlama as _bs
+                ok, msg = _bs.lokal_mysql_ishga_tushir()
+            except Exception as e:
+                ok, msg = False, str(e)
+            (messagebox.showinfo if ok else messagebox.showwarning)("Lokal MySQL", msg, parent=dialog)
+            if ok:
+                test_db()
 
         ttk.Button(tab_db, text="Ulanishni tekshirish", command=test_db).grid(
             row=5, column=0, columnspan=2, pady=12)
+
+        # ── Tez tanlov: shu kompyuter / boshqa kompyuter IP ──
+        db_quick = ttk.Frame(tab_db)
+        db_quick.grid(row=6, column=0, columnspan=2, sticky=tk.W, padx=8, pady=(0, 4))
+        ttk.Button(db_quick, text="🖥 Shu kompyuterdagi baza",
+                   command=lambda: vars_map[("database", "host")].set("127.0.0.1")).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(db_quick, text="🔧 Lokal MySQL'ni ishga tushirish",
+                   command=mysql_start).pack(side=tk.LEFT, padx=(0, 6))
+        try:
+            import baza_sozlama as _bs
+            _myip = _bs.bu_kompyuter_ip()
+        except Exception:
+            _myip = "?"
+        ttk.Label(db_quick, text=f"🌐 Bu kompyuter IP: {_myip}",
+                  foreground="#1f8a4c").pack(side=tk.LEFT, padx=6)
+        ttk.Label(tab_db,
+                  text="Boshqa kompyuterdagi bazaga ulanish: o'sha kompyuter IP sini Host maydoniga yozing.",
+                  foreground="#666", wraplength=560).grid(row=7, column=0, columnspan=2, sticky=tk.W, padx=8)
 
         # ───────────────────────── SIYDIK (URIT-50, Serial) ─────────────
         tab_s = ttk.Frame(nb)
@@ -17259,6 +17289,102 @@ Sana: {_sana_fmt}"""
 
         ttk.Button(tab_b, text="Port holatini tekshirish", command=test_tcp_server).grid(
             row=7, column=0, columnspan=2, pady=12)
+
+        # ───────────────────────── LITSENZIYA ───────────────────────────
+        tab_lic = ttk.Frame(nb)
+        nb.add(tab_lic, text="🔑 Litsenziya")
+        tab_lic.columnconfigure(0, weight=1)
+        try:
+            from litsenziya import litsenziya_manager as _lm
+        except Exception as _le:
+            _lm = None
+            ttk.Label(tab_lic, text=f"Litsenziya moduli yuklanmadi:\n{_le}",
+                      foreground="#c0392b", justify=tk.LEFT).grid(row=0, column=0, sticky=tk.W, padx=8, pady=8)
+
+        if _lm is not None:
+            ttk.Label(tab_lic,
+                      text="Litsenziya muddati tugasa yoki yangilansa — administrator "
+                           "yuborgan yangi litsenziya faylini (.azlic) shu yerdan yuklang.\n"
+                           "Faylni Telegram orqali kompyuterga saqlab, tugmani bosing.",
+                      foreground="#555", justify=tk.LEFT, wraplength=560).grid(
+                          row=0, column=0, sticky=tk.W, padx=8, pady=(8, 10))
+
+            lic_status_lbl = tk.Label(tab_lic, text="", justify=tk.LEFT,
+                                      font=("Consolas", 9), bg="#f5f5fa", anchor="w")
+            lic_status_lbl.grid(row=1, column=0, sticky="ew", padx=8, ipady=6, ipadx=10, pady=(0, 10))
+
+            ttk.Label(tab_lic, text="Ushbu kompyuter ID (administratorga yuboring):",
+                      font=("Arial", 9, "bold")).grid(row=2, column=0, sticky=tk.W, padx=8)
+            lic_id_fr = ttk.Frame(tab_lic)
+            lic_id_fr.grid(row=3, column=0, sticky="ew", padx=8, pady=(2, 12))
+            lic_id_fr.columnconfigure(0, weight=1)
+            lic_id_var = tk.StringVar(value="")
+            ttk.Entry(lic_id_fr, textvariable=lic_id_var, font=("Consolas", 11),
+                      state="readonly").grid(row=0, column=0, sticky="ew")
+
+            def lic_copy_id():
+                try:
+                    dialog.clipboard_clear()
+                    dialog.clipboard_append(lic_id_var.get())
+                    messagebox.showinfo("Nusxalandi",
+                                        "Kompyuter ID nusxalandi. Administratorga yuboring.",
+                                        parent=dialog)
+                except Exception:
+                    pass
+
+            ttk.Button(lic_id_fr, text="📋 Nusxa", command=lic_copy_id).grid(row=0, column=1, padx=(6, 0))
+
+            def lic_refresh():
+                import datetime as _dt
+                try:
+                    n = _lm.holatni_tekshir(online=False)
+                except Exception as e:
+                    lic_status_lbl.config(text=f"Holatni o'qib bo'lmadi: {e}")
+                    return
+                holat = getattr(n.holat, "value", str(n.holat))
+                exp = n.payload.get("expires_at") if getattr(n, "payload", None) else None
+                exp_txt = "—"
+                if exp:
+                    try:
+                        exp_txt = _dt.datetime.fromtimestamp(int(exp)).strftime("%Y-%m-%d %H:%M")
+                    except Exception:
+                        exp_txt = str(exp)
+                belgi = "✅" if n.yaroqli else "⛔"
+                lic_status_lbl.config(text=(
+                    f"{belgi} Holat:      {holat}\n"
+                    f"   Izoh:       {n.xabar}\n"
+                    f"   Tugash:     {exp_txt}"))
+                lic_id_var.set(n.machine_id)
+
+            def lic_import():
+                from tkinter import filedialog
+                yol = filedialog.askopenfilename(
+                    title="Yangilangan litsenziya faylini tanlang",
+                    filetypes=[("Litsenziya", "*.azlic"), ("Barcha fayllar", "*.*")],
+                    parent=dialog)
+                if not yol:
+                    return
+                try:
+                    natija = _lm.faollashtir(yol)
+                except Exception as e:
+                    messagebox.showerror("Litsenziya", f"Yuklashda xato:\n{e}", parent=dialog)
+                    return
+                if natija.yaroqli:
+                    messagebox.showinfo("Litsenziya yangilandi",
+                                        f"✅ Litsenziya muvaffaqiyatli yangilandi!\n\n{natija.xabar}",
+                                        parent=dialog)
+                else:
+                    messagebox.showerror("Litsenziya xatosi",
+                                         f"⛔ Fayl qabul qilinmadi:\n\n{natija.xabar}\n\n"
+                                         "Fayl shu kompyuter ID uchun berilganini tekshiring.",
+                                         parent=dialog)
+                lic_refresh()
+
+            ttk.Button(tab_lic, text="📂 Litsenziya faylini tanlash (.azlic) — yangilash",
+                       command=lic_import).grid(row=4, column=0, sticky="ew", padx=8, pady=(0, 6))
+            ttk.Button(tab_lic, text="↻ Holatni yangilash",
+                       command=lic_refresh).grid(row=5, column=0, sticky=tk.W, padx=8)
+            lic_refresh()
 
         # ───────────────────────── Pastki tugmalar ──────────────────────
         ttk.Label(dialog,
@@ -19391,7 +19517,8 @@ if __name__ == "__main__":
         except Exception as _e:
             print(f"[URIT] xato: {_e}")
         _sys.exit(0)
-    # Litsenziya darvozasi
+    # Litsenziya darvozasi (fail-closed: modul o'chirilgan/buzilgan bo'lsa EXE ishlamaydi)
+    _FROZEN = getattr(_sys, "frozen", False)
     try:
         import os as _os
         _here = _os.path.dirname(_os.path.abspath(__file__))
@@ -19400,7 +19527,25 @@ if __name__ == "__main__":
         from litsenziya import litsenziya_gate as _gate
         if not _gate.darvoza("AzizMedLine — Natija (Monoblok)"):
             _sys.exit(0)
-    except ImportError:
-        pass
+    except SystemExit:
+        raise
+    except BaseException:
+        if _FROZEN:
+            try:
+                import tkinter.messagebox as _mb
+                _mb.showerror("Litsenziya",
+                              "Litsenziya moduli topilmadi yoki buzilgan.\n"
+                              "Dastur to'xtatildi. Administrator: +998 99 673 13 42")
+            except Exception:
+                pass
+            _sys.exit(1)
+    # Normalarni bazaga ko'chirish (koddan → DB; shifokor keyin tahrirlaydi). Idempotent, startni to'smaydi.
+    try:
+        import norma_seed
+        _nn = norma_seed.seed_avto()
+        if _nn:
+            print(f"[norma_seed] {_nn} norma bazaga ko'chirildi")
+    except Exception as _ne:
+        print(f"[norma_seed] o'tkazildi: {_ne}")
     main()
  

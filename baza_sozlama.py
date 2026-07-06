@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
+r"""
 Baza ulanish sozlamasi — frozen-aware (manba va EXE da bir xil ishlaydi).
 
 Mijoz EXE da db_config.txt ni qayerdan o'qish kerakligini hal qiladi va texnik
@@ -97,6 +97,146 @@ def saqla(cfg: dict) -> str:
     with open(yol, "w", encoding="utf-8") as f:
         f.write(matn)
     return yol
+
+
+# ── Sozlama master paroli (DB'siz — login oynasidan ulanish sozlash uchun) ──
+_SOZLAMA_PAROL_DEFAULT = "azizmed2026"
+
+
+def sozlama_parol() -> str:
+    """
+    Ulanish sozlamalarini ochish uchun DOIMIY master parol (bazaga bog'liq emas).
+    %ProgramData%\\AzizMedLine\\sozlama_parol.txt bo'lsa — undan; bo'lmasa default.
+    Shu tarzda DB o'lik bo'lsa ham admin sozlamani ocha oladi.
+    """
+    p = os.path.join(konfig_papka(), "sozlama_parol.txt")
+    if os.path.exists(p):
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                v = f.read().strip()
+            if v:
+                return v
+        except Exception:
+            pass
+    return _SOZLAMA_PAROL_DEFAULT
+
+
+def sozlama_parol_saqla(yangi: str) -> str:
+    """Master sozlama parolini o'zgartiradi (sozlama_parol.txt ga yozadi)."""
+    os.makedirs(konfig_papka(), exist_ok=True)
+    p = os.path.join(konfig_papka(), "sozlama_parol.txt")
+    with open(p, "w", encoding="utf-8") as f:
+        f.write((yangi or "").strip())
+    return p
+
+
+def bu_kompyuter_ip() -> str:
+    """
+    Shu kompyuterning LAN IP manzili (boshqa kompyuter shuni terib ulanadi).
+    Topilmasa '127.0.0.1'.
+    """
+    import socket
+    ip = "127.0.0.1"
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.3)
+        s.connect(("8.8.8.8", 80))   # tashqi ulanish shart emas — faqat lokal IP ni aniqlaydi
+        ip = s.getsockname()[0]
+        s.close()
+    except Exception:
+        try:
+            ip = socket.gethostbyname(socket.gethostname())
+        except Exception:
+            ip = "127.0.0.1"
+    return ip
+
+
+_MYSQL_SERVICE = "AzizMedLineMySQL"
+
+
+def _port_ochiqmi(host: str, port: int, timeout: float = 2.0) -> bool:
+    """TCP port ochiq (kimdir tinglayaptimi) — MySQL tirikligini bilish uchun."""
+    import socket
+    try:
+        s = socket.create_connection((host, int(port)), timeout=timeout)
+        s.close()
+        return True
+    except Exception:
+        return False
+
+
+def _sc_holat() -> str:
+    """AzizMedLineMySQL xizmati holati: 'yoq' | 'running' | 'stopped'.
+    (sc query STATE 'RUNNING'/'STOPPED' — til-mustaqil kalitlar; returncode 1060=yo'q.)"""
+    import subprocess
+    cf = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        r = subprocess.run(["sc", "query", _MYSQL_SERVICE],
+                           capture_output=True, text=True, errors="replace",
+                           creationflags=cf, timeout=10)
+        if r.returncode != 0:
+            return "yoq"
+        up = (r.stdout or "").upper()
+        if "RUNNING" in up:
+            return "running"
+        return "stopped"
+    except Exception:
+        return "yoq"
+
+
+def lokal_mysql_ishga_tushir():
+    """
+    Lokal AzizMedLineMySQL Windows xizmatini ishga tushirishga urinadi.
+    (ok, xabar). Admin huquqi kerak bo'lishi mumkin.
+    """
+    import subprocess
+    cf = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    holat = _sc_holat()
+    if holat == "yoq":
+        return False, ("MySQL xizmati bu kompyuterda o'rnatilmagan.\n"
+                       "FULL o'rnatish (MySQL bilan) yoki BazaUstasi orqali bazani sozlang.")
+    if holat == "running":
+        return True, "MySQL allaqachon ishlayapti."
+    # stopped — ishga tushiramiz
+    try:
+        subprocess.run(["net", "start", _MYSQL_SERVICE],
+                       capture_output=True, creationflags=cf, timeout=45)
+    except Exception:
+        pass
+    if _sc_holat() == "running":
+        return True, "MySQL xizmati ishga tushdi."
+    return False, ("MySQL xizmatini ishga tushirib bo'lmadi (ehtimol administrator huquqi kerak).\n"
+                   "Dasturni 'Administrator sifatida ishga tushiring' yoki BazaUstasi'ni oching.")
+
+
+def ulanish_diagnostika(cfg: dict) -> str:
+    """
+    Ulanish nega bo'lmayotganini aniqlaydi va aniq yo'l-yo'riq beradi
+    (MySQL o'chiqmi / tarmoqmi / parolmi).
+    """
+    host = str(cfg.get("host", "127.0.0.1")).strip()
+    try:
+        port = int(cfg.get("port", 3306) or 3306)
+    except Exception:
+        port = 3306
+    lokalmi = host in ("127.0.0.1", "localhost", "::1")
+
+    if not _port_ochiqmi(host, port):
+        if lokalmi:
+            return ("⛔ MySQL server BU kompyuterda ishlamayapti (port 3306 yopiq).\n\n"
+                    "Yechim: '🔧 Lokal MySQL'ni ishga tushirish' tugmasini bosing.\n"
+                    "Agar yordam bermasa — BazaUstasi (FULL o'rnatish) orqali bazani sozlang.")
+        return (f"⛔ '{host}:{port}' manziliga ulanib bo'lmadi (tarmoq/IP/firewall).\n\n"
+                "Tekshiring:\n"
+                "• IP TO'G'RI terilganmi (masalan 192.168.13.42 — 198.162 EMAS!)\n"
+                "• O'sha (asosiy) kompyuter yoniqmi va bir tarmoqdami\n"
+                "• Asosiy kompyuterda MySQL ishlayaptimi")
+
+    ok, msg = test_ulanish(cfg)
+    if ok:
+        return "✅ Ulanish muvaffaqiyatli."
+    return (f"⚠️ Server javob beryapti, lekin ulanmadi:\n{msg}\n\n"
+            "Odatda foydalanuvchi/parol yoki ruxsat (grant) noto'g'ri.")
 
 
 def test_ulanish(cfg: dict):
