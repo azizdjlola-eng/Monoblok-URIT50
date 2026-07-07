@@ -33,8 +33,10 @@ SERVER_IP = _bio_cfg.get("ip", "0.0.0.0")
 SERVER_PORT = int(_bio_cfg.get("port", 8087))
 ENCODING = _bio_cfg.get("encoding", "utf-8")
 
-BASE_DIR = r"G:\DASTUR\URIT 50\BK280\RAW_LOGS"
-ERRORS_DIR = r"G:\DASTUR\URIT 50\BK280\ERRORS"
+# Frozen-aware yozish papkasi (mijozda G: bo'lmasligi mumkin)
+_BK_DATA = os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), "AzizMedLine", "BK280")
+BASE_DIR = os.path.join(_BK_DATA, "RAW_LOGS")
+ERRORS_DIR = os.path.join(_BK_DATA, "ERRORS")
 os.makedirs(BASE_DIR, exist_ok=True)
 os.makedirs(ERRORS_DIR, exist_ok=True)
 

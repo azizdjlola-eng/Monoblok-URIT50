@@ -16,3 +16,14 @@ last_login.txt
 # Build/cache
 .idea/
 out/
+
+# Litsenziya — maxfiy / har kompyuterga xos (commit qilinmaydi)
+litsenziya.azlic
+.vaqt_belgisi
+litsenziya/_maxfiy_kalit.pem
+litsenziya/_admin_token.txt
+litsenziya/chiqarilgan/
+litsenziya/berilgan_litsenziyalar.json
+
+# Analizator/baza lokal sozlama (har kompyuterda alohida)
+analizator.json
