@@ -184,7 +184,6 @@ STANDART_SHABLON_MAPPING = {
 # Connection Pooling
 _db_connection = None
 _db_connection_lock = Lock()
-_db_query_lock = Lock()  # Fon oqimida (background thread) so'rov yuborilganda ulanishni bo'lishmaslik uchun
 
 _db_first_connect = True  # Birinchi ulanish uchun flag
 
@@ -2068,17 +2067,8 @@ def create_torch_table_in_doc(doc, result_json, order_info):
         _cell_write(row.cells[0], ko_rsatkich, align=WD_ALIGN_PARAGRAPH.LEFT)
         igm_val = data.get(f"{kalit}_igm", '')
         igg_val = data.get(f"{kalit}_igg", '')
-        igm_pos = igm_val not in ('', 'Manfiy (-)')
-        igg_pos = igg_val not in ('', 'Manfiy (-)')
-        # IgM musbat bo'lsa — qizil rang
-        if igm_pos:
-            p = row.cells[1].paragraphs[0]
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            _set_para_spacing(p, 0, 0, line_spacing=1)
-            _add_run_tnr(p, igm_val, 11, bold=True, color_rgb=RGBColor(0xCC, 0x00, 0x00))
-        else:
-            _cell_write(row.cells[1], igm_val, bold=False)
-        _cell_write(row.cells[2], igg_val, bold=igg_pos)
+        _cell_write(row.cells[1], igm_val, bold=(igm_val not in ('', 'Manfiy (-)')))
+        _cell_write(row.cells[2], igg_val, bold=(igg_val not in ('', 'Manfiy (-)')))
         _cell_write(row.cells[3], "Manfiy (-)")
     doc.add_paragraph()
 
@@ -5607,10 +5597,10 @@ def save_pdf_to_onedrive(docx_path, date_str=None):
                         _gs,
                         '-sDEVICE=pdfwrite',
                         '-dCompatibilityLevel=1.4',
-                        '-dPDFSETTINGS=/ebook',    # kichik hajm, lekin fontlar joylashadi
+                        '-dPDFSETTINGS=/screen',   # eng kichik hajm
                         '-dNOPAUSE', '-dQUIET', '-dBATCH',
-                        '-dEmbedAllFonts=true',    # fontlarni PDF ichiga joylash (telefonda to'g'ri ko'rinishi uchun)
-                        '-dSubsetFonts=true',      # faqat ishlatilgan harflar — hajm kichik qoladi
+                        '-dEmbedAllFonts=false',
+                        '-dSubsetFonts=false',
                         '-dCompressFonts=true',
                         '-dDetectDuplicateImages=true',
                         f'-sOutputFile={_gs_tmp}',
@@ -5650,9 +5640,18 @@ def save_pdf_to_onedrive(docx_path, date_str=None):
                     for _pg in _pdf.pages:
                         if '/Thumb' in _pg:
                             del _pg['/Thumb']
-                    # DIQQAT: fontlarni (FontFile) O'CHIRMAYMIZ — aks holda telefonda
-                    # Times New Roman almashtiriladi va Bold sarlavhalar buziladi (+2 siljish).
-                    # Faqat metadata/thumbnail tozalanadi, fontlar joyida qoladi.
+                    # GLOBAL: barcha indirect obyektlardan FontDescriptor topib FontFile olib tashlash
+                    for _obj in _pdf.objects:
+                        try:
+                            if not isinstance(_obj, pikepdf.Dictionary):
+                                continue
+                            _otype = _obj.get('/Type')
+                            if _otype == _FONT_DESC:
+                                for _sk in ['/FontFile', '/FontFile2', '/FontFile3']:
+                                    if _sk in _obj:
+                                        del _obj[_sk]
+                        except Exception:
+                            pass
                     _pdf.save(
                         _tmp_compressed,
                         compress_streams=True,
@@ -5682,8 +5681,18 @@ def save_pdf_to_onedrive(docx_path, date_str=None):
                 import fitz  # pymupdf
                 _tmp_fitz = pdf_path + ".fz.tmp"
                 _fdoc = fitz.open(pdf_path)
-                # DIQQAT: fontlarni (FontFile) O'CHIRMAYMIZ — telefonda buzilmasligi uchun.
-                # Faqat orphan streamlarni yig'ishtirib, hajmni kichraytiramiz.
+                # Barcha FontDescriptor lardan FontFile olib tashlash
+                for _xref in range(1, _fdoc.xref_length()):
+                    try:
+                        _s = _fdoc.xref_object(_xref)
+                        # FontDescriptor ni aniqlaymiz
+                        if '/FontDescriptor' not in _s and '/Type/FontDescriptor' not in _s:
+                            continue
+                        for _fk in ['FontFile', 'FontFile2', 'FontFile3']:
+                            if '/' + _fk in _s:
+                                _fdoc.xref_set_key(_xref, _fk, 'null')
+                    except Exception:
+                        pass
                 # garbage=4: orphan streamlarni tozalash, deflate+clean
                 _fdoc.save(_tmp_fitz, garbage=4, deflate=True, clean=True)
                 _fdoc.close()
@@ -9719,9 +9728,8 @@ class MonoblokApp:
         # Qidirish tugmalari
         search_btn_frame = ttk.Frame(search_frame)
         search_btn_frame.grid(row=2, column=2, columnspan=2, pady=5, sticky=tk.E)
-        self._search_btn = ttk.Button(search_btn_frame, text="🔍 Qidirish",
-                   command=self.search_patients)
-        self._search_btn.pack(side=tk.LEFT, padx=5)
+        ttk.Button(search_btn_frame, text="🔍 Qidirish",
+                   command=self.search_patients).pack(side=tk.LEFT, padx=5)
         ttk.Button(search_btn_frame, text="[XATO] Tozalash",
                    command=self.clear_search_fields).pack(side=tk.LEFT, padx=5)
 
@@ -9812,189 +9820,140 @@ class MonoblokApp:
             self.search_results_tree.delete(item)
     
     def search_patients(self):
-        """[OK] Bemorlarni qidirish - MySQL 8 bilan moslashtirilgan (fon oqimida — UI qotib qolmasligi uchun)"""
+        """[OK] Bemorlarni qidirish - MySQL 8 bilan moslashtirilgan"""
         ism = self.search_ism_entry.get().strip()
         fam = self.search_fam_entry.get().strip()
         tel = self.search_tel_entry.get().strip()
         dob = self.search_dob_entry.get().strip()
         jins = self.search_jins_var.get().strip()
-
+        
         # Hech bo'lmaganda bitta maydon to'ldirilgan bo'lishi kerak
         if not any([ism, fam, tel, dob, jins]):
             messagebox.showwarning("Diqqat", "Qidirish uchun kamida bitta maydon to'ldiring!")
             return
-
-        # Qidiruv allaqachon ketayotgan bo'lsa, qayta bosishga (masalan sabrsizlanib bir necha
-        # marta bosishga) yo'l qo'ymaslik — aks holda ulanish bir necha oqimda bir vaqtda
-        # ishlatilib, dastur osilib/yiqilib qolishi mumkin edi.
-        if getattr(self, "_search_in_progress", False):
+        
+        conn = db_conn()
+        if not conn:
+            error_msg = (
+                "MySQL serverga ulana olmadi!\n\n"
+                "Tekshirishlar:\n"
+                "1. MySQL server ishlayotganini tekshiring (ASUS kompyuteridagi MySQL server)\n"
+                "2. Firewall MySQL port (3306) ni ochishga ruxsat bering\n"
+                "3. IP manzil to'g'riligini tekshiring\n"
+                "4. MySQL foydalanuvchi va parol to'g'riligini tekshiring\n\n"
+                "Console da batafsil xato ma'lumotlari ko'rsatilgan."
+            )
+            messagebox.showerror("Database Ulanish Xatosi", error_msg)
             return
-        self._search_in_progress = True
-        if hasattr(self, "_search_btn"):
-            try:
-                self._search_btn.config(state="disabled")
-            except Exception:
-                pass
-        self.status_var.set("🔎 Qidirilmoqda...")
-
-        def worker():
-            outcome = {"ok": False, "kind": "query", "message": "Noma'lum xato", "results": []}
-            try:
-                conn = db_conn()
-                if not conn:
-                    outcome["kind"] = "conn"
-                    outcome["message"] = (
-                        "MySQL serverga ulana olmadi!\n\n"
-                        "Tekshirishlar:\n"
-                        "1. MySQL server ishlayotganini tekshiring (ASUS kompyuteridagi MySQL server)\n"
-                        "2. Firewall MySQL port (3306) ni ochishga ruxsat bering\n"
-                        "3. IP manzil to'g'riligini tekshiring\n"
-                        "4. MySQL foydalanuvchi va parol to'g'riligini tekshiring\n\n"
-                        "Console da batafsil xato ma'lumotlari ko'rsatilgan."
+        
+        try:
+            cursor = conn.cursor(dictionary=True)
+            
+            # [OK] MySQL 8 uchun to'g'ri SQL query
+            # Har bir bemor uchun eng oxirgi buyurtma (subquery orqali)
+            # DISTINCT ishlatilmaydi, chunki har bir bemor bir marta chiqadi
+            # Agar bir xil sana_vaqt bo'lsa, eng katta ID ni olamiz
+            query = """
+                SELECT 
+                    b.id,
+                    b.fish,
+                    b.yosh,
+                    b.jins,
+                    b.telefon,
+                    b.tugilgan_sana,
+                    o_latest.id as order_id,
+                    o_latest.sample_id
+                FROM bemorlar b
+                LEFT JOIN (
+                    SELECT o1.id, o1.bemor_id, o1.sample_id, o1.sana_vaqt
+                    FROM orders o1
+                    INNER JOIN (
+                        SELECT bemor_id, MAX(sana_vaqt) as max_sana_vaqt
+                        FROM orders
+                        GROUP BY bemor_id
+                    ) o2 ON o1.bemor_id = o2.bemor_id AND o1.sana_vaqt = o2.max_sana_vaqt
+                    WHERE o1.id = (
+                        SELECT MAX(id)
+                        FROM orders o3
+                        WHERE o3.bemor_id = o1.bemor_id 
+                        AND o3.sana_vaqt = o1.sana_vaqt
                     )
+                ) o_latest ON b.id = o_latest.bemor_id
+                WHERE 1=1
+            """
+            params = []
+            
+            # Ism va Familiya bo'yicha qidirish (fish maydonida)
+            if ism or fam:
+                if ism and fam:
+                    # Ikkalasi ham bo'lsa, ikki so'zni qidiramiz
+                    query += " AND (b.fish LIKE %s AND b.fish LIKE %s)"
+                    params.append(f"%{ism}%")
+                    params.append(f"%{fam}%")
+                elif ism:
+                    query += " AND b.fish LIKE %s"
+                    params.append(f"%{ism}%")
+                elif fam:
+                    query += " AND b.fish LIKE %s"
+                    params.append(f"%{fam}%")
+            
+            # Telefon bo'yicha qidirish
+            if tel:
+                query += " AND b.telefon LIKE %s"
+                params.append(f"%{tel}%")
+            
+            # Tug'ilgan yil yoki sana bo'yicha qidirish
+            if dob:
+                dob_clean = dob.strip()
+                if len(dob_clean) == 4 and dob_clean.isdigit():
+                    # Faqat yil kiritilgan: YYYY
+                    query += " AND YEAR(b.tugilgan_sana) = %s"
+                    params.append(int(dob_clean))
                 else:
-                    # DB ulanishi butun dastur uchun umumiy (singleton), shu sababli fon
-                    # oqimi bilan asosiy oqim bir vaqtda so'rov yubormasligi uchun qulflaymiz
-                    with _db_query_lock:
-                        cursor = conn.cursor(dictionary=True)
-                        try:
-                            # [OK] MySQL 8 uchun to'g'ri SQL query
-                            # Har bir bemor uchun eng oxirgi buyurtma (subquery orqali)
-                            # DISTINCT ishlatilmaydi, chunki har bir bemor bir marta chiqadi
-                            # Agar bir xil sana_vaqt bo'lsa, eng katta ID ni olamiz
-                            query = """
-                                SELECT
-                                    b.id,
-                                    b.fish,
-                                    b.yosh,
-                                    b.jins,
-                                    b.telefon,
-                                    b.tugilgan_sana,
-                                    o_latest.id as order_id,
-                                    o_latest.sample_id
-                                FROM bemorlar b
-                                LEFT JOIN (
-                                    SELECT o1.id, o1.bemor_id, o1.sample_id, o1.sana_vaqt
-                                    FROM orders o1
-                                    INNER JOIN (
-                                        SELECT bemor_id, MAX(sana_vaqt) as max_sana_vaqt
-                                        FROM orders
-                                        GROUP BY bemor_id
-                                    ) o2 ON o1.bemor_id = o2.bemor_id AND o1.sana_vaqt = o2.max_sana_vaqt
-                                    WHERE o1.id = (
-                                        SELECT MAX(id)
-                                        FROM orders o3
-                                        WHERE o3.bemor_id = o1.bemor_id
-                                        AND o3.sana_vaqt = o1.sana_vaqt
-                                    )
-                                ) o_latest ON b.id = o_latest.bemor_id
-                                WHERE 1=1
-                            """
-                            params = []
-
-                            # Ism va Familiya bo'yicha qidirish (fish maydonida)
-                            if ism or fam:
-                                if ism and fam:
-                                    # Ikkalasi ham bo'lsa, ikki so'zni qidiramiz
-                                    query += " AND (b.fish LIKE %s AND b.fish LIKE %s)"
-                                    params.append(f"%{ism}%")
-                                    params.append(f"%{fam}%")
-                                elif ism:
-                                    query += " AND b.fish LIKE %s"
-                                    params.append(f"%{ism}%")
-                                elif fam:
-                                    query += " AND b.fish LIKE %s"
-                                    params.append(f"%{fam}%")
-
-                            # Telefon bo'yicha qidirish
-                            if tel:
-                                query += " AND b.telefon LIKE %s"
-                                params.append(f"%{tel}%")
-
-                            # Tug'ilgan yil yoki sana bo'yicha qidirish
-                            if dob:
-                                dob_clean = dob.strip()
-                                if len(dob_clean) == 4 and dob_clean.isdigit():
-                                    # Faqat yil kiritilgan: YYYY
-                                    query += " AND YEAR(b.tugilgan_sana) = %s"
-                                    params.append(int(dob_clean))
-                                else:
-                                    # To'liq sana: YYYY-MM-DD
-                                    query += " AND DATE(b.tugilgan_sana) = %s"
-                                    params.append(dob_clean)
-
-                            # Jins bo'yicha qidirish
-                            if jins:
-                                query += " AND b.jins = %s"
-                                params.append(jins)
-
-                            # [OK] ORDER BY - eng oxirgi buyurtma bo'yicha tartiblash
-                            query += " ORDER BY o_latest.sana_vaqt DESC, b.id DESC LIMIT 100"
-
-                            cursor.execute(query, tuple(params))
-                            outcome["ok"] = True
-                            outcome["results"] = cursor.fetchall()
-                        finally:
-                            cursor.close()
-            except Exception as e:
-                outcome["kind"] = "query"
-                outcome["message"] = f"Qidirishda xato: {e}"
-                import traceback
-                traceback.print_exc()
-
-            self.root.after(0, lambda: self._apply_search_results(outcome))
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _apply_search_results(self, outcome):
-        """search_patients fon oqimidan qaytgan natijani UI ga qo'llash (asosiy oqimda chaqiriladi)"""
-        self._search_in_progress = False
-        try:
-            if hasattr(self, "_search_btn") and self._search_btn.winfo_exists():
-                self._search_btn.config(state="normal")
-        except Exception:
-            pass
-
-        # Qidiruv ketayotganda foydalanuvchi "Bemorlarni Qidirish" oynasini yopib
-        # yuborgan bo'lishi mumkin — bu holda jadvalga tegilmaydi
-        try:
-            tree_alive = self.search_results_tree.winfo_exists()
-        except Exception:
-            tree_alive = False
-        if not tree_alive:
-            return
-
-        if not outcome["ok"]:
-            title = "Database Ulanish Xatosi" if outcome["kind"] == "conn" else "Xatolik"
-            self.status_var.set("[OGOHLANTIRISH] Qidirishda xato")
-            messagebox.showerror(title, outcome["message"])
-            return
-
-        results = outcome["results"]
-
-        # Jadvalni tozalash
-        for item in self.search_results_tree.get_children():
-            self.search_results_tree.delete(item)
-
-        # Natijalarni ko'rsatish
-        if not results:
-            self.status_var.set("Natija topilmadi")
-            messagebox.showinfo("Natija", "Hech qanday natija topilmadi")
-            return
-
-        for row in results:
-            self.search_results_tree.insert("", tk.END, values=(
-                row.get('id', ''),
-                row.get('fish', ''),
-                row.get('yosh', ''),
-                row.get('jins', ''),
-                row.get('telefon', ''),
-                _fmt_tug_sana(row.get('tugilgan_sana', '')),
-                row.get('order_id', ''),
-                row.get('sample_id', '')
-            ))
-
-        self.status_var.set(f"[OK] {len(results)} ta natija topildi")
+                    # To'liq sana: YYYY-MM-DD
+                    query += " AND DATE(b.tugilgan_sana) = %s"
+                    params.append(dob_clean)
+            
+            # Jins bo'yicha qidirish
+            if jins:
+                query += " AND b.jins = %s"
+                params.append(jins)
+            
+            # [OK] ORDER BY - eng oxirgi buyurtma bo'yicha tartiblash
+            query += " ORDER BY o_latest.sana_vaqt DESC, b.id DESC LIMIT 100"
+            
+            cursor.execute(query, tuple(params))
+            results = cursor.fetchall()
+            
+            # Jadvalni tozalash
+            for item in self.search_results_tree.get_children():
+                self.search_results_tree.delete(item)
+            
+            # Natijalarni ko'rsatish
+            if not results:
+                messagebox.showinfo("Natija", "Hech qanday natija topilmadi")
+                return
+            
+            for row in results:
+                self.search_results_tree.insert("", tk.END, values=(
+                    row.get('id', ''),
+                    row.get('fish', ''),
+                    row.get('yosh', ''),
+                    row.get('jins', ''),
+                    row.get('telefon', ''),
+                    _fmt_tug_sana(row.get('tugilgan_sana', '')),
+                    row.get('order_id', ''),
+                    row.get('sample_id', '')
+                ))
+            
+            self.status_var.set(f"[OK] {len(results)} ta natija topildi")
+            
+        except Exception as e:
+            messagebox.showerror("Xatolik", f"Qidirishda xato: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            cursor.close()
     
     def on_search_result_double_click(self, event):
         """Qidirish natijasida double-click qilganda buyurtmani yuklash"""
@@ -13385,6 +13344,19 @@ Sana: {_sana_fmt}"""
                 height=popup_h
             )
 
+            listbox = tk.Listbox(
+                popup_frame,
+                font=("Arial", 13, "bold"),
+                height=len(options),
+                selectbackground="#3377CC",
+                selectforeground="white",
+                activestyle="none",
+                borderwidth=0,
+                highlightthickness=0,
+                relief=tk.FLAT
+            )
+            listbox.pack(fill="both", expand=True, padx=1, pady=1)
+
             # Oldingi tanlovni aniqlash (ro'yxatga qo'shishdan oldin - belgi qo'yish uchun)
             default_idx = 0
             if old_result_value:
@@ -13393,215 +13365,84 @@ Sana: {_sana_fmt}"""
                 except ValueError:
                     default_idx = 0
 
-            if is_blood_group:
-                # ══════════════════════════════════════════════════════
-                #  Qon guruhi — ABO nishoni (badge) + Rh rangi bilan qator
-                #  Har bir guruh (O/A/B/AB) o'ziga xos rangli nishonga ega,
-                #  shu bilan yaqin turgan variantlarni (masalan 3- va 4-
-                #  guruh) adashtirib yuborish ehtimoli kamayadi.
-                # ══════════════════════════════════════════════════════
-                ABO_BADGE = {
-                    'O':  "#6C4BA6",
-                    'A':  "#1C8C8C",
-                    'B':  "#2A5CAA",
-                    'AB': "#B23A73",
-                }
-
-                def _abo_key(opt):
-                    return "AB" if opt.startswith("AB") else opt[0]
-
-                popup_frame.config(takefocus=1)
-                sel_idx = [default_idx]
-                rows = []
-
-                def highlight(idx):
-                    for i, rf in enumerate(rows):
-                        rf.config(highlightthickness=(2 if i == idx else 0),
-                                  highlightbackground="#3377CC")
-
-                def _confirm_and_move(direction):
-                    if 0 <= sel_idx[0] < len(options):
-                        do_save(options[sel_idx[0]])
-                    close_popup(popup_frame)
-                    self._navigate_to_item(item, direction=direction)
-                    return "break"
-
-                def save_and_next(event=None):
-                    return _confirm_and_move('next')
-
-                def save_and_prev(event=None):
-                    return _confirm_and_move('prev')
-
-                def on_escape(event=None):
-                    close_popup(popup_frame)
-                    self.tests_tree.focus_set()
-                    return "break"
-
-                def on_up(event=None):
-                    if sel_idx[0] == 0:
-                        return save_and_prev()
-                    sel_idx[0] -= 1
-                    highlight(sel_idx[0])
-                    return "break"
-
-                def on_down(event=None):
-                    if sel_idx[0] == len(options) - 1:
-                        return save_and_next()
-                    sel_idx[0] += 1
-                    highlight(sel_idx[0])
-                    return "break"
-
-                def on_focus_out(event=None):
-                    self.tests_tree.after(100, lambda: _check_focus_and_close())
-
-                def _check_focus_and_close():
-                    try:
-                        if self.root.focus_get() is not popup_frame:
-                            close_popup(popup_frame)
-                    except Exception:
-                        close_popup(popup_frame)
-
-                for idx, opt in enumerate(options):
-                    is_current = (idx == default_idx and bool(old_result_value))
+            for idx, opt in enumerate(options):
+                display_text = ("☑ " + opt) if idx == default_idx and old_result_value else opt
+                listbox.insert(tk.END, display_text)
+                # Qon guruhida Rh+ / Rh- ni rang bilan ajratish - adashib ketishning oldini olish
+                if is_blood_group:
                     if "Rh+" in opt:
-                        row_bg, row_fg = "#FFE3E3", "#B00020"
-                    else:
-                        row_bg, row_fg = "#E3ECFF", "#0B3D91"
-                    badge_key  = _abo_key(opt)
-                    badge_bg   = ABO_BADGE.get(badge_key, "#888888")
-                    badge_text = badge_key + ("+" if "Rh+" in opt else "-")
+                        listbox.itemconfig(idx, background="#FFE3E3", foreground="#B00020")
+                    elif "Rh-" in opt:
+                        listbox.itemconfig(idx, background="#E3ECFF", foreground="#0B3D91")
 
-                    row_frame = tk.Frame(popup_frame, bg=row_bg)
-                    row_frame.place(x=1, y=1 + idx * ROW_H, width=popup_w - 2, height=ROW_H)
+            listbox.selection_set(default_idx)
+            listbox.activate(default_idx)
+            listbox.see(default_idx)
 
-                    badge_lbl = tk.Label(row_frame, text=badge_text, bg=badge_bg, fg="white",
-                                          font=("Arial", 11, "bold"), width=4)
-                    badge_lbl.pack(side="left", fill="y")
+            # ── Saqlash va keyingi qatorga o'tish ─────────────────
+            def save_and_next(event=None):
+                sel = listbox.curselection()
+                if sel:
+                    do_save(options[sel[0]])
+                close_popup(popup_frame)
+                self._navigate_to_item(item, direction='next')
+                return "break"
 
-                    display_text = ("☑ " + opt) if is_current else opt
-                    text_lbl = tk.Label(row_frame, text=display_text, bg=row_bg, fg=row_fg,
-                                         font=("Arial", 13, "bold"), anchor="w")
-                    text_lbl.pack(side="left", fill="both", expand=True, padx=6)
+            # ── Saqlash va oldingi qatorga o'tish ─────────────────
+            def save_and_prev(event=None):
+                sel = listbox.curselection()
+                if sel:
+                    do_save(options[sel[0]])
+                close_popup(popup_frame)
+                self._navigate_to_item(item, direction='prev')
+                return "break"
 
-                    def _on_click(event, i=idx):
-                        sel_idx[0] = i
-                        highlight(i)
-                        popup_frame.focus_set()
-                        return "break"
+            # ── Bekor qilish ──────────────────────────────────────
+            def on_escape(event=None):
+                close_popup(popup_frame)
+                self.tests_tree.focus_set()
+                return "break"
 
-                    def _on_double_click(event, i=idx):
-                        sel_idx[0] = i
-                        return save_and_next()
+            # ── Yuqori chekda → oldingi qatorga o'tish ───────────
+            def on_up(event=None):
+                sel = listbox.curselection()
+                if sel and sel[0] == 0:
+                    return save_and_prev()
+                # Aks holda Listbox o'zi boshqaradi
 
-                    for w in (row_frame, badge_lbl, text_lbl):
-                        w.bind("<Button-1>", _on_click)
-                        w.bind("<Double-Button-1>", _on_double_click)
+            # ── Quyi chekda → keyingi qatorga o'tish ─────────────
+            def on_down(event=None):
+                sel = listbox.curselection()
+                if sel and sel[0] == len(options) - 1:
+                    return save_and_next()
+                # Aks holda Listbox o'zi boshqaradi
 
-                    rows.append(row_frame)
+            # ── Fokus yo'qolganda popup yopilsin ──────────────────
+            def on_focus_out(event=None):
+                # Listbox dan fokus chiqsa, popup ni yopish
+                self.tests_tree.after(100, lambda: _check_focus_and_close())
 
-                highlight(default_idx)
-
-                popup_frame.bind("<Return>",   save_and_next)
-                popup_frame.bind("<Tab>",      save_and_next)
-                popup_frame.bind("<Escape>",   on_escape)
-                popup_frame.bind("<Up>",       on_up)
-                popup_frame.bind("<Down>",     on_down)
-                popup_frame.bind("<FocusOut>", on_focus_out)
-
-                self.result_entry    = popup_frame
-                self.editing_item    = item
-                self.editing_test_id = test_id
-                popup_frame.focus_set()
-
-            else:
-                # ══════════════════════════════════════════════════════
-                #  Umumiy variantlar ro'yxati → Listbox (klaviatura uchun)
-                # ══════════════════════════════════════════════════════
-                listbox = tk.Listbox(
-                    popup_frame,
-                    font=("Arial", 13, "bold"),
-                    height=len(options),
-                    selectbackground="#3377CC",
-                    selectforeground="white",
-                    activestyle="none",
-                    borderwidth=0,
-                    highlightthickness=0,
-                    relief=tk.FLAT
-                )
-                listbox.pack(fill="both", expand=True, padx=1, pady=1)
-
-                for idx, opt in enumerate(options):
-                    display_text = ("☑ " + opt) if idx == default_idx and old_result_value else opt
-                    listbox.insert(tk.END, display_text)
-
-                listbox.selection_set(default_idx)
-                listbox.activate(default_idx)
-                listbox.see(default_idx)
-
-                # ── Saqlash va keyingi qatorga o'tish ─────────────────
-                def save_and_next(event=None):
-                    sel = listbox.curselection()
-                    if sel:
-                        do_save(options[sel[0]])
-                    close_popup(popup_frame)
-                    self._navigate_to_item(item, direction='next')
-                    return "break"
-
-                # ── Saqlash va oldingi qatorga o'tish ─────────────────
-                def save_and_prev(event=None):
-                    sel = listbox.curselection()
-                    if sel:
-                        do_save(options[sel[0]])
-                    close_popup(popup_frame)
-                    self._navigate_to_item(item, direction='prev')
-                    return "break"
-
-                # ── Bekor qilish ──────────────────────────────────────
-                def on_escape(event=None):
-                    close_popup(popup_frame)
-                    self.tests_tree.focus_set()
-                    return "break"
-
-                # ── Yuqori chekda → oldingi qatorga o'tish ───────────
-                def on_up(event=None):
-                    sel = listbox.curselection()
-                    if sel and sel[0] == 0:
-                        return save_and_prev()
-                    # Aks holda Listbox o'zi boshqaradi
-
-                # ── Quyi chekda → keyingi qatorga o'tish ─────────────
-                def on_down(event=None):
-                    sel = listbox.curselection()
-                    if sel and sel[0] == len(options) - 1:
-                        return save_and_next()
-                    # Aks holda Listbox o'zi boshqaradi
-
-                # ── Fokus yo'qolganda popup yopilsin ──────────────────
-                def on_focus_out(event=None):
-                    # Listbox dan fokus chiqsa, popup ni yopish
-                    self.tests_tree.after(100, lambda: _check_focus_and_close())
-
-                def _check_focus_and_close():
-                    try:
-                        focused = self.root.focus_get()
-                        # Agar fokus popup ichidagi widget da bo'lmasa — yopish
-                        if focused is not listbox and focused is not popup_frame:
-                            close_popup(popup_frame)
-                    except Exception:
+            def _check_focus_and_close():
+                try:
+                    focused = self.root.focus_get()
+                    # Agar fokus popup ichidagi widget da bo'lmasa — yopish
+                    if focused is not listbox and focused is not popup_frame:
                         close_popup(popup_frame)
+                except Exception:
+                    close_popup(popup_frame)
 
-                listbox.bind("<Return>",   save_and_next)
-                listbox.bind("<Tab>",      save_and_next)
-                listbox.bind("<Escape>",   on_escape)
-                listbox.bind("<Double-1>", save_and_next)
-                listbox.bind("<Up>",       on_up)
-                listbox.bind("<Down>",     on_down)
-                listbox.bind("<FocusOut>", on_focus_out)
+            listbox.bind("<Return>",   save_and_next)
+            listbox.bind("<Tab>",      save_and_next)
+            listbox.bind("<Escape>",   on_escape)
+            listbox.bind("<Double-1>", save_and_next)
+            listbox.bind("<Up>",       on_up)
+            listbox.bind("<Down>",     on_down)
+            listbox.bind("<FocusOut>", on_focus_out)
 
-                self.result_entry    = popup_frame
-                self.editing_item    = item
-                self.editing_test_id = test_id
-                listbox.focus_set()
+            self.result_entry    = popup_frame
+            self.editing_item    = item
+            self.editing_test_id = test_id
+            listbox.focus_set()
 
         # ══════════════════════════════════════════════════════════
         #  8 tadan ko'p variant  →  Combobox (Enter/Tab ishlaydi)
@@ -16710,7 +16551,7 @@ Sana: {_sana_fmt}"""
     #  TORCH INFEKSIYASI IgM VA IgG
     # ─────────────────────────────────────────────────────────────────────────
     def show_torch_form(self, test_id, test_name, test_data):
-        """TORCH - test kartasi ko'rinishida natija kiritish (TOX|RV|CMV|HSV-I|HSV-II ustunlar)."""
+        """TORCH infeksiyasi IgM va IgG uchun natija kiritish dialogi."""
         import json
         old_result = {}
         existing = self.test_results.get(test_id, '')
@@ -16722,118 +16563,64 @@ Sana: {_sana_fmt}"""
 
         dialog = tk.Toplevel(self.root)
         dialog.title("TORCH Infeksiyasi — Natija Kiritish")
-        dialog.geometry("920x430")
-        dialog.resizable(True, False)
+        dialog.geometry("700x360")
         dialog.transient(self.root)
         dialog.grab_set()
         dialog.focus_set()
 
         tk.Label(dialog, text="TORCH INFEKSIYASIGA IgM VA IgG",
-                 font=("Times New Roman", 13, "bold"), pady=6).pack()
+                 font=("Times New Roman", 13, "bold"), pady=8).pack()
 
-        TORCH_TESTS = [
-            ("TOX",    "Toxoplasma",  "toxo"),
-            ("RV",     "Rubella",     "rubella"),
-            ("CMV",    "CMV",         "cmv"),
-            ("HSV-I",  "Herpes 1",    "herpes1"),
-            ("HSV-II", "Herpes 2",    "herpes2"),
+        table_frame = tk.Frame(dialog, padx=10, pady=5)
+        table_frame.pack(fill="both", expand=True)
+
+        for col, (text, w) in enumerate([("Ko'rsatkich", 36), ("IgG", 16), ("IgM", 16), ("Me'yor", 12)]):
+            tk.Label(table_frame, text=text, font=("Arial", 9, "bold"),
+                     relief="groove", width=w, pady=5, bg="#d0d0d0", anchor="center").grid(
+                row=0, column=col, sticky="nsew", padx=1, pady=1)
+
+        rows_config = [
+            ("Toxoplasma (TOKSOPLAZMOZ) Ekspress test",           "toxo"),
+            ("Rubella (QIZILCHA) Ekspress test",                  "rubella"),
+            ("Cytomegalovirus (SITOMYEGALOVIRUS) Ekspress test",  "cmv"),
+            ("Herpes 1 (ODDIY GERPYES 1 tipi) Ekspress test",    "herpes1"),
+            ("Herpes 2 (ODDIY GERPYES 2 tipi) Ekspress test",    "herpes2"),
         ]
-        OPTS = ["Manfiy (-)", "Musbat (+)", "Musbat (++)", "Musbat (+++)"]
-        MANFIY = "Manfiy (-)"
-        STRIP_W, STRIP_H = 108, 110
-        C_Y, IGG_Y, IGM_Y = 20, 60, 88
 
-        main_frame = tk.Frame(dialog, padx=8, pady=4)
-        main_frame.pack(fill="both", expand=True)
-
-        # Sol tomon qator yorliqlari
-        tk.Label(main_frame, text="", height=2).grid(row=0, column=0)
-        tk.Label(main_frame, text="IgG", font=("Arial", 11, "bold"), fg="#1a1a8c",
-                 width=7, anchor="e", padx=6).grid(row=1, column=0, pady=4)
-        tk.Label(main_frame, text="IgM", font=("Arial", 11, "bold"), fg="#cc0000",
-                 width=7, anchor="e", padx=6).grid(row=2, column=0, pady=4)
-
+        torch_opts = ["Manfiy (-)", "Musbat (+)", "Musbat (++)", "Musbat (+++)"]
         igg_vars = {}
         igm_vars = {}
-        canvases = {}
 
-        def _draw_strip(canvas, kalit, igg_val, igm_val):
-            """Stripni qayta chizish."""
-            canvas.delete("dynamic")
-            # C chizig'i — doim bor
-            canvas.create_line(28, C_Y, STRIP_W - 8, C_Y,
-                                fill="#1a1a8c", width=4, tags="dynamic")
-            # IgG chizig'i
-            if igg_val != MANFIY and igg_val:
-                canvas.create_line(28, IGG_Y, STRIP_W - 8, IGG_Y,
-                                    fill="#1a1a8c", width=4, tags="dynamic")
-            # IgM chizig'i
-            if igm_val != MANFIY and igm_val:
-                canvas.create_line(28, IGM_Y, STRIP_W - 8, IGM_Y,
-                                    fill="#cc0000", width=4, tags="dynamic")
-
-        for col_idx, (short_name, full_name, kalit) in enumerate(TORCH_TESTS, start=1):
-            # ── Strip vizual ──────────────────────────────────────────────
-            strip_outer = tk.Frame(main_frame, bg="#c8b89a", bd=2, relief="raised")
-            strip_outer.grid(row=0, column=col_idx, padx=10, pady=2, sticky="n")
-
-            hdr = tk.Frame(strip_outer, bg="#1a1a8c")
-            hdr.pack(fill="x")
-            tk.Label(hdr, text=short_name, font=("Arial", 11, "bold"),
-                     bg="#1a1a8c", fg="white", width=9).pack()
-            tk.Label(strip_outer, text=full_name, font=("Arial", 7),
-                     bg="#c8b89a", fg="#333", width=10, wraplength=85).pack()
-
-            canvas = tk.Canvas(strip_outer, width=STRIP_W, height=STRIP_H,
-                                bg="#f0ead8", bd=0, highlightthickness=0)
-            canvas.pack(padx=2, pady=2)
-            # Statik yorliqlar
-            canvas.create_text(15, C_Y,   text="C",   font=("Arial", 8, "bold"), fill="#1a1a8c")
-            canvas.create_text(15, IGG_Y, text="IgG", font=("Arial", 7),         fill="#1a1a8c")
-            canvas.create_text(15, IGM_Y, text="IgM", font=("Arial", 7),         fill="#880000")
-            canvases[kalit] = canvas
-
-            init_igg = old_result.get(f"{kalit}_igg", OPTS[0])
-            init_igm = old_result.get(f"{kalit}_igm", OPTS[0])
-            _draw_strip(canvas, kalit, init_igg, init_igm)
-
-            # ── IgG dropdown ──────────────────────────────────────────────
-            igg_var = tk.StringVar(value=init_igg)
+        for row_idx, (ko_rsatkich, kalit) in enumerate(rows_config, start=1):
+            tk.Label(table_frame, text=ko_rsatkich, font=("Arial", 9),
+                     relief="groove", width=36, pady=5, anchor="w", padx=5,
+                     wraplength=255, justify="left").grid(
+                row=row_idx, column=0, sticky="nsew", padx=1, pady=1)
+            igg_var = tk.StringVar(value=old_result.get(f"{kalit}_igg", torch_opts[0]))
             igg_vars[kalit] = igg_var
-            igg_menu = tk.OptionMenu(main_frame, igg_var, *OPTS)
-            igg_menu.config(font=("Arial", 9), width=12, fg="#1a1a8c")
-            igg_menu.grid(row=1, column=col_idx, padx=10, pady=3, sticky="ew")
-
-            # ── IgM dropdown ──────────────────────────────────────────────
-            igm_var = tk.StringVar(value=init_igm)
+            igg_menu = tk.OptionMenu(table_frame, igg_var, *torch_opts)
+            igg_menu.config(font=("Arial", 9), width=13)
+            igg_menu.grid(row=row_idx, column=1, sticky="nsew", padx=1, pady=1)
+            igm_var = tk.StringVar(value=old_result.get(f"{kalit}_igm", torch_opts[0]))
             igm_vars[kalit] = igm_var
-            igm_menu = tk.OptionMenu(main_frame, igm_var, *OPTS)
-            igm_menu.config(font=("Arial", 9), width=12,
-                             fg=("#cc0000" if init_igm != MANFIY else "#333333"))
-            igm_menu.grid(row=2, column=col_idx, padx=10, pady=3, sticky="ew")
+            igm_menu = tk.OptionMenu(table_frame, igm_var, *torch_opts)
+            igm_menu.config(font=("Arial", 9), width=13)
+            igm_menu.grid(row=row_idx, column=2, sticky="nsew", padx=1, pady=1)
+            tk.Label(table_frame, text="Manfiy (-)", font=("Arial", 9), fg="#555",
+                     relief="groove", width=12, anchor="center").grid(
+                row=row_idx, column=3, sticky="nsew", padx=1, pady=1)
 
-            # Trace: strip va rang yangilash
-            def _on_change(*, k=kalit, cv=canvas, iv=igg_var, mv=igm_var, mm=igm_menu):
-                ig = iv.get(); im = mv.get()
-                _draw_strip(cv, k, ig, im)
-                mm.config(fg=("#cc0000" if im != MANFIY else "#333333"),
-                           font=("Arial", 9, "bold") if im != MANFIY else ("Arial", 9))
-
-            igg_var.trace_add('write', lambda *a, fn=_on_change: fn())
-            igm_var.trace_add('write', lambda *a, fn=_on_change: fn())
-
-        # ── Tugmalar ──────────────────────────────────────────────────────
         btn_frame = tk.Frame(dialog, pady=8)
         btn_frame.pack(fill="x")
 
         def saqlash():
             data = {}
-            for _, _, kalit in TORCH_TESTS:
+            for kalit in [r[1] for r in rows_config]:
                 data[f"{kalit}_igg"] = igg_vars[kalit].get()
                 data[f"{kalit}_igm"] = igm_vars[kalit].get()
             result_json = json.dumps(data, ensure_ascii=False)
-            pos = [tn for _, tn, k in TORCH_TESTS
-                   if igg_vars[k].get() != MANFIY or igm_vars[k].get() != MANFIY]
+            pos = [r[0].split()[0] for r in rows_config
+                   if igg_vars[r[1]].get() != "Manfiy (-)" or igm_vars[r[1]].get() != "Manfiy (-)"]
             natija_str = ("Musbat: " + ", ".join(pos)) if pos else "Barchasi Manfiy (-)"
             self._save_test_result_to_tree(test_id, result_json, natija_str)
             dialog.destroy()

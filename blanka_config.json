@@ -13,5 +13,7 @@
   "klinika_tel": "Tel.: (998) 99-673-13-42",
   "klinika_rang": "1E9943",
   "header_bg_color": "D609DB",
-  "bemor_row_color": "EAED7E"
+  "bemor_row_color": "EAED7E",
+  "table_header_bg": "F4C7DC",
+  "group_title_color": "B5179E"
 }

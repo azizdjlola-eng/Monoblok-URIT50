@@ -2068,17 +2068,8 @@ def create_torch_table_in_doc(doc, result_json, order_info):
         _cell_write(row.cells[0], ko_rsatkich, align=WD_ALIGN_PARAGRAPH.LEFT)
         igm_val = data.get(f"{kalit}_igm", '')
         igg_val = data.get(f"{kalit}_igg", '')
-        igm_pos = igm_val not in ('', 'Manfiy (-)')
-        igg_pos = igg_val not in ('', 'Manfiy (-)')
-        # IgM musbat bo'lsa — qizil rang
-        if igm_pos:
-            p = row.cells[1].paragraphs[0]
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            _set_para_spacing(p, 0, 0, line_spacing=1)
-            _add_run_tnr(p, igm_val, 11, bold=True, color_rgb=RGBColor(0xCC, 0x00, 0x00))
-        else:
-            _cell_write(row.cells[1], igm_val, bold=False)
-        _cell_write(row.cells[2], igg_val, bold=igg_pos)
+        _cell_write(row.cells[1], igm_val, bold=(igm_val not in ('', 'Manfiy (-)')))
+        _cell_write(row.cells[2], igg_val, bold=(igg_val not in ('', 'Manfiy (-)')))
         _cell_write(row.cells[3], "Manfiy (-)")
     doc.add_paragraph()
 
@@ -5607,10 +5598,10 @@ def save_pdf_to_onedrive(docx_path, date_str=None):
                         _gs,
                         '-sDEVICE=pdfwrite',
                         '-dCompatibilityLevel=1.4',
-                        '-dPDFSETTINGS=/ebook',    # kichik hajm, lekin fontlar joylashadi
+                        '-dPDFSETTINGS=/screen',   # eng kichik hajm
                         '-dNOPAUSE', '-dQUIET', '-dBATCH',
-                        '-dEmbedAllFonts=true',    # fontlarni PDF ichiga joylash (telefonda to'g'ri ko'rinishi uchun)
-                        '-dSubsetFonts=true',      # faqat ishlatilgan harflar — hajm kichik qoladi
+                        '-dEmbedAllFonts=false',
+                        '-dSubsetFonts=false',
                         '-dCompressFonts=true',
                         '-dDetectDuplicateImages=true',
                         f'-sOutputFile={_gs_tmp}',
@@ -5650,9 +5641,18 @@ def save_pdf_to_onedrive(docx_path, date_str=None):
                     for _pg in _pdf.pages:
                         if '/Thumb' in _pg:
                             del _pg['/Thumb']
-                    # DIQQAT: fontlarni (FontFile) O'CHIRMAYMIZ — aks holda telefonda
-                    # Times New Roman almashtiriladi va Bold sarlavhalar buziladi (+2 siljish).
-                    # Faqat metadata/thumbnail tozalanadi, fontlar joyida qoladi.
+                    # GLOBAL: barcha indirect obyektlardan FontDescriptor topib FontFile olib tashlash
+                    for _obj in _pdf.objects:
+                        try:
+                            if not isinstance(_obj, pikepdf.Dictionary):
+                                continue
+                            _otype = _obj.get('/Type')
+                            if _otype == _FONT_DESC:
+                                for _sk in ['/FontFile', '/FontFile2', '/FontFile3']:
+                                    if _sk in _obj:
+                                        del _obj[_sk]
+                        except Exception:
+                            pass
                     _pdf.save(
                         _tmp_compressed,
                         compress_streams=True,
@@ -5682,8 +5682,18 @@ def save_pdf_to_onedrive(docx_path, date_str=None):
                 import fitz  # pymupdf
                 _tmp_fitz = pdf_path + ".fz.tmp"
                 _fdoc = fitz.open(pdf_path)
-                # DIQQAT: fontlarni (FontFile) O'CHIRMAYMIZ — telefonda buzilmasligi uchun.
-                # Faqat orphan streamlarni yig'ishtirib, hajmni kichraytiramiz.
+                # Barcha FontDescriptor lardan FontFile olib tashlash
+                for _xref in range(1, _fdoc.xref_length()):
+                    try:
+                        _s = _fdoc.xref_object(_xref)
+                        # FontDescriptor ni aniqlaymiz
+                        if '/FontDescriptor' not in _s and '/Type/FontDescriptor' not in _s:
+                            continue
+                        for _fk in ['FontFile', 'FontFile2', 'FontFile3']:
+                            if '/' + _fk in _s:
+                                _fdoc.xref_set_key(_xref, _fk, 'null')
+                    except Exception:
+                        pass
                 # garbage=4: orphan streamlarni tozalash, deflate+clean
                 _fdoc.save(_tmp_fitz, garbage=4, deflate=True, clean=True)
                 _fdoc.close()
@@ -16710,7 +16720,7 @@ Sana: {_sana_fmt}"""
     #  TORCH INFEKSIYASI IgM VA IgG
     # ─────────────────────────────────────────────────────────────────────────
     def show_torch_form(self, test_id, test_name, test_data):
-        """TORCH - test kartasi ko'rinishida natija kiritish (TOX|RV|CMV|HSV-I|HSV-II ustunlar)."""
+        """TORCH infeksiyasi IgM va IgG uchun natija kiritish dialogi."""
         import json
         old_result = {}
         existing = self.test_results.get(test_id, '')
@@ -16722,118 +16732,64 @@ Sana: {_sana_fmt}"""
 
         dialog = tk.Toplevel(self.root)
         dialog.title("TORCH Infeksiyasi — Natija Kiritish")
-        dialog.geometry("920x430")
-        dialog.resizable(True, False)
+        dialog.geometry("700x360")
         dialog.transient(self.root)
         dialog.grab_set()
         dialog.focus_set()
 
         tk.Label(dialog, text="TORCH INFEKSIYASIGA IgM VA IgG",
-                 font=("Times New Roman", 13, "bold"), pady=6).pack()
+                 font=("Times New Roman", 13, "bold"), pady=8).pack()
 
-        TORCH_TESTS = [
-            ("TOX",    "Toxoplasma",  "toxo"),
-            ("RV",     "Rubella",     "rubella"),
-            ("CMV",    "CMV",         "cmv"),
-            ("HSV-I",  "Herpes 1",    "herpes1"),
-            ("HSV-II", "Herpes 2",    "herpes2"),
+        table_frame = tk.Frame(dialog, padx=10, pady=5)
+        table_frame.pack(fill="both", expand=True)
+
+        for col, (text, w) in enumerate([("Ko'rsatkich", 36), ("IgG", 16), ("IgM", 16), ("Me'yor", 12)]):
+            tk.Label(table_frame, text=text, font=("Arial", 9, "bold"),
+                     relief="groove", width=w, pady=5, bg="#d0d0d0", anchor="center").grid(
+                row=0, column=col, sticky="nsew", padx=1, pady=1)
+
+        rows_config = [
+            ("Toxoplasma (TOKSOPLAZMOZ) Ekspress test",           "toxo"),
+            ("Rubella (QIZILCHA) Ekspress test",                  "rubella"),
+            ("Cytomegalovirus (SITOMYEGALOVIRUS) Ekspress test",  "cmv"),
+            ("Herpes 1 (ODDIY GERPYES 1 tipi) Ekspress test",    "herpes1"),
+            ("Herpes 2 (ODDIY GERPYES 2 tipi) Ekspress test",    "herpes2"),
         ]
-        OPTS = ["Manfiy (-)", "Musbat (+)", "Musbat (++)", "Musbat (+++)"]
-        MANFIY = "Manfiy (-)"
-        STRIP_W, STRIP_H = 108, 110
-        C_Y, IGG_Y, IGM_Y = 20, 60, 88
 
-        main_frame = tk.Frame(dialog, padx=8, pady=4)
-        main_frame.pack(fill="both", expand=True)
-
-        # Sol tomon qator yorliqlari
-        tk.Label(main_frame, text="", height=2).grid(row=0, column=0)
-        tk.Label(main_frame, text="IgG", font=("Arial", 11, "bold"), fg="#1a1a8c",
-                 width=7, anchor="e", padx=6).grid(row=1, column=0, pady=4)
-        tk.Label(main_frame, text="IgM", font=("Arial", 11, "bold"), fg="#cc0000",
-                 width=7, anchor="e", padx=6).grid(row=2, column=0, pady=4)
-
+        torch_opts = ["Manfiy (-)", "Musbat (+)", "Musbat (++)", "Musbat (+++)"]
         igg_vars = {}
         igm_vars = {}
-        canvases = {}
 
-        def _draw_strip(canvas, kalit, igg_val, igm_val):
-            """Stripni qayta chizish."""
-            canvas.delete("dynamic")
-            # C chizig'i — doim bor
-            canvas.create_line(28, C_Y, STRIP_W - 8, C_Y,
-                                fill="#1a1a8c", width=4, tags="dynamic")
-            # IgG chizig'i
-            if igg_val != MANFIY and igg_val:
-                canvas.create_line(28, IGG_Y, STRIP_W - 8, IGG_Y,
-                                    fill="#1a1a8c", width=4, tags="dynamic")
-            # IgM chizig'i
-            if igm_val != MANFIY and igm_val:
-                canvas.create_line(28, IGM_Y, STRIP_W - 8, IGM_Y,
-                                    fill="#cc0000", width=4, tags="dynamic")
-
-        for col_idx, (short_name, full_name, kalit) in enumerate(TORCH_TESTS, start=1):
-            # ── Strip vizual ──────────────────────────────────────────────
-            strip_outer = tk.Frame(main_frame, bg="#c8b89a", bd=2, relief="raised")
-            strip_outer.grid(row=0, column=col_idx, padx=10, pady=2, sticky="n")
-
-            hdr = tk.Frame(strip_outer, bg="#1a1a8c")
-            hdr.pack(fill="x")
-            tk.Label(hdr, text=short_name, font=("Arial", 11, "bold"),
-                     bg="#1a1a8c", fg="white", width=9).pack()
-            tk.Label(strip_outer, text=full_name, font=("Arial", 7),
-                     bg="#c8b89a", fg="#333", width=10, wraplength=85).pack()
-
-            canvas = tk.Canvas(strip_outer, width=STRIP_W, height=STRIP_H,
-                                bg="#f0ead8", bd=0, highlightthickness=0)
-            canvas.pack(padx=2, pady=2)
-            # Statik yorliqlar
-            canvas.create_text(15, C_Y,   text="C",   font=("Arial", 8, "bold"), fill="#1a1a8c")
-            canvas.create_text(15, IGG_Y, text="IgG", font=("Arial", 7),         fill="#1a1a8c")
-            canvas.create_text(15, IGM_Y, text="IgM", font=("Arial", 7),         fill="#880000")
-            canvases[kalit] = canvas
-
-            init_igg = old_result.get(f"{kalit}_igg", OPTS[0])
-            init_igm = old_result.get(f"{kalit}_igm", OPTS[0])
-            _draw_strip(canvas, kalit, init_igg, init_igm)
-
-            # ── IgG dropdown ──────────────────────────────────────────────
-            igg_var = tk.StringVar(value=init_igg)
+        for row_idx, (ko_rsatkich, kalit) in enumerate(rows_config, start=1):
+            tk.Label(table_frame, text=ko_rsatkich, font=("Arial", 9),
+                     relief="groove", width=36, pady=5, anchor="w", padx=5,
+                     wraplength=255, justify="left").grid(
+                row=row_idx, column=0, sticky="nsew", padx=1, pady=1)
+            igg_var = tk.StringVar(value=old_result.get(f"{kalit}_igg", torch_opts[0]))
             igg_vars[kalit] = igg_var
-            igg_menu = tk.OptionMenu(main_frame, igg_var, *OPTS)
-            igg_menu.config(font=("Arial", 9), width=12, fg="#1a1a8c")
-            igg_menu.grid(row=1, column=col_idx, padx=10, pady=3, sticky="ew")
-
-            # ── IgM dropdown ──────────────────────────────────────────────
-            igm_var = tk.StringVar(value=init_igm)
+            igg_menu = tk.OptionMenu(table_frame, igg_var, *torch_opts)
+            igg_menu.config(font=("Arial", 9), width=13)
+            igg_menu.grid(row=row_idx, column=1, sticky="nsew", padx=1, pady=1)
+            igm_var = tk.StringVar(value=old_result.get(f"{kalit}_igm", torch_opts[0]))
             igm_vars[kalit] = igm_var
-            igm_menu = tk.OptionMenu(main_frame, igm_var, *OPTS)
-            igm_menu.config(font=("Arial", 9), width=12,
-                             fg=("#cc0000" if init_igm != MANFIY else "#333333"))
-            igm_menu.grid(row=2, column=col_idx, padx=10, pady=3, sticky="ew")
+            igm_menu = tk.OptionMenu(table_frame, igm_var, *torch_opts)
+            igm_menu.config(font=("Arial", 9), width=13)
+            igm_menu.grid(row=row_idx, column=2, sticky="nsew", padx=1, pady=1)
+            tk.Label(table_frame, text="Manfiy (-)", font=("Arial", 9), fg="#555",
+                     relief="groove", width=12, anchor="center").grid(
+                row=row_idx, column=3, sticky="nsew", padx=1, pady=1)
 
-            # Trace: strip va rang yangilash
-            def _on_change(*, k=kalit, cv=canvas, iv=igg_var, mv=igm_var, mm=igm_menu):
-                ig = iv.get(); im = mv.get()
-                _draw_strip(cv, k, ig, im)
-                mm.config(fg=("#cc0000" if im != MANFIY else "#333333"),
-                           font=("Arial", 9, "bold") if im != MANFIY else ("Arial", 9))
-
-            igg_var.trace_add('write', lambda *a, fn=_on_change: fn())
-            igm_var.trace_add('write', lambda *a, fn=_on_change: fn())
-
-        # ── Tugmalar ──────────────────────────────────────────────────────
         btn_frame = tk.Frame(dialog, pady=8)
         btn_frame.pack(fill="x")
 
         def saqlash():
             data = {}
-            for _, _, kalit in TORCH_TESTS:
+            for kalit in [r[1] for r in rows_config]:
                 data[f"{kalit}_igg"] = igg_vars[kalit].get()
                 data[f"{kalit}_igm"] = igm_vars[kalit].get()
             result_json = json.dumps(data, ensure_ascii=False)
-            pos = [tn for _, tn, k in TORCH_TESTS
-                   if igg_vars[k].get() != MANFIY or igm_vars[k].get() != MANFIY]
+            pos = [r[0].split()[0] for r in rows_config
+                   if igg_vars[r[1]].get() != "Manfiy (-)" or igm_vars[r[1]].get() != "Manfiy (-)"]
             natija_str = ("Musbat: " + ", ".join(pos)) if pos else "Barchasi Manfiy (-)"
             self._save_test_result_to_tree(test_id, result_json, natija_str)
             dialog.destroy()
