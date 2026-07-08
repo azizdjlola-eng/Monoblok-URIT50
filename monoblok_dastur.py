@@ -12507,8 +12507,12 @@ Sana: {_sana_fmt}"""
         # 3. Express (Manfiy/Musbat) — gepatit, RW, sifilis va boshqalar
         # IFA/ИФА testlarida raqamli natija kiritiladi — Manfiy/Musbat ko'rsatilmaydi
         _is_ifa = 'ifa' in test_name_lower or 'ифа' in test_name_lower
-        if not _is_ifa and (type_from_norma in ('positive_negative', 'express', 'ekspress') or
-                any(k in test_name_lower for k in ['gepatit', 'hbsag', 'hcv', 'rw', 'sifilis', 'ekspress', 'hiv'])):
+        # Norma raqamli oraliq bo'lsa (masalan '0.0-10.101') — bu miqdoriy IFA indeks
+        # testi (masalan "Anti HBsAg"), nom bo'yicha Manfiy/Musbat aniqlanmasin → raqam kiritiladi
+        _norma_has_number = any(ch.isdigit() for ch in ((test_data.get('norma') or '') if test_data else ''))
+        _name_is_express = (not _norma_has_number and
+                            any(k in test_name_lower for k in ['gepatit', 'hbsag', 'hcv', 'rw', 'sifilis', 'ekspress', 'hiv']))
+        if not _is_ifa and (type_from_norma in ('positive_negative', 'express', 'ekspress') or _name_is_express):
             self.edit_result_inline_with_options(
                 item, test_id, test_name, test_data,
                 response_options='Manfiy (-),Musbat (+)'
@@ -14056,8 +14060,12 @@ Sana: {_sana_fmt}"""
         # 3. Express (Manfiy / Musbat) — nom yoki tur bo'yicha
         # IFA/ИФА testlarida raqamli natija kiritiladi — Manfiy/Musbat ko'rsatilmaydi
         _is_ifa_t = 'ifa' in tname_lower or 'ифа' in tname_lower
-        if not _is_ifa_t and (type_from_norma in ('positive_negative', 'express', 'ekspress') or
-                any(k in tname_lower for k in ['gepatit', 'hbsag', 'hcv', 'rw ', 'sifilis', 'ekspress', 'hiv'])):
+        # Norma raqamli oraliq bo'lsa (masalan '0.0-10.101') — miqdoriy IFA indeks testi
+        # (masalan "Anti HBsAg"), nom bo'yicha Manfiy/Musbat aniqlanmasin → raqam kiritiladi
+        _norma_has_number_t = any(ch.isdigit() for ch in ((test_data.get('norma') or '') if test_data else ''))
+        _name_is_express_t = (not _norma_has_number_t and
+                              any(k in tname_lower for k in ['gepatit', 'hbsag', 'hcv', 'rw ', 'sifilis', 'ekspress', 'hiv']))
+        if not _is_ifa_t and (type_from_norma in ('positive_negative', 'express', 'ekspress') or _name_is_express_t):
             self.edit_result_inline_with_options(
                 item, test_id, test_name, test_data,
                 response_options='Manfiy (-),Musbat (+)'
@@ -15776,7 +15784,7 @@ Sana: {_sana_fmt}"""
               "Qattiq"],
              "Shakllangan (silindrsimon)"),
             ("Rangi",                  "rangi",            "opts",
-             ["Jigarrang","Sariq","Yashil","Qora","Qizil","Kulrang"],
+             ["Jigarrang","Sariq","Yashil","Qora","Qizil","Kulrang","Oq (sutdek)"],
              "Jigarrang"),
             ("Reaksiyasi (pH)",        "reaksiya",         "opts",
              ["Neytral","Kislotali","Ishqoriy"],

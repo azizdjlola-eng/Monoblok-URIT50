@@ -37,7 +37,16 @@ def db_conn():
         print(f"[XATO] DB ulanish: {e}")
         return None
 
-BK280_RAW_PATH = r"G:\DASTUR\URIT 50\BK280\RAW_LOGS"
+# BK-280 RAW fayllar papkasi — listener bilan BIR XIL bo'lishi shart.
+# Listener (bk280_listener.py) fayllarni ProgramData ga yozadi (mijozda G: bo'lmasligi mumkin).
+_BK_DATA = os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), "AzizMedLine", "BK280")
+BK280_RAW_PATH = os.path.join(_BK_DATA, "RAW_LOGS")   # asosiy (yangi) yo'l — listener shu yerga yozadi
+
+# Eski fayllar ham ko'rinib tursin: yangi + eski (legacy) papkalar birga qidiriladi
+BK280_RAW_PATHS = [
+    BK280_RAW_PATH,
+    r"G:\DASTUR\URIT 50\BK280\RAW_LOGS",   # eski (legacy) yo'l
+]
 
 # LIS nomer → LIMS tahlillar.id (birlamchi bog'lanish — LIS nomer kabi ishlaydi)
 # Tahlil nomi DB da o'zgarsa ham bu bog'lanish o'zgarmaydi.
@@ -748,12 +757,20 @@ def load_raw_files(date_from=None, date_to=None):
     BK-280 RAW fayllarni sana oralig'i bo'yicha yuklash.
     date_from va date_to IKKALASI INCLUSIVE (shu kunlar ham kiradi).
     """
-    if not os.path.exists(BK280_RAW_PATH):
-        return []
+    # Barcha qidiruv papkalari (yangi ProgramData + eski G:) dan fayllarni yig'ish
+    all_files = []
+    for root in BK280_RAW_PATHS:
+        if not os.path.exists(root):
+            continue
+        # Oylik papkalar va to'g'ridan-to'g'ri fayllarni qidirish (rekursiv)
+        all_files += glob.glob(os.path.join(root, "**", "*.txt"), recursive=True)
+        all_files += glob.glob(os.path.join(root, "*.txt"))
 
-    # Oylik papkalar va to'g'ridan-to'g'ri fayllarni qidirish (rekursiv)
-    all_files = glob.glob(os.path.join(BK280_RAW_PATH, "**", "*.txt"), recursive=True)
-    all_files += glob.glob(os.path.join(BK280_RAW_PATH, "*.txt"))
+    # Bir xil fayl ikki marta kelmasin (rekursiv + to'g'ridan qidiruv ustma-ust tushishi mumkin)
+    all_files = list(dict.fromkeys(all_files))
+
+    if not all_files:
+        return []
 
     if date_from and date_to:
         try:
@@ -981,7 +998,8 @@ def refresh_patient_list(ptree, rtree, status_var,
     if not files:
         status_var.set("Fayllar topilmadi")
         messagebox.showinfo("Ma'lumot",
-            f"BK-280 RAW fayllari topilmadi.\n\nPapka: {BK280_RAW_PATH}")
+            "BK-280 RAW fayllari topilmadi.\n\nQidirilgan papkalar:\n" +
+            "\n".join(f"  • {p}" for p in BK280_RAW_PATHS))
         return
 
     patients_data.clear()
