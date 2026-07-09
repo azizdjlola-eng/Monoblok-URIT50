@@ -19,12 +19,47 @@ import sys
 from . import litsenziya_manager as lm
 
 # Aloqa ma'lumotlari (faollashtirish oynasida ko'rsatiladi)
-ALOQA_TELEFON = "+998 90 000 00 00"
-ALOQA_TELEGRAM = "@azizmedline_support"
+ALOQA_TELEFON = "+998 99 673 13 42"
+ALOQA_TELEGRAM = "@Aziz996731342"
 
 
 def tekshir() -> "lm.Natija":
     return lm.holatni_tekshir()
+
+
+# ── Baza (va boshqa muhim amallar) uchun yengil, keshlangan tekshiruv ──
+import time as _time
+_ruxsat_cache = {"t": 0.0, "ok": False}
+
+
+def ruxsat_bormi(cache_sec: float = 300.0) -> bool:
+    """
+    Litsenziya yaroqlimi? (keshlangan — har chaqiruvda fayl/imzo qayta o'qilmaydi).
+    Baza ulanishini himoyalash uchun: litsenziyasiz BAZAGA HAM kirmasin.
+    Xatolik/yaroqsiz bo'lsa — False (fail-closed).
+    """
+    now = _time.time()
+    if _ruxsat_cache["ok"] and (now - _ruxsat_cache["t"]) < cache_sec:
+        return True
+    try:
+        ok = lm.holatni_tekshir().yaroqli
+    except Exception:
+        ok = False
+    _ruxsat_cache["ok"] = ok
+    _ruxsat_cache["t"] = now
+    return ok
+
+
+def baza_ruxsati_yoki_xato():
+    """
+    Baza ulanish nuqtalarida chaqiriladi. Faqat FROZEN (EXE) da majburlaydi
+    (dev'da ishlashni to'smaydi). Yaroqsiz bo'lsa RuntimeError ko'taradi.
+    """
+    import sys as _sys
+    if not getattr(_sys, "frozen", False):
+        return  # dev — o'tkazamiz
+    if not ruxsat_bormi():
+        raise RuntimeError("Litsenziya yaroqsiz — bazaga kirish taqiqlangan.")
 
 
 def darvoza_server(app_nomi: str = "AzizMed Server") -> bool:

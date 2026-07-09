@@ -14,6 +14,8 @@ Internet shart EMAS — barcha tekshiruv offline bajariladi.
 
 import os
 import json
+import time
+import hashlib
 from enum import Enum
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -220,9 +222,58 @@ def holatni_tekshir(online: bool = True) -> Natija:
         return Natija(Holat.MUDDATI_TUGAGAN, "Litsenziya muddati tugagan.",
                       payload=payload, machine_id=mid)
 
-    qolgan = int((expires - ishonchli_hozir) // 86400)
-    return Natija(Holat.OK, f"Litsenziya yaroqli. {qolgan} kun qoldi.",
-                  payload=payload, qolgan_kun=qolgan, machine_id=mid)
+    qolgan_sek = expires - ishonchli_hozir
+    qolgan = int(qolgan_sek // 86400)
+    if qolgan_sek < 3600:
+        matn = f"Litsenziya yaroqli. {int(qolgan_sek // 60)} daqiqa qoldi."
+    elif qolgan_sek < 86400:
+        matn = f"Litsenziya yaroqli. {int(qolgan_sek // 3600)} soat qoldi."
+    else:
+        matn = f"Litsenziya yaroqli. {qolgan} kun qoldi."
+    return Natija(Holat.OK, matn, payload=payload, qolgan_kun=qolgan, machine_id=mid)
+
+
+_data_kalit_cache = {"k": None}
+
+
+def data_kalit():
+    """
+    Baza IP himoyasi uchun AES-256 kalit (32 bayt) yoki None.
+
+    FAQAT yaroqli litsenziyada (imzo + machine_id + muddat tugamagan) qaytadi.
+    Litsenziya yo'q / soxta / boshqa PC / muddati tugagan bo'lsa → None →
+    shifrlangan katalog/norma OCHILMAYDI (baza boshqa dasturda ishlamaydi).
+    Kalit litsenziya ichidagi `data_key` dan olinadi (oylik yangilashda o'zgarmaydi).
+    Keshlanadi (har DB amalda qayta o'qilmaydi).
+    """
+    if _data_kalit_cache["k"] is not None:
+        return _data_kalit_cache["k"]
+    k = None
+    try:
+        fayl = faylni_top()
+        if fayl:
+            with open(fayl, "r", encoding="utf-8") as f:
+                paket = json.load(f)
+            mid = _mid.mashina_id()
+            payload, holat = _blobni_tekshir(paket, mid)
+            if holat == "ok" and not payload.get("bloklangan"):
+                expires = int(payload.get("expires_at", 0))
+                if expires == 0 or time.time() <= expires:
+                    dk = payload.get("data_key")
+                    if dk:
+                        k = hashlib.sha256(
+                            ("azizmed-data-v1:" + str(dk) + ":" + mid).encode("utf-8")
+                        ).digest()
+    except Exception:
+        k = None
+    if k is not None:
+        _data_kalit_cache["k"] = k
+    return k
+
+
+def data_kalit_reset():
+    """Faollashtirishdan keyin keshni tozalash (yangi litsenziya o'qilsin)."""
+    _data_kalit_cache["k"] = None
 
 
 def faollashtir(azlic_yoli: str) -> Natija:
@@ -242,4 +293,5 @@ def faollashtir(azlic_yoli: str) -> Natija:
             f.write(mazmun)
     except Exception as e:
         return Natija(Holat.SOXTA, f"Faylni saqlab bo'lmadi: {e}")
+    data_kalit_reset()  # yangi litsenziya kaliti o'qilsin
     return holatni_tekshir()
