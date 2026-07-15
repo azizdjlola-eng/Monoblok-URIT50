@@ -2068,17 +2068,8 @@ def create_torch_table_in_doc(doc, result_json, order_info):
         _cell_write(row.cells[0], ko_rsatkich, align=WD_ALIGN_PARAGRAPH.LEFT)
         igm_val = data.get(f"{kalit}_igm", '')
         igg_val = data.get(f"{kalit}_igg", '')
-        igm_pos = igm_val not in ('', 'Manfiy (-)')
-        igg_pos = igg_val not in ('', 'Manfiy (-)')
-        # IgM musbat bo'lsa — qizil rang
-        if igm_pos:
-            p = row.cells[1].paragraphs[0]
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            _set_para_spacing(p, 0, 0, line_spacing=1)
-            _add_run_tnr(p, igm_val, 11, bold=True, color_rgb=RGBColor(0xCC, 0x00, 0x00))
-        else:
-            _cell_write(row.cells[1], igm_val, bold=False)
-        _cell_write(row.cells[2], igg_val, bold=igg_pos)
+        _cell_write(row.cells[1], igm_val, bold=(igm_val not in ('', 'Manfiy (-)')))
+        _cell_write(row.cells[2], igg_val, bold=(igg_val not in ('', 'Manfiy (-)')))
         _cell_write(row.cells[3], "Manfiy (-)")
     doc.add_paragraph()
 
@@ -4143,20 +4134,6 @@ def _create_lipid_spektri_section(doc, lipid_tests: list, test_results: dict, or
             if db_norma:
                 LIPID_ROWS[i] = (name, key, db_norma, db_unit or unit)
 
-    # Vrachlar uchun ruscha nomlar (blankada qavs ichida qo'shiladi)
-    LIPID_RU_NAMES = {
-        "tc":      "Общий холестерин",
-        "hdl":     "Липопротеины высокой плотности (ЛПВП)",
-        "ldl":     "Липопротеины низкой плотности (ЛПНП)",
-        "tg":      "Триглицериды",
-        "vldl":    "Липопротеины очень низкой плотности (ЛПОНП)",
-        "non_hdl": "Не-ЛПВП холестерин",
-        "ka":      "Коэффициент атерогенности (КА)",
-        "tc_hdl":  "Соотношение ОХ/ЛПВП",
-        "ldl_hdl": "Соотношение ЛПНП/ЛПВП",
-        "tg_hdl":  "Соотношение ТГ/ЛПВП",
-    }
-
     heading = doc.add_paragraph()
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _set_para_spacing(heading, 0, 0, line_spacing=1.0)
@@ -4184,9 +4161,6 @@ def _create_lipid_spektri_section(doc, lipid_tests: list, test_results: dict, or
         p0.alignment = WD_ALIGN_PARAGRAPH.LEFT
         _set_para_spacing(p0, 0, 0, line_spacing=1)
         _add_run_tnr(p0, row_name, 11, bold=True)
-        _ru_name = LIPID_RU_NAMES.get(key)
-        if _ru_name:
-            _add_run_tnr(p0, "\n(" + _ru_name + ")", 9, bold=False, italic=True)
         p1 = cells_r[1].paragraphs[0]
         p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_para_spacing(p1, 0, 0, line_spacing=1)
@@ -5624,10 +5598,10 @@ def save_pdf_to_onedrive(docx_path, date_str=None):
                         _gs,
                         '-sDEVICE=pdfwrite',
                         '-dCompatibilityLevel=1.4',
-                        '-dPDFSETTINGS=/ebook',    # kichik hajm, lekin fontlar joylashadi
+                        '-dPDFSETTINGS=/screen',   # eng kichik hajm
                         '-dNOPAUSE', '-dQUIET', '-dBATCH',
-                        '-dEmbedAllFonts=true',    # fontlarni PDF ichiga joylash (telefonda to'g'ri ko'rinishi uchun)
-                        '-dSubsetFonts=true',      # faqat ishlatilgan harflar — hajm kichik qoladi
+                        '-dEmbedAllFonts=false',
+                        '-dSubsetFonts=false',
                         '-dCompressFonts=true',
                         '-dDetectDuplicateImages=true',
                         f'-sOutputFile={_gs_tmp}',
@@ -5667,9 +5641,18 @@ def save_pdf_to_onedrive(docx_path, date_str=None):
                     for _pg in _pdf.pages:
                         if '/Thumb' in _pg:
                             del _pg['/Thumb']
-                    # DIQQAT: fontlarni (FontFile) O'CHIRMAYMIZ — aks holda telefonda
-                    # Times New Roman almashtiriladi va Bold sarlavhalar buziladi (+2 siljish).
-                    # Faqat metadata/thumbnail tozalanadi, fontlar joyida qoladi.
+                    # GLOBAL: barcha indirect obyektlardan FontDescriptor topib FontFile olib tashlash
+                    for _obj in _pdf.objects:
+                        try:
+                            if not isinstance(_obj, pikepdf.Dictionary):
+                                continue
+                            _otype = _obj.get('/Type')
+                            if _otype == _FONT_DESC:
+                                for _sk in ['/FontFile', '/FontFile2', '/FontFile3']:
+                                    if _sk in _obj:
+                                        del _obj[_sk]
+                        except Exception:
+                            pass
                     _pdf.save(
                         _tmp_compressed,
                         compress_streams=True,
@@ -5699,8 +5682,18 @@ def save_pdf_to_onedrive(docx_path, date_str=None):
                 import fitz  # pymupdf
                 _tmp_fitz = pdf_path + ".fz.tmp"
                 _fdoc = fitz.open(pdf_path)
-                # DIQQAT: fontlarni (FontFile) O'CHIRMAYMIZ — telefonda buzilmasligi uchun.
-                # Faqat orphan streamlarni yig'ishtirib, hajmni kichraytiramiz.
+                # Barcha FontDescriptor lardan FontFile olib tashlash
+                for _xref in range(1, _fdoc.xref_length()):
+                    try:
+                        _s = _fdoc.xref_object(_xref)
+                        # FontDescriptor ni aniqlaymiz
+                        if '/FontDescriptor' not in _s and '/Type/FontDescriptor' not in _s:
+                            continue
+                        for _fk in ['FontFile', 'FontFile2', 'FontFile3']:
+                            if '/' + _fk in _s:
+                                _fdoc.xref_set_key(_xref, _fk, 'null')
+                    except Exception:
+                        pass
                 # garbage=4: orphan streamlarni tozalash, deflate+clean
                 _fdoc.save(_tmp_fitz, garbage=4, deflate=True, clean=True)
                 _fdoc.close()
@@ -9055,32 +9048,8 @@ class MonoblokApp:
             pass
         # Avval mavjud jarayonlarni to'xtatish
         self.stop_existing_urit50_processes()
-
-        # FROZEN (EXE): python skript yo'q — o'zini --urit-service bilan ishga tushiradi
-        if getattr(sys, "frozen", False):
-            try:
-                # Eski URIT child'ni to'xtatish (frozen'da stop_existing topa olmaydi — to'planmasin)
-                try:
-                    if getattr(self, "urit_process", None) and self.urit_process.poll() is None:
-                        self.urit_process.terminate()
-                except Exception:
-                    pass
-                self.urit_process = subprocess.Popen(
-                    [sys.executable, "--urit-service"],
-                    creationflags=subprocess.CREATE_NO_WINDOW)
-                time.sleep(1)
-                msg = f"[OK] URIT-50 xizmati ishga tushdi (EXE, PID: {self.urit_process.pid})"
-                print(msg)
-                try:
-                    self.root.after(0, lambda: self.status_var.set(msg))
-                except Exception:
-                    pass
-                return True
-            except Exception as e:
-                print(f"[OGOHLANTIRISH] URIT-50 (EXE) ishga tushmadi: {e}")
-                return False
-
-        # URIT-50 dasturining yo'li (dev rejimi)
+        
+        # URIT-50 dasturining yo'li
         script_dir = os.path.dirname(os.path.abspath(__file__))
         
         # Bir nechta mumkin bo'lgan fayl nomlarini tekshirish
@@ -9618,8 +9587,8 @@ class MonoblokApp:
         ).pack(side=tk.LEFT, padx=2)
 
         ttk.Button(
-            left_buttons,
-            text="DB Test (Ctrl+Shift+D)",
+            left_buttons, 
+            text="DB Test (Ctrl+Shift+D)", 
             command=self.test_database_read,
             width=20
         ).pack(side=tk.LEFT, padx=2)
@@ -11197,10 +11166,6 @@ Sana: {_sana_fmt}"""
         try:
             cursor = conn.cursor(dictionary=True)
             history_mode = getattr(self, '_history_mode', False)
-            # DB da natijasi haqiqatan saqlangan (result_items yoki test_results)
-            # test id lari. Bulardagi status har doim "Saqlandi" ko'rsatiladi —
-            # "Tayyor"/"Kutilmoqda" bilan chalg'itib, natija kiritilmagandek ko'rinmasin.
-            _persisted_result_ids = set()
 
             if not history_mode:
                 print(f"[YANGILANMOQDA] Tahlillarni yuklayapman (Order ID: {self.current_order_id})...")
@@ -11266,7 +11231,6 @@ Sana: {_sana_fmt}"""
                         test_name = test.get('nomi', '')
                         if test_name in saved_results:
                             self.test_results[test['id']] = saved_results[test_name]
-                            _persisted_result_ids.add(test['id'])
 
             # Treeview ni tozalash (har doim)
             for item in self.tests_tree.get_children():
@@ -11300,20 +11264,11 @@ Sana: {_sana_fmt}"""
                     _tname = _t.get('nomi', '')
                     if _tname in test_results_data:
                         _rd = (test_results_data[_tname].get('result_data') or '').strip()
-                        _st = (test_results_data[_tname].get('status') or '')
                         if _rd:
                             self.test_results[_t['id']] = _rd
-                            _persisted_result_ids.add(_t['id'])
-                        elif _st in ('Saqlandi', 'saqlandi', 'Chop etildi', 'printed'):
-                            _persisted_result_ids.add(_t['id'])
             else:
                 print(f"[TARIX] Tahlillar tarixi ko'rsatilmoqda ({len(self.current_tests)} ta tahlil)...")
                 test_results_data = {}  # history_mode da _history_trd ishlatiladi
-                # Tarix rejimida ham DB da saqlangan natijalar "Saqlandi" bo'lsin
-                for _tid, _d in getattr(self, '_history_trd', {}).items():
-                    if (_d.get('result_data') or '').strip() or \
-                       (_d.get('status') or '') in ('Saqlandi', 'saqlandi', 'Chop etildi', 'printed'):
-                        _persisted_result_ids.add(_tid)
 
             # ── Barcha norma ma'lumotlarini BIR so'rovda yuklash (performance) ──
             _all_test_names = [t.get('nomi', '') for t in self.current_tests if t.get('nomi')]
@@ -11455,8 +11410,7 @@ Sana: {_sana_fmt}"""
                     nonlocal row_idx
                     row_idx += 1
                     # Parent test statusi — bazadan saqlangan bo'lsa "Saqlandi"
-                    _parent_saved = (result_status == 'Saqlandi' or result_status == 'saqlandi'
-                                     or test_id in _persisted_result_ids)
+                    _parent_saved = (result_status == 'Saqlandi' or result_status == 'saqlandi')
                     if not val:
                         _st = 'kutilmoqda'
                         _status_text = "Kutilmoqda"
@@ -11584,9 +11538,8 @@ Sana: {_sana_fmt}"""
                         _natija = ', '.join(_parts) if _parts else "Kiritilgan"
                         _xulosa = (rd.get('xulosa') or '')[:60]
                         _display = _natija + (f" | {_xulosa}" if _xulosa else '')
-                        _q_saved = result_status in ('Saqlandi', 'saqlandi') or test_id in _persisted_result_ids
-                        _st = 'saqlandi' if _q_saved else 'tayyor'
-                        _st_txt = "Saqlandi" if _q_saved else "Tayyor"
+                        _st = 'saqlandi' if result_status in ('Saqlandi', 'saqlandi') else 'tayyor'
+                        _st_txt = "Saqlandi" if result_status in ('Saqlandi', 'saqlandi') else "Tayyor"
                     else:
                         _display = ""
                         _st = 'kutilmoqda'
@@ -11639,13 +11592,6 @@ Sana: {_sana_fmt}"""
                         status = "Chop etildi"
                     else:
                         status = "Kutilmoqda"
-
-                    # DB da natija saqlangan bo'lsa (result_items/test_results) —
-                    # test_results jadvalida status qatori yo'q/mos kelmasa ham
-                    # "Saqlandi" ko'rsatamiz. Aks holda saqlangan natija "Tayyor"/
-                    # "Kutilmoqda" bo'lib, natija kiritilmagandek chalg'itadi.
-                    if test_id in _persisted_result_ids and status in ("Kutilmoqda", "Tayyor"):
-                        status = "Saqlandi"
 
                     # DB da natija yo'q bo'lsa — xotiradagi natijani ko'rsatish
                     if not display_result:
@@ -12507,12 +12453,8 @@ Sana: {_sana_fmt}"""
         # 3. Express (Manfiy/Musbat) — gepatit, RW, sifilis va boshqalar
         # IFA/ИФА testlarida raqamli natija kiritiladi — Manfiy/Musbat ko'rsatilmaydi
         _is_ifa = 'ifa' in test_name_lower or 'ифа' in test_name_lower
-        # Norma raqamli oraliq bo'lsa (masalan '0.0-10.101') — bu miqdoriy IFA indeks
-        # testi (masalan "Anti HBsAg"), nom bo'yicha Manfiy/Musbat aniqlanmasin → raqam kiritiladi
-        _norma_has_number = any(ch.isdigit() for ch in ((test_data.get('norma') or '') if test_data else ''))
-        _name_is_express = (not _norma_has_number and
-                            any(k in test_name_lower for k in ['gepatit', 'hbsag', 'hcv', 'rw', 'sifilis', 'ekspress', 'hiv']))
-        if not _is_ifa and (type_from_norma in ('positive_negative', 'express', 'ekspress') or _name_is_express):
+        if not _is_ifa and (type_from_norma in ('positive_negative', 'express', 'ekspress') or
+                any(k in test_name_lower for k in ['gepatit', 'hbsag', 'hcv', 'rw', 'sifilis', 'ekspress', 'hiv'])):
             self.edit_result_inline_with_options(
                 item, test_id, test_name, test_data,
                 response_options='Manfiy (-),Musbat (+)'
@@ -14060,12 +14002,8 @@ Sana: {_sana_fmt}"""
         # 3. Express (Manfiy / Musbat) — nom yoki tur bo'yicha
         # IFA/ИФА testlarida raqamli natija kiritiladi — Manfiy/Musbat ko'rsatilmaydi
         _is_ifa_t = 'ifa' in tname_lower or 'ифа' in tname_lower
-        # Norma raqamli oraliq bo'lsa (masalan '0.0-10.101') — miqdoriy IFA indeks testi
-        # (masalan "Anti HBsAg"), nom bo'yicha Manfiy/Musbat aniqlanmasin → raqam kiritiladi
-        _norma_has_number_t = any(ch.isdigit() for ch in ((test_data.get('norma') or '') if test_data else ''))
-        _name_is_express_t = (not _norma_has_number_t and
-                              any(k in tname_lower for k in ['gepatit', 'hbsag', 'hcv', 'rw ', 'sifilis', 'ekspress', 'hiv']))
-        if not _is_ifa_t and (type_from_norma in ('positive_negative', 'express', 'ekspress') or _name_is_express_t):
+        if not _is_ifa_t and (type_from_norma in ('positive_negative', 'express', 'ekspress') or
+                any(k in tname_lower for k in ['gepatit', 'hbsag', 'hcv', 'rw ', 'sifilis', 'ekspress', 'hiv'])):
             self.edit_result_inline_with_options(
                 item, test_id, test_name, test_data,
                 response_options='Manfiy (-),Musbat (+)'
@@ -15784,7 +15722,7 @@ Sana: {_sana_fmt}"""
               "Qattiq"],
              "Shakllangan (silindrsimon)"),
             ("Rangi",                  "rangi",            "opts",
-             ["Jigarrang","Sariq","Yashil","Qora","Qizil","Kulrang","Oq (sutdek)"],
+             ["Jigarrang","Sariq","Yashil","Qora","Qizil","Kulrang"],
              "Jigarrang"),
             ("Reaksiyasi (pH)",        "reaksiya",         "opts",
              ["Neytral","Kislotali","Ishqoriy"],
@@ -16782,7 +16720,7 @@ Sana: {_sana_fmt}"""
     #  TORCH INFEKSIYASI IgM VA IgG
     # ─────────────────────────────────────────────────────────────────────────
     def show_torch_form(self, test_id, test_name, test_data):
-        """TORCH - test kartasi ko'rinishida natija kiritish (TOX|RV|CMV|HSV-I|HSV-II ustunlar)."""
+        """TORCH infeksiyasi IgM va IgG uchun natija kiritish dialogi."""
         import json
         old_result = {}
         existing = self.test_results.get(test_id, '')
@@ -16794,118 +16732,64 @@ Sana: {_sana_fmt}"""
 
         dialog = tk.Toplevel(self.root)
         dialog.title("TORCH Infeksiyasi — Natija Kiritish")
-        dialog.geometry("920x430")
-        dialog.resizable(True, False)
+        dialog.geometry("700x360")
         dialog.transient(self.root)
         dialog.grab_set()
         dialog.focus_set()
 
         tk.Label(dialog, text="TORCH INFEKSIYASIGA IgM VA IgG",
-                 font=("Times New Roman", 13, "bold"), pady=6).pack()
+                 font=("Times New Roman", 13, "bold"), pady=8).pack()
 
-        TORCH_TESTS = [
-            ("TOX",    "Toxoplasma",  "toxo"),
-            ("RV",     "Rubella",     "rubella"),
-            ("CMV",    "CMV",         "cmv"),
-            ("HSV-I",  "Herpes 1",    "herpes1"),
-            ("HSV-II", "Herpes 2",    "herpes2"),
+        table_frame = tk.Frame(dialog, padx=10, pady=5)
+        table_frame.pack(fill="both", expand=True)
+
+        for col, (text, w) in enumerate([("Ko'rsatkich", 36), ("IgG", 16), ("IgM", 16), ("Me'yor", 12)]):
+            tk.Label(table_frame, text=text, font=("Arial", 9, "bold"),
+                     relief="groove", width=w, pady=5, bg="#d0d0d0", anchor="center").grid(
+                row=0, column=col, sticky="nsew", padx=1, pady=1)
+
+        rows_config = [
+            ("Toxoplasma (TOKSOPLAZMOZ) Ekspress test",           "toxo"),
+            ("Rubella (QIZILCHA) Ekspress test",                  "rubella"),
+            ("Cytomegalovirus (SITOMYEGALOVIRUS) Ekspress test",  "cmv"),
+            ("Herpes 1 (ODDIY GERPYES 1 tipi) Ekspress test",    "herpes1"),
+            ("Herpes 2 (ODDIY GERPYES 2 tipi) Ekspress test",    "herpes2"),
         ]
-        OPTS = ["Manfiy (-)", "Musbat (+)", "Musbat (++)", "Musbat (+++)"]
-        MANFIY = "Manfiy (-)"
-        STRIP_W, STRIP_H = 108, 110
-        C_Y, IGG_Y, IGM_Y = 20, 60, 88
 
-        main_frame = tk.Frame(dialog, padx=8, pady=4)
-        main_frame.pack(fill="both", expand=True)
-
-        # Sol tomon qator yorliqlari
-        tk.Label(main_frame, text="", height=2).grid(row=0, column=0)
-        tk.Label(main_frame, text="IgG", font=("Arial", 11, "bold"), fg="#1a1a8c",
-                 width=7, anchor="e", padx=6).grid(row=1, column=0, pady=4)
-        tk.Label(main_frame, text="IgM", font=("Arial", 11, "bold"), fg="#cc0000",
-                 width=7, anchor="e", padx=6).grid(row=2, column=0, pady=4)
-
+        torch_opts = ["Manfiy (-)", "Musbat (+)", "Musbat (++)", "Musbat (+++)"]
         igg_vars = {}
         igm_vars = {}
-        canvases = {}
 
-        def _draw_strip(canvas, kalit, igg_val, igm_val):
-            """Stripni qayta chizish."""
-            canvas.delete("dynamic")
-            # C chizig'i — doim bor
-            canvas.create_line(28, C_Y, STRIP_W - 8, C_Y,
-                                fill="#1a1a8c", width=4, tags="dynamic")
-            # IgG chizig'i
-            if igg_val != MANFIY and igg_val:
-                canvas.create_line(28, IGG_Y, STRIP_W - 8, IGG_Y,
-                                    fill="#1a1a8c", width=4, tags="dynamic")
-            # IgM chizig'i
-            if igm_val != MANFIY and igm_val:
-                canvas.create_line(28, IGM_Y, STRIP_W - 8, IGM_Y,
-                                    fill="#cc0000", width=4, tags="dynamic")
-
-        for col_idx, (short_name, full_name, kalit) in enumerate(TORCH_TESTS, start=1):
-            # ── Strip vizual ──────────────────────────────────────────────
-            strip_outer = tk.Frame(main_frame, bg="#c8b89a", bd=2, relief="raised")
-            strip_outer.grid(row=0, column=col_idx, padx=10, pady=2, sticky="n")
-
-            hdr = tk.Frame(strip_outer, bg="#1a1a8c")
-            hdr.pack(fill="x")
-            tk.Label(hdr, text=short_name, font=("Arial", 11, "bold"),
-                     bg="#1a1a8c", fg="white", width=9).pack()
-            tk.Label(strip_outer, text=full_name, font=("Arial", 7),
-                     bg="#c8b89a", fg="#333", width=10, wraplength=85).pack()
-
-            canvas = tk.Canvas(strip_outer, width=STRIP_W, height=STRIP_H,
-                                bg="#f0ead8", bd=0, highlightthickness=0)
-            canvas.pack(padx=2, pady=2)
-            # Statik yorliqlar
-            canvas.create_text(15, C_Y,   text="C",   font=("Arial", 8, "bold"), fill="#1a1a8c")
-            canvas.create_text(15, IGG_Y, text="IgG", font=("Arial", 7),         fill="#1a1a8c")
-            canvas.create_text(15, IGM_Y, text="IgM", font=("Arial", 7),         fill="#880000")
-            canvases[kalit] = canvas
-
-            init_igg = old_result.get(f"{kalit}_igg", OPTS[0])
-            init_igm = old_result.get(f"{kalit}_igm", OPTS[0])
-            _draw_strip(canvas, kalit, init_igg, init_igm)
-
-            # ── IgG dropdown ──────────────────────────────────────────────
-            igg_var = tk.StringVar(value=init_igg)
+        for row_idx, (ko_rsatkich, kalit) in enumerate(rows_config, start=1):
+            tk.Label(table_frame, text=ko_rsatkich, font=("Arial", 9),
+                     relief="groove", width=36, pady=5, anchor="w", padx=5,
+                     wraplength=255, justify="left").grid(
+                row=row_idx, column=0, sticky="nsew", padx=1, pady=1)
+            igg_var = tk.StringVar(value=old_result.get(f"{kalit}_igg", torch_opts[0]))
             igg_vars[kalit] = igg_var
-            igg_menu = tk.OptionMenu(main_frame, igg_var, *OPTS)
-            igg_menu.config(font=("Arial", 9), width=12, fg="#1a1a8c")
-            igg_menu.grid(row=1, column=col_idx, padx=10, pady=3, sticky="ew")
-
-            # ── IgM dropdown ──────────────────────────────────────────────
-            igm_var = tk.StringVar(value=init_igm)
+            igg_menu = tk.OptionMenu(table_frame, igg_var, *torch_opts)
+            igg_menu.config(font=("Arial", 9), width=13)
+            igg_menu.grid(row=row_idx, column=1, sticky="nsew", padx=1, pady=1)
+            igm_var = tk.StringVar(value=old_result.get(f"{kalit}_igm", torch_opts[0]))
             igm_vars[kalit] = igm_var
-            igm_menu = tk.OptionMenu(main_frame, igm_var, *OPTS)
-            igm_menu.config(font=("Arial", 9), width=12,
-                             fg=("#cc0000" if init_igm != MANFIY else "#333333"))
-            igm_menu.grid(row=2, column=col_idx, padx=10, pady=3, sticky="ew")
+            igm_menu = tk.OptionMenu(table_frame, igm_var, *torch_opts)
+            igm_menu.config(font=("Arial", 9), width=13)
+            igm_menu.grid(row=row_idx, column=2, sticky="nsew", padx=1, pady=1)
+            tk.Label(table_frame, text="Manfiy (-)", font=("Arial", 9), fg="#555",
+                     relief="groove", width=12, anchor="center").grid(
+                row=row_idx, column=3, sticky="nsew", padx=1, pady=1)
 
-            # Trace: strip va rang yangilash
-            def _on_change(*, k=kalit, cv=canvas, iv=igg_var, mv=igm_var, mm=igm_menu):
-                ig = iv.get(); im = mv.get()
-                _draw_strip(cv, k, ig, im)
-                mm.config(fg=("#cc0000" if im != MANFIY else "#333333"),
-                           font=("Arial", 9, "bold") if im != MANFIY else ("Arial", 9))
-
-            igg_var.trace_add('write', lambda *a, fn=_on_change: fn())
-            igm_var.trace_add('write', lambda *a, fn=_on_change: fn())
-
-        # ── Tugmalar ──────────────────────────────────────────────────────
         btn_frame = tk.Frame(dialog, pady=8)
         btn_frame.pack(fill="x")
 
         def saqlash():
             data = {}
-            for _, _, kalit in TORCH_TESTS:
+            for kalit in [r[1] for r in rows_config]:
                 data[f"{kalit}_igg"] = igg_vars[kalit].get()
                 data[f"{kalit}_igm"] = igm_vars[kalit].get()
             result_json = json.dumps(data, ensure_ascii=False)
-            pos = [tn for _, tn, k in TORCH_TESTS
-                   if igg_vars[k].get() != MANFIY or igm_vars[k].get() != MANFIY]
+            pos = [r[0].split()[0] for r in rows_config
+                   if igg_vars[r[1]].get() != "Manfiy (-)" or igm_vars[r[1]].get() != "Manfiy (-)"]
             natija_str = ("Musbat: " + ", ".join(pos)) if pos else "Barchasi Manfiy (-)"
             self._save_test_result_to_tree(test_id, result_json, natija_str)
             dialog.destroy()
@@ -17408,54 +17292,24 @@ Sana: {_sana_fmt}"""
         add_row(tab_db, 3, "Baza nomi:", "database", "database")
         add_row(tab_db, 4, "Port:", "database", "port")
 
-        def _db_cfg_form():
-            return {
-                "host": vars_map[("database", "host")].get().strip(),
-                "user": vars_map[("database", "user")].get().strip(),
-                "password": vars_map[("database", "password")].get(),
-                "database": vars_map[("database", "database")].get().strip(),
-                "port": int(vars_map[("database", "port")].get().strip() or 3306),
-            }
-
         def test_db():
             try:
-                import baza_sozlama as _bs
-                msg = _bs.ulanish_diagnostika(_db_cfg_form())
-                ok = msg.startswith("✅")
+                import mysql.connector as _mc
+                conn = _mc.connect(
+                    host=vars_map[("database", "host")].get().strip(),
+                    user=vars_map[("database", "user")].get().strip(),
+                    password=vars_map[("database", "password")].get(),
+                    database=vars_map[("database", "database")].get().strip(),
+                    port=int(vars_map[("database", "port")].get().strip() or 3306),
+                    connection_timeout=5,
+                )
+                conn.close()
+                messagebox.showinfo("Baza", "[OK] Bazaga muvaffaqiyatli ulanildi!", parent=dialog)
             except Exception as e:
-                ok, msg = False, f"Tekshirib bo'lmadi: {e}"
-            (messagebox.showinfo if ok else messagebox.showwarning)("Baza", msg, parent=dialog)
-
-        def mysql_start():
-            try:
-                import baza_sozlama as _bs
-                ok, msg = _bs.lokal_mysql_ishga_tushir()
-            except Exception as e:
-                ok, msg = False, str(e)
-            (messagebox.showinfo if ok else messagebox.showwarning)("Lokal MySQL", msg, parent=dialog)
-            if ok:
-                test_db()
+                messagebox.showerror("Baza", f"[XATO] Ulanmadi:\n{e}", parent=dialog)
 
         ttk.Button(tab_db, text="Ulanishni tekshirish", command=test_db).grid(
             row=5, column=0, columnspan=2, pady=12)
-
-        # ── Tez tanlov: shu kompyuter / boshqa kompyuter IP ──
-        db_quick = ttk.Frame(tab_db)
-        db_quick.grid(row=6, column=0, columnspan=2, sticky=tk.W, padx=8, pady=(0, 4))
-        ttk.Button(db_quick, text="🖥 Shu kompyuterdagi baza",
-                   command=lambda: vars_map[("database", "host")].set("127.0.0.1")).pack(side=tk.LEFT, padx=(0, 6))
-        ttk.Button(db_quick, text="🔧 Lokal MySQL'ni ishga tushirish",
-                   command=mysql_start).pack(side=tk.LEFT, padx=(0, 6))
-        try:
-            import baza_sozlama as _bs
-            _myip = _bs.bu_kompyuter_ip()
-        except Exception:
-            _myip = "?"
-        ttk.Label(db_quick, text=f"🌐 Bu kompyuter IP: {_myip}",
-                  foreground="#1f8a4c").pack(side=tk.LEFT, padx=6)
-        ttk.Label(tab_db,
-                  text="Boshqa kompyuterdagi bazaga ulanish: o'sha kompyuter IP sini Host maydoniga yozing.",
-                  foreground="#666", wraplength=560).grid(row=7, column=0, columnspan=2, sticky=tk.W, padx=8)
 
         # ───────────────────────── SIYDIK (URIT-50, Serial) ─────────────
         tab_s = ttk.Frame(nb)
@@ -17558,102 +17412,6 @@ Sana: {_sana_fmt}"""
 
         ttk.Button(tab_b, text="Port holatini tekshirish", command=test_tcp_server).grid(
             row=7, column=0, columnspan=2, pady=12)
-
-        # ───────────────────────── LITSENZIYA ───────────────────────────
-        tab_lic = ttk.Frame(nb)
-        nb.add(tab_lic, text="🔑 Litsenziya")
-        tab_lic.columnconfigure(0, weight=1)
-        try:
-            from litsenziya import litsenziya_manager as _lm
-        except Exception as _le:
-            _lm = None
-            ttk.Label(tab_lic, text=f"Litsenziya moduli yuklanmadi:\n{_le}",
-                      foreground="#c0392b", justify=tk.LEFT).grid(row=0, column=0, sticky=tk.W, padx=8, pady=8)
-
-        if _lm is not None:
-            ttk.Label(tab_lic,
-                      text="Litsenziya muddati tugasa yoki yangilansa — administrator "
-                           "yuborgan yangi litsenziya faylini (.azlic) shu yerdan yuklang.\n"
-                           "Faylni Telegram orqali kompyuterga saqlab, tugmani bosing.",
-                      foreground="#555", justify=tk.LEFT, wraplength=560).grid(
-                          row=0, column=0, sticky=tk.W, padx=8, pady=(8, 10))
-
-            lic_status_lbl = tk.Label(tab_lic, text="", justify=tk.LEFT,
-                                      font=("Consolas", 9), bg="#f5f5fa", anchor="w")
-            lic_status_lbl.grid(row=1, column=0, sticky="ew", padx=8, ipady=6, ipadx=10, pady=(0, 10))
-
-            ttk.Label(tab_lic, text="Ushbu kompyuter ID (administratorga yuboring):",
-                      font=("Arial", 9, "bold")).grid(row=2, column=0, sticky=tk.W, padx=8)
-            lic_id_fr = ttk.Frame(tab_lic)
-            lic_id_fr.grid(row=3, column=0, sticky="ew", padx=8, pady=(2, 12))
-            lic_id_fr.columnconfigure(0, weight=1)
-            lic_id_var = tk.StringVar(value="")
-            ttk.Entry(lic_id_fr, textvariable=lic_id_var, font=("Consolas", 11),
-                      state="readonly").grid(row=0, column=0, sticky="ew")
-
-            def lic_copy_id():
-                try:
-                    dialog.clipboard_clear()
-                    dialog.clipboard_append(lic_id_var.get())
-                    messagebox.showinfo("Nusxalandi",
-                                        "Kompyuter ID nusxalandi. Administratorga yuboring.",
-                                        parent=dialog)
-                except Exception:
-                    pass
-
-            ttk.Button(lic_id_fr, text="📋 Nusxa", command=lic_copy_id).grid(row=0, column=1, padx=(6, 0))
-
-            def lic_refresh():
-                import datetime as _dt
-                try:
-                    n = _lm.holatni_tekshir(online=False)
-                except Exception as e:
-                    lic_status_lbl.config(text=f"Holatni o'qib bo'lmadi: {e}")
-                    return
-                holat = getattr(n.holat, "value", str(n.holat))
-                exp = n.payload.get("expires_at") if getattr(n, "payload", None) else None
-                exp_txt = "—"
-                if exp:
-                    try:
-                        exp_txt = _dt.datetime.fromtimestamp(int(exp)).strftime("%Y-%m-%d %H:%M")
-                    except Exception:
-                        exp_txt = str(exp)
-                belgi = "✅" if n.yaroqli else "⛔"
-                lic_status_lbl.config(text=(
-                    f"{belgi} Holat:      {holat}\n"
-                    f"   Izoh:       {n.xabar}\n"
-                    f"   Tugash:     {exp_txt}"))
-                lic_id_var.set(n.machine_id)
-
-            def lic_import():
-                from tkinter import filedialog
-                yol = filedialog.askopenfilename(
-                    title="Yangilangan litsenziya faylini tanlang",
-                    filetypes=[("Litsenziya", "*.azlic"), ("Barcha fayllar", "*.*")],
-                    parent=dialog)
-                if not yol:
-                    return
-                try:
-                    natija = _lm.faollashtir(yol)
-                except Exception as e:
-                    messagebox.showerror("Litsenziya", f"Yuklashda xato:\n{e}", parent=dialog)
-                    return
-                if natija.yaroqli:
-                    messagebox.showinfo("Litsenziya yangilandi",
-                                        f"✅ Litsenziya muvaffaqiyatli yangilandi!\n\n{natija.xabar}",
-                                        parent=dialog)
-                else:
-                    messagebox.showerror("Litsenziya xatosi",
-                                         f"⛔ Fayl qabul qilinmadi:\n\n{natija.xabar}\n\n"
-                                         "Fayl shu kompyuter ID uchun berilganini tekshiring.",
-                                         parent=dialog)
-                lic_refresh()
-
-            ttk.Button(tab_lic, text="📂 Litsenziya faylini tanlash (.azlic) — yangilash",
-                       command=lic_import).grid(row=4, column=0, sticky="ew", padx=8, pady=(0, 6))
-            ttk.Button(tab_lic, text="↻ Holatni yangilash",
-                       command=lic_refresh).grid(row=5, column=0, sticky=tk.W, padx=8)
-            lic_refresh()
 
         # ───────────────────────── Pastki tugmalar ──────────────────────
         ttk.Label(dialog,
@@ -19777,44 +19535,5 @@ def main():
         input("\nDasturni yopish uchun Enter bosing...")
 
 if __name__ == "__main__":
-    import sys as _sys
-    # URIT-50 (siydik) xizmati — alohida jarayon (frozen EXE'da o'zini --urit-service bilan qayta ishga tushiradi)
-    if "--urit-service" in _sys.argv:
-        try:
-            import urit50_service
-            urit50_service.main()
-        except Exception as _e:
-            print(f"[URIT] xato: {_e}")
-        _sys.exit(0)
-    # Litsenziya darvozasi (fail-closed: modul o'chirilgan/buzilgan bo'lsa EXE ishlamaydi)
-    _FROZEN = getattr(_sys, "frozen", False)
-    try:
-        import os as _os
-        _here = _os.path.dirname(_os.path.abspath(__file__))
-        if _here not in _sys.path:
-            _sys.path.insert(0, _here)
-        from litsenziya import litsenziya_gate as _gate
-        if not _gate.darvoza("AzizMedLine — Natija (Monoblok)"):
-            _sys.exit(0)
-    except SystemExit:
-        raise
-    except BaseException:
-        if _FROZEN:
-            try:
-                import tkinter.messagebox as _mb
-                _mb.showerror("Litsenziya",
-                              "Litsenziya moduli topilmadi yoki buzilgan.\n"
-                              "Dastur to'xtatildi. Administrator: +998 99 673 13 42")
-            except Exception:
-                pass
-            _sys.exit(1)
-    # Normalarni bazaga ko'chirish (koddan → DB; shifokor keyin tahrirlaydi). Idempotent, startni to'smaydi.
-    try:
-        import norma_seed
-        _nn = norma_seed.seed_avto()
-        if _nn:
-            print(f"[norma_seed] {_nn} norma bazaga ko'chirildi")
-    except Exception as _ne:
-        print(f"[norma_seed] o'tkazildi: {_ne}")
     main()
  

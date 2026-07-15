@@ -31,7 +31,7 @@
     "enabled": true,
     "name": "BK-280 (Bioximiya)",
     "connection_type": "tcp_server",
-    "ip": "0.0.0.0",
+    "ip": "192.168.0.100",
     "port": 8087,
     "lis_port": 8088,
     "encoding": "utf-8"
