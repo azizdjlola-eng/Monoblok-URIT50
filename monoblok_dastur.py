@@ -246,6 +246,16 @@ def db_conn():
 # Config: load/save blanka_config.json
 LOGO_DEFAULT_PATH = r"G:\DASTUR\URIT 50\logo.jpg"
 
+# ── PDF hajm rejimi ─────────────────────────────────────────────────────────
+# True  = fontlarni PDF ga EMBED QILMAYMIZ → eng kichik hajm (~15–40 KB, martdagidek).
+#         PDF faqat onlayn saqlash/ulashish uchun; chop etish Word'dan qilinadi.
+#         Windows kompyuterlarda Times New Roman tizimdan olinadi — ko'rinish to'g'ri.
+#         Kamchilik: Times New Roman o'rnatilmagan qurilmada (ba'zi telefonlar) shrift
+#         almashadi va "10⁹/L" dagi yuqori indeks ⁹ chiqmasligi mumkin.
+# False = fontlarni subset qilib EMBED qilamiz → ~42–90 KB, HAR qurilmada bir xil ko'rinadi
+#         (QR orqali telefonda ochilsa ham to'g'ri). Kerak bo'lsa shu qiymatni False qiling.
+PDF_STRIP_FONTS = True
+
 def load_blanka_config() -> dict:
     default_path = r"G:\DASTUR\URIT 50\Standart shablonlar\blanka ustuni.docx"
     default_config = {
@@ -5047,9 +5057,47 @@ def add_page_footer_to_doc(doc: Document, order_info: dict):
             run.font.size = Pt(9)
         section.footer_distance = Cm(0.5)  # 0.5sm sahifa chetidan (printerda ko'rinadi)
 
+def _set_document_default_font(doc, font_name="Times New Roman"):
+    """Hujjatning standart fontini Times New Roman ga o'rnatadi (Normal uslub + docDefaults).
+    Word standart fonti Calibri/Cambria — footer sahifa raqamlari va aniq formatlanmagan
+    runlar shu fontlarda chiqib, PDF ga keraksiz Cambria/Calibri embed bo'ladi (~17 KB ortiqcha).
+    Barchasini TNR ga majburlaymiz — faqat bitta font oilasi embed bo'ladi, ko'rinish o'zgarmaydi.
+    """
+    try:
+        st = doc.styles['Normal']
+        st.font.name = font_name
+        rpr = st.element.get_or_add_rPr()
+        rf = rpr.find(qn('w:rFonts'))
+        if rf is None:
+            rf = OxmlElement('w:rFonts'); rpr.insert(0, rf)
+        for a in ('w:ascii', 'w:hAnsi', 'w:eastAsia', 'w:cs'):
+            rf.set(qn(a), font_name)
+    except Exception:
+        pass
+    try:
+        dd = doc.styles.element.find(qn('w:docDefaults'))
+        if dd is not None:
+            rpd = dd.find(qn('w:rPrDefault'))
+            if rpd is not None:
+                rp = rpd.find(qn('w:rPr'))
+                if rp is None:
+                    rp = OxmlElement('w:rPr'); rpd.append(rp)
+                rf2 = rp.find(qn('w:rFonts'))
+                if rf2 is None:
+                    rf2 = OxmlElement('w:rFonts'); rp.insert(0, rf2)
+                for a in ('w:ascii', 'w:hAnsi', 'w:eastAsia', 'w:cs'):
+                    rf2.set(qn(a), font_name)
+                # Theme referenslarini (Calibri/Cambria ga ishora) olib tashlash
+                for a in ('w:asciiTheme', 'w:hAnsiTheme', 'w:eastAsiaTheme', 'w:cstheme'):
+                    if rf2.get(qn(a)) is not None:
+                        del rf2.attrib[qn(a)]
+    except Exception:
+        pass
+
 # [14] create_unified_blank() - single DOCX with all sections
 def create_unified_blank(order_id: int, order_info: dict, organized: dict, test_results: dict = None, qr_link_override=None):
     doc = Document()
+    _set_document_default_font(doc)  # Cambria/Calibri o'rniga faqat Times New Roman embed bo'lsin
     is_first_section = True
     header_added = False
     if not header_added:
@@ -5694,21 +5742,52 @@ def save_pdf_to_onedrive(docx_path, date_str=None):
                 except Exception:
                     pass
 
-            # ── 3-USUL: pymupdf/fitz — embedded font stripping + garbage collect ──
+            # ── 3-USUL: pymupdf/fitz — FONT ishlov + logo kichraytirish (ASOSIY siqish) ──
+            # Word PDF ga fontlarni TO'LIQ joylashtiradi (Times/Cambria/Calibri ~360 KB).
+            # PDF_STRIP_FONTS ga qarab: olib tashlaymiz (eng kichik) yoki subset qilamiz.
             try:
                 import fitz  # pymupdf
                 _tmp_fitz = pdf_path + ".fz.tmp"
                 _fdoc = fitz.open(pdf_path)
-                # DIQQAT: fontlarni (FontFile) O'CHIRMAYMIZ — telefonda buzilmasligi uchun.
-                # Faqat orphan streamlarni yig'ishtirib, hajmni kichraytiramiz.
-                # garbage=4: orphan streamlarni tozalash, deflate+clean
-                _fdoc.save(_tmp_fitz, garbage=4, deflate=True, clean=True)
+                if PDF_STRIP_FONTS:
+                    # Fontlarni EMBED QILMASLIK — barcha FontFile streamlarini olib tashlash.
+                    # Eng kichik hajm (~15–40 KB). Windows viewerlar Times ni tizimdan oladi.
+                    _nff = 0
+                    for _x in range(1, _fdoc.xref_length()):
+                        try:
+                            _ks = _fdoc.xref_get_keys(_x)
+                        except Exception:
+                            continue
+                        for _ff in ("FontFile", "FontFile2", "FontFile3"):
+                            if _ff in _ks:
+                                try:
+                                    _fdoc.xref_set_key(_x, _ff, "null")
+                                    _nff += 1
+                                except Exception:
+                                    pass
+                else:
+                    # Fontlarni subset qilish — faqat ishlatilgan glyphlar (har qurilmada bir xil)
+                    try:
+                        _fdoc.subset_fonts()
+                    except Exception as _se:
+                        print(f"[PDF] subset_fonts o'tkazildi: {_se}")
+                # Logoni kichraytirish: Word logoni 288px (~228 DPI) da joylashtiradi — ortiqcha.
+                # Faqat lossy (JPEG logo) 110 DPI ga tushiriladi; PNG/bitonal (barcode/QR)
+                # TEGILMAYDI — skanerlanishi buzilmasligi uchun. ~15 KB tejaydi.
+                try:
+                    _fdoc.rewrite_images(dpi_threshold=150, dpi_target=110, quality=82,
+                                         lossless=False, bitonal=False)
+                except Exception as _re:
+                    print(f"[PDF] rewrite_images o'tkazildi: {_re}")
+                # garbage=4: orphan (olib tashlangan font) streamlarni tozalash, deflate+clean
+                _fdoc.save(_tmp_fitz, garbage=4, deflate=True, clean=True, deflate_images=True)
                 _fdoc.close()
                 if os.path.exists(_tmp_fitz) and os.path.getsize(_tmp_fitz) > 1000:
                     _sz_fz = os.path.getsize(_tmp_fitz) / 1024
                     if _sz_fz < _sz_before:
                         os.replace(_tmp_fitz, pdf_path)
-                        print(f"[PDF] pymupdf: {_sz_before:.0f} KB -> {_sz_fz:.0f} KB")
+                        _mode = "font-strip" if PDF_STRIP_FONTS else "subset"
+                        print(f"[PDF] pymupdf {_mode}: {_sz_before:.0f} KB -> {_sz_fz:.0f} KB")
                     else:
                         os.remove(_tmp_fitz)
                 elif os.path.exists(_tmp_fitz):
@@ -5972,6 +6051,7 @@ def generate_unified_blank(order_id):
             doc = Document()
         else:
             doc = Document(template_path)
+        _set_document_default_font(doc)  # Cambria/Calibri o'rniga faqat Times New Roman embed bo'lsin
         insert_blanka_ustuni_header(doc, order_info)
 
         # KLINIK MA'LUMOTLAR — blankada qizil katak (menstrual sikl, emizikli, menopauza, homiladorlik, gormon dori)
