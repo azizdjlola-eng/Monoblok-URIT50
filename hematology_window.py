@@ -14,6 +14,11 @@ import glob
 import re
 import json
 
+try:
+    import critical_alert
+except Exception:
+    critical_alert = None
+
 # ══════════════════════════════════════════════════════════════════
 #  MULTI-REFERENCE NORMALS (yosh va jinsga qarab)
 #  Har parametr uchun: [(age_min, age_max, gender, low, high)]
@@ -369,6 +374,11 @@ def open_window(parent=None, on_import_callback=None):
     results_tree.tag_configure("normal_res", foreground="black")
     results_tree.tag_configure("edited",     foreground="#006600",
                                              font=("Arial", 9, "bold"))
+    # Kritik natija — qizil fon
+    results_tree.tag_configure("critical",   background="#ffcccc", foreground="#a00000",
+                                             font=("Arial", 9, "bold"))
+    patient_tree.tag_configure("crit_patient", background="#ffe0e0", foreground="#a00000")
+    _alerted_sids = set()   # takror ovoz bermaslik uchun
 
     results_scrollbar = ttk.Scrollbar(right_panel, orient=tk.VERTICAL, command=results_tree.yview)
     results_tree.configure(yscrollcommand=results_scrollbar.set)
@@ -465,6 +475,18 @@ def open_window(parent=None, on_import_callback=None):
         gender = pinfo.get('gender', '')
         no     = 1
 
+        # ── Kritik natija: qaysi ko'rsatkichlar qizil bo'lishi kerak ──
+        crit_keys = set()
+        if critical_alert is not None:
+            try:
+                vmap = {}
+                for pk in ("WBC", "RBC", "HGB", "PLT"):
+                    if pk in tests:
+                        vmap[pk] = edits.get(pk, tests[pk].get('value', ''))
+                _al, crit_keys = critical_alert.check_hematology(vmap)
+            except Exception:
+                crit_keys = set()
+
         for param_key in CLINICAL_PARAMETERS:
             if param_key not in tests:
                 continue
@@ -521,6 +543,8 @@ def open_window(parent=None, on_import_callback=None):
                         display_value = value; row_tag = "normal_res"
                     flag_display = raw_flag
 
+            if param_key in crit_keys:
+                row_tag = "critical"
             results_tree.insert("", tk.END, values=(
                 str(no),
                 tdata.get('name', param_key),
@@ -534,6 +558,39 @@ def open_window(parent=None, on_import_callback=None):
     def show_results_with_data(event):
         _close_entry()
         _show_results_local(event)
+
+    def _scan_criticals(play=True):
+        """Barcha bemorlarni tekshirib, kritiklarni qizil belgilash;
+        yangi kritik bemor uchun ovoz + popup."""
+        if critical_alert is None:
+            return
+        new_crit = []
+        for item in patient_tree.get_children():
+            vals = patient_tree.item(item, "values")
+            if not vals or len(vals) < 2:
+                continue
+            sid = vals[1]
+            pdata = patients_data.get(sid)
+            if not pdata:
+                continue
+            tests = pdata.get('tests', {})
+            vmap = {pk: tests[pk].get('value', '') for pk in ("WBC", "RBC", "HGB", "PLT") if pk in tests}
+            try:
+                alerts, _ = critical_alert.check_hematology(vmap)
+            except Exception:
+                alerts = []
+            if critical_alert.has_critical(alerts):
+                # ABNORMAL statusi bo'yicha rangni buzmasdan qizil fon qo'shamiz
+                patient_tree.item(item, tags=("crit_patient",))
+                if sid not in _alerted_sids:
+                    _alerted_sids.add(sid)
+                    new_crit.append((pdata.get('name', sid), alerts))
+        if new_crit and play:
+            names = ", ".join(n for n, _ in new_crit)
+            all_alerts = []
+            for _, al in new_crit:
+                all_alerts.extend(al)
+            critical_alert.notify(window, names, all_alerts)
 
     # ══════════════════════════════════════════════════════════════════
     #  AUTO-REFRESH — har 5 sekundda fayl o'zgarishini kuzatish
@@ -575,6 +632,7 @@ def open_window(parent=None, on_import_callback=None):
 
                 refresh_patient_list(patient_tree, results_tree, status_var,
                                      date_from_var, date_to_var, patients_data)
+                _scan_criticals(play=True)
 
                 # Avvalgi tanlovni tiklash
                 if sel_sid:
@@ -630,6 +688,17 @@ def open_window(parent=None, on_import_callback=None):
         for pk, nv in edits.items():
             if pk in pinfo['tests']:
                 pinfo['tests'][pk]['value'] = nv
+
+        # ── Kritik natija bo'lsa import oldidan tasdiqlash ──
+        if critical_alert is not None:
+            try:
+                vmap = {pk: pinfo['tests'][pk].get('value', '')
+                        for pk in ("WBC", "RBC", "HGB", "PLT") if pk in pinfo['tests']}
+                alerts, _ = critical_alert.check_hematology(vmap)
+                if not critical_alert.confirm_save(window, pinfo.get('name', sample_id) or sample_id, alerts):
+                    return
+            except Exception:
+                pass
 
         try:
             count = on_import_callback(sample_id, pinfo)
@@ -906,6 +975,7 @@ def open_window(parent=None, on_import_callback=None):
     def refresh_with_data():
         refresh_patient_list(patient_tree, results_tree, status_var,
                              date_from_var, date_to_var, patients_data)
+        _scan_criticals(play=True)
     ttk.Button(left_control, text="🔄 Yangilash",
                command=refresh_with_data).pack(side=tk.LEFT, padx=5)
 
@@ -950,8 +1020,10 @@ def open_window(parent=None, on_import_callback=None):
     # ── Event binding ─────────────────────────────────────────────────
     patient_tree.bind("<<TreeviewSelect>>", show_results_with_data)
 
-    # Dastlabki yuklash + auto-refresh boshlash
-    refresh_with_data()
+    # Dastlabki yuklash — kritiklarni qizil belgilaymiz, lekin ochilishda ovoz/popup bermaymiz
+    refresh_patient_list(patient_tree, results_tree, status_var,
+                         date_from_var, date_to_var, patients_data)
+    _scan_criticals(play=False)
     _auto_refresh_id[0] = window.after(5000, _auto_refresh_tick)
     return window
 

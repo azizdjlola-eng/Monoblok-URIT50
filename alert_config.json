@@ -1,0 +1,255 @@
+{
+  "enabled": true,
+  "popup": true,
+  "sound": true,
+  "sound_file": "signals/alarm_clock.wav",
+  "hematology": {
+    "WBC": {
+      "low": 4.0,
+      "high": 20.0
+    },
+    "RBC": {
+      "low": 2.0,
+      "high": 6.0
+    },
+    "HGB": {
+      "low": 80.0,
+      "high": 160.0
+    },
+    "PLT": {
+      "low": 100.0,
+      "high": 600.0
+    },
+    "hard_low": {
+      "RBC": 1.0,
+      "HGB": 30.0
+    },
+    "hb_rbc_ratio": {
+      "min": 25.0,
+      "max": 37.0
+    },
+    "multi_low_count": 2
+  },
+  "biochemistry": {
+    "tests": [
+      {
+        "key": "umumiy_oqsil",
+        "match": [
+          "umumiy oqsil"
+        ],
+        "low": 40,
+        "high": 100,
+        "zero": true
+      },
+      {
+        "key": "albumin",
+        "match": [
+          "albumin"
+        ],
+        "exclude": [
+          "mikroalbumin"
+        ],
+        "low": 20,
+        "high": 60,
+        "zero": true
+      },
+      {
+        "key": "glyukoza",
+        "match": [
+          "glyukoza"
+        ],
+        "exclude": [
+          "tolerantlik",
+          "soat",
+          "natoshchak",
+          "o'tgach"
+        ],
+        "low": 2.0,
+        "high": 25,
+        "zero": true
+      },
+      {
+        "key": "kreatinin",
+        "match": [
+          "kreatinin"
+        ],
+        "exclude": [
+          "nisbat",
+          "mochevina",
+          "/"
+        ],
+        "low": 40,
+        "high": 500,
+        "zero": true
+      },
+      {
+        "key": "mochevina",
+        "match": [
+          "mochevina"
+        ],
+        "exclude": [
+          "azot",
+          "nisbat",
+          "kislota",
+          "/"
+        ],
+        "low": 0.5,
+        "high": 30,
+        "zero": true
+      },
+      {
+        "key": "siydik_kislota",
+        "match": [
+          "siydik kislota",
+          "mochevaya kislota"
+        ],
+        "low": 60,
+        "high": 900,
+        "zero": true
+      },
+      {
+        "key": "kalsiy",
+        "match": [
+          "kalsiy"
+        ],
+        "low": 1.5,
+        "high": 3.5,
+        "zero": true
+      },
+      {
+        "key": "kaliy",
+        "match": [
+          "kaliy"
+        ],
+        "low": 2.0,
+        "high": 7.0,
+        "zero": true
+      },
+      {
+        "key": "natriy",
+        "match": [
+          "natriy"
+        ],
+        "low": 110,
+        "high": 170,
+        "zero": true
+      },
+      {
+        "key": "magniy",
+        "match": [
+          "magniy"
+        ],
+        "low": 0.5,
+        "high": 5.0,
+        "zero": true
+      },
+      {
+        "key": "temir",
+        "match": [
+          "temir",
+          " fe"
+        ],
+        "high": 70,
+        "neg": true
+      },
+      {
+        "key": "alt",
+        "match": [
+          "alanin aminotransferaza",
+          "(alt)"
+        ],
+        "high": 400,
+        "neg": true
+      },
+      {
+        "key": "ast",
+        "match": [
+          "aspartat aminotransferaza",
+          "(ast)"
+        ],
+        "high": 400,
+        "neg": true
+      },
+      {
+        "key": "ldg",
+        "match": [
+          "laktatdegidrog",
+          "(ldg)"
+        ],
+        "low": 50,
+        "high": 2000
+      },
+      {
+        "key": "ggt",
+        "match": [
+          "gamma-glutamil",
+          "(ggt)"
+        ],
+        "high": 600,
+        "neg": true
+      },
+      {
+        "key": "alp",
+        "match": [
+          "ishqoriy fosfataza"
+        ],
+        "high": 1000,
+        "neg": true
+      },
+      {
+        "key": "amilaza",
+        "match": [
+          "amilaza"
+        ],
+        "high": 600,
+        "neg": true
+      },
+      {
+        "key": "timol",
+        "match": [
+          "timol"
+        ],
+        "high": 10,
+        "neg": true
+      },
+      {
+        "key": "xolesterin",
+        "match": [
+          "umumiy xolesterin"
+        ],
+        "high": 12,
+        "zero": true
+      },
+      {
+        "key": "trigliserid",
+        "match": [
+          "trigliserid"
+        ],
+        "high": 15,
+        "zero": true
+      },
+      {
+        "key": "umumiy_bilirubin",
+        "match": [
+          "umumiy bilirubin"
+        ],
+        "high": 200,
+        "zero": true
+      },
+      {
+        "key": "boglangan_bil",
+        "match": [
+          "langan bilirubin"
+        ],
+        "high": 100,
+        "neg": true
+      }
+    ],
+    "rules": {
+      "bilirubin_direct_ge_total": true,
+      "bilirubin_direct_ratio_warn": 0.9,
+      "kreatinin_low": 40,
+      "kre_urea_ratio_min": 8
+    }
+  }
+}

@@ -22,6 +22,11 @@ import glob
 import re
 
 try:
+    import critical_alert
+except Exception:
+    critical_alert = None
+
+try:
     import mysql.connector
     from monoblok_db_config import DB_CONFIG
     DB_AVAILABLE = True
@@ -430,6 +435,11 @@ def open_window(parent=None, on_import_callback=None):
     rtree.tag_configure("normal_res", foreground="black")
     rtree.tag_configure("edited",     foreground="#006600",
                                       font=("Arial", 9, "bold"))
+    # Kritik natija — qizil fon
+    rtree.tag_configure("critical",   background="#ffcccc", foreground="#a00000",
+                                      font=("Arial", 9, "bold"))
+    ptree.tag_configure("crit_patient", background="#ffe0e0", foreground="#a00000")
+    _alerted_sids = set()   # allaqachon ovoz berilgan bemorlar (takror bermaslik)
     rs = ttk.Scrollbar(rp, orient=tk.VERTICAL, command=rtree.yview)
     rtree.configure(yscrollcommand=rs.set)
     rtree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -513,6 +523,20 @@ def open_window(parent=None, on_import_callback=None):
             return
         tests = patients_data[sid].get('tests', {})
         edits = edited_values.get(sid, {})
+
+        # ── Kritik natija tekshiruvi (nom bo'yicha qizil qilinadigan qatorlar) ──
+        crit_names = set()
+        if critical_alert is not None:
+            try:
+                rows_for_check = []
+                for k, t in tests.items():
+                    lc = t.get('lis_code', k)
+                    val = edits.get(lc, t.get('value', ''))
+                    rows_for_check.append((t.get('name', ''), val))
+                _al, crit_names = critical_alert.check_biochemistry(rows_for_check)
+            except Exception:
+                crit_names = set()
+
         for key in sorted(tests, key=lambda k: int(k) if str(k).isdigit() else 9999):
             t    = tests[key]
             flag = t.get('flag', '').strip().upper()
@@ -532,6 +556,8 @@ def open_window(parent=None, on_import_callback=None):
                     display_value = value
                     row_tag       = "normal_res"
             ref = t.get('ref', '').replace('~', ' - ')
+            if t.get('name', '') in crit_names:
+                row_tag = "critical"
             rtree.insert("", tk.END, values=(
                 lis_code, t.get('name', ''),
                 display_value, t.get('unit', ''),
@@ -566,6 +592,16 @@ def open_window(parent=None, on_import_callback=None):
         for lis_code, new_val in edits.items():
             if lis_code in pinfo['tests']:
                 pinfo['tests'][lis_code]['value'] = new_val
+
+        # ── Kritik natija bo'lsa import oldidan tasdiqlash ──
+        if critical_alert is not None:
+            try:
+                rows = [(t.get('name', ''), t.get('value', '')) for t in pinfo['tests'].values()]
+                alerts, _ = critical_alert.check_biochemistry(rows)
+                if not critical_alert.confirm_save(window, pinfo.get('name', sid), alerts):
+                    return
+            except Exception:
+                pass
 
         try:
             count = on_import_callback(sid, pinfo)
@@ -731,8 +767,40 @@ def open_window(parent=None, on_import_callback=None):
         state=import_btn_state
     ).pack(side=tk.LEFT, padx=(0, 12))
 
+    def _scan_criticals(play=True):
+        """Barcha yuklangan bemorlarni tekshirib, kritiklarni qizil belgilash;
+        yangi kritik bemor uchun ovoz + popup berish."""
+        if critical_alert is None:
+            return
+        new_crit = []
+        for item in ptree.get_children():
+            vals = ptree.item(item, 'values')
+            if not vals or len(vals) < 2:
+                continue
+            sid = str(vals[1])
+            pdata = patients_data.get(sid)
+            if not pdata:
+                continue
+            rows = [(t.get('name', ''), t.get('value', '')) for t in pdata.get('tests', {}).values()]
+            try:
+                alerts, _ = critical_alert.check_biochemistry(rows)
+            except Exception:
+                alerts = []
+            if critical_alert.has_critical(alerts):
+                ptree.item(item, tags=("crit_patient",))
+                if sid not in _alerted_sids:
+                    _alerted_sids.add(sid)
+                    new_crit.append((pdata.get('name', sid), alerts))
+        if new_crit and play:
+            names = ", ".join(n for n, _ in new_crit)
+            all_alerts = []
+            for _, al in new_crit:
+                all_alerts.extend(al)
+            critical_alert.notify(window, names, all_alerts)
+
     def do_refresh():
         refresh_patient_list(ptree, rtree, status_var, date_from_var, date_to_var, patients_data)
+        _scan_criticals(play=True)
 
     ttk.Button(lc, text="\U0001f504 Yangilash", command=do_refresh).pack(side=tk.LEFT, padx=5)
     tk.Button(lc, text="o'chirish", command=_delete_patient,
@@ -748,7 +816,9 @@ def open_window(parent=None, on_import_callback=None):
               highlightbackground="#28a745", highlightthickness=2, bd=2).pack(side=tk.LEFT, padx=3)
 
     ptree.bind("<<TreeviewSelect>>", do_show_full)
-    do_refresh()
+    # Dastlabki yuklash — kritiklarni belgilaymiz, lekin ochilishda ovoz/popup bermaymiz
+    refresh_patient_list(ptree, rtree, status_var, date_from_var, date_to_var, patients_data)
+    _scan_criticals(play=False)
     return window
 
 
