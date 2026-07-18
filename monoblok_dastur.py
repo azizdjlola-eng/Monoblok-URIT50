@@ -135,6 +135,85 @@ TEST_GROUPS = ['GEM', 'BIO', 'IFA', 'URINE', 'TEST', 'COAG']
 LIPID_PANEL_MEMBER_IDS = {43, 44, 123, 124}   # TC=43, TG=44, LDL=123, HDL=124
 BUYRAK_PANEL_MEMBER_IDS = {42, 41, 35, 50}    # Mochevina=42, Kreatinin=41, Albumin=35, Siydik kislota=50
 
+# ── UZI (vrach qabuli) protokol shablonlari ─────────────────────────────────
+# Test nomida quyidagi kalit so'z topilsa, mos shablon Text widget'ga
+# oldindan to'ldiriladi (vrach kerakli joyini tahrirlaydi). Kalit so'zlar
+# tekshiruv tartibida — birinchi mos kelgani ishlatiladi.
+UZI_PROTOKOL_SHABLONLARI = [
+    ("exokg", "EXOKG (YURAK) PROTOKOLI\n\n"
+        "Chap qorincha (LV): KDO ____ ml, KSO ____ ml, EF (chiqarish fraktsiyasi): ____ %\n"
+        "Devorlar qalinligi: MJP ____ mm, orqa devor ____ mm\n"
+        "Chap bo'lmacha (LA): ____ mm\n"
+        "O'ng qorincha/bo'lmacha: kattalashmagan\n\n"
+        "Klapanlar:\n"
+        "  Mitral klapan: yopilishi to'liq, regurgitatsiya: yo'q / I / II / III daraja\n"
+        "  Aorta klapani: yopilishi to'liq, regurgitatsiya: yo'q / I / II / III daraja, stenoz: yo'q / bor\n"
+        "  Trikuspidal klapan: regurgitatsiya: yo'q / I / II / III daraja\n"
+        "  Pulmonal klapan: o'zgarishsiz\n\n"
+        "Perikard bo'shlig'ida suyuqlik: aniqlanmadi / aniqlandi (____ mm)\n"
+        "Yurak qisqarish ritmi: to'g'ri, YUS: ____ /min"),
+    ("qalqonsimon", "QALQONSIMON BEZ UZI PROTOKOLI\n\n"
+        "O'ng bo'lak: o'lchami ____ x ____ x ____ mm, hajmi: ____ sm3\n"
+        "Chap bo'lak: o'lchami ____ x ____ x ____ mm, hajmi: ____ sm3\n"
+        "Istmus qalinligi: ____ mm\n"
+        "Umumiy hajm: ____ sm3\n\n"
+        "Kontur: tekis      Ekogenligi: normal / diffuz pasaygan / diffuz oshgan\n"
+        "Struktura: bir jinsli / notekis (geterogen)\n"
+        "Tugunlar: yo'q / bor (joylashuvi: ____, o'lchami: ____ mm, ekogenligi: ____, konturi: ____)\n\n"
+        "Mintaqaviy limfa tugunlari: kattalashmagan"),
+    ("kichik tos", "KICHIK TOS A'ZOLARI UZI PROTOKOLI\n\n"
+        "Bachadon: joylashuvi — anteflexio / retroflexio, o'lchami: ____ x ____ x ____ mm\n"
+        "Konturi: tekis      Miometriy: bir jinsli / o'choqli o'zgargan (____)\n"
+        "Endometriy: qalinligi ____ mm, tsikl faziga mos / mos emas\n"
+        "Bachadon bo'shlig'i: deformatsiyasiz\n\n"
+        "O'ng tuxumdon: o'lchami ____ x ____ mm, follikulyar apparat: saqlangan\n"
+        "Kistalar/o'simtalar: yo'q / bor (____)\n\n"
+        "Chap tuxumdon: o'lchami ____ x ____ mm, follikulyar apparat: saqlangan\n"
+        "Kistalar/o'simtalar: yo'q / bor (____)\n\n"
+        "Dominant follikula (follikulometriya uchun): o'ng / chap tuxumdonda, o'lchami ____ mm, "
+        "sikl kuni: ____\n\n"
+        "Erkin suyuqlik retrouterin bo'shliqda: aniqlanmadi / aniqlandi (____ mm)"),
+    ("qorin", "QORIN BO'SHLIG'I A'ZOLARI UZI PROTOKOLI\n\n"
+        "Jigar: o'lchami — o'ng bo'lak: ____ mm, chap bo'lak: ____ mm\n"
+        "Konturi: tekis, qirralari: o'tkir      Parenxima ekogenligi: normal / oshgan / diffuz o'zgargan\n"
+        "Tomirlar: portal vena ____ mm, kengaymagan\n"
+        "O'choqli o'zgarishlar: yo'q / bor (____)\n\n"
+        "O't pufagi: o'lchami: ____ x ____ mm, devori: ____ mm (qalinlashmagan / qalinlashgan)\n"
+        "Bo'shlig'i: bir jinsli / cho'kindili      Konkrementlar: yo'q / bor (____)\n\n"
+        "Taloq: o'lchami: ____ x ____ mm, parenxima bir jinsli, o'choqli o'zgarishsiz\n\n"
+        "Pankreas: bosh ____ mm, tana ____ mm, dum ____ mm\n"
+        "Konturi: tekis, ekogenligi: normal / oshgan\n"
+        "Virsung yo'li: kengaymagan\n\n"
+        "Erkin suyuqlik qorin bo'shlig'ida: aniqlanmadi / aniqlandi (____)"),
+    ("buyrak", "BUYRAK UZI PROTOKOLI\n\n"
+        "O'ng buyrak: joylashuvi — odatiy, o'lchami: ____ x ____ mm\n"
+        "Kontur: tekis / notekis      Harakatchanligi: saqlangan / cheklangan\n"
+        "Parenxima qalinligi: ____ mm      Ekogenligi: normal / oshgan / pasaygan\n"
+        "CHLS (chashka-laxanka sistemasi): kengaymagan / kengaygan (____ mm)\n"
+        "Konkrementlar: yo'q / bor (soni: ____, o'lchami: ____ mm, joylashuvi: ____)\n"
+        "Kistalar/o'simtalar: yo'q / bor (____)\n\n"
+        "Chap buyrak: joylashuvi — odatiy, o'lchami: ____ x ____ mm\n"
+        "Kontur: tekis / notekis      Harakatchanligi: saqlangan / cheklangan\n"
+        "Parenxima qalinligi: ____ mm      Ekogenligi: normal / oshgan / pasaygan\n"
+        "CHLS: kengaymagan / kengaygan (____ mm)\n"
+        "Konkrementlar: yo'q / bor (soni: ____, o'lchami: ____ mm, joylashuvi: ____)\n"
+        "Kistalar/o'simtalar: yo'q / bor (____)\n\n"
+        "Siydik pufagi: shakli odatiy, devori tekis, bo'shlig'i bir jinsli, qoldiq siydik: ____ ml"),
+]
+
+_UZI_GENERIK_SHABLON = ("UZI TEKSHIRUVI PROTOKOLI\n\n"
+    "Tekshirilgan a'zo: ____\n"
+    "Topilmalar: ____\n\n"
+    "Xulosa uchun ma'lumot pastdagi maydonlarda kiritiladi.")
+
+
+def _uzi_shablon_matni(test_name_lower: str) -> str:
+    """Test nomiga qarab mos UZI protokol shablonini qaytaradi."""
+    for kalit, matn in UZI_PROTOKOL_SHABLONLARI:
+        if kalit in test_name_lower:
+            return matn
+    return _UZI_GENERIK_SHABLON
+
 GROUP_NAMES = {
     "GEM": "GEMOTOLOGIK TEKSHIRUVLAR",
     "BIO": "QONNING BIOKIMYOVIY TAHLILI",
@@ -210,6 +289,7 @@ def db_conn():
             config.update({
                 "connection_timeout": 10,
                 "raise_on_warnings": False,
+                "use_pure": True,   # C-extension "Failed raising error" nosozligidan saqlanish
             })
 
             if _db_first_connect:
@@ -245,6 +325,16 @@ def db_conn():
 
 # Config: load/save blanka_config.json
 LOGO_DEFAULT_PATH = r"G:\DASTUR\URIT 50\logo.jpg"
+
+# ── PDF hajm rejimi ─────────────────────────────────────────────────────────
+# True  = fontlarni PDF ga EMBED QILMAYMIZ → eng kichik hajm (~15–40 KB, martdagidek).
+#         PDF faqat onlayn saqlash/ulashish uchun; chop etish Word'dan qilinadi.
+#         Windows kompyuterlarda Times New Roman tizimdan olinadi — ko'rinish to'g'ri.
+#         Kamchilik: Times New Roman o'rnatilmagan qurilmada (ba'zi telefonlar) shrift
+#         almashadi va "10⁹/L" dagi yuqori indeks ⁹ chiqmasligi mumkin.
+# False = fontlarni subset qilib EMBED qilamiz → ~42–90 KB, HAR qurilmada bir xil ko'rinadi
+#         (QR orqali telefonda ochilsa ham to'g'ri). Kerak bo'lsa shu qiymatni False qiling.
+PDF_STRIP_FONTS = True
 
 def load_blanka_config() -> dict:
     default_path = r"G:\DASTUR\URIT 50\Standart shablonlar\blanka ustuni.docx"
@@ -5047,9 +5137,47 @@ def add_page_footer_to_doc(doc: Document, order_info: dict):
             run.font.size = Pt(9)
         section.footer_distance = Cm(0.5)  # 0.5sm sahifa chetidan (printerda ko'rinadi)
 
+def _set_document_default_font(doc, font_name="Times New Roman"):
+    """Hujjatning standart fontini Times New Roman ga o'rnatadi (Normal uslub + docDefaults).
+    Word standart fonti Calibri/Cambria — footer sahifa raqamlari va aniq formatlanmagan
+    runlar shu fontlarda chiqib, PDF ga keraksiz Cambria/Calibri embed bo'ladi (~17 KB ortiqcha).
+    Barchasini TNR ga majburlaymiz — faqat bitta font oilasi embed bo'ladi, ko'rinish o'zgarmaydi.
+    """
+    try:
+        st = doc.styles['Normal']
+        st.font.name = font_name
+        rpr = st.element.get_or_add_rPr()
+        rf = rpr.find(qn('w:rFonts'))
+        if rf is None:
+            rf = OxmlElement('w:rFonts'); rpr.insert(0, rf)
+        for a in ('w:ascii', 'w:hAnsi', 'w:eastAsia', 'w:cs'):
+            rf.set(qn(a), font_name)
+    except Exception:
+        pass
+    try:
+        dd = doc.styles.element.find(qn('w:docDefaults'))
+        if dd is not None:
+            rpd = dd.find(qn('w:rPrDefault'))
+            if rpd is not None:
+                rp = rpd.find(qn('w:rPr'))
+                if rp is None:
+                    rp = OxmlElement('w:rPr'); rpd.append(rp)
+                rf2 = rp.find(qn('w:rFonts'))
+                if rf2 is None:
+                    rf2 = OxmlElement('w:rFonts'); rp.insert(0, rf2)
+                for a in ('w:ascii', 'w:hAnsi', 'w:eastAsia', 'w:cs'):
+                    rf2.set(qn(a), font_name)
+                # Theme referenslarini (Calibri/Cambria ga ishora) olib tashlash
+                for a in ('w:asciiTheme', 'w:hAnsiTheme', 'w:eastAsiaTheme', 'w:cstheme'):
+                    if rf2.get(qn(a)) is not None:
+                        del rf2.attrib[qn(a)]
+    except Exception:
+        pass
+
 # [14] create_unified_blank() - single DOCX with all sections
 def create_unified_blank(order_id: int, order_info: dict, organized: dict, test_results: dict = None, qr_link_override=None):
     doc = Document()
+    _set_document_default_font(doc)  # Cambria/Calibri o'rniga faqat Times New Roman embed bo'lsin
     is_first_section = True
     header_added = False
     if not header_added:
@@ -5694,21 +5822,52 @@ def save_pdf_to_onedrive(docx_path, date_str=None):
                 except Exception:
                     pass
 
-            # ── 3-USUL: pymupdf/fitz — embedded font stripping + garbage collect ──
+            # ── 3-USUL: pymupdf/fitz — FONT ishlov + logo kichraytirish (ASOSIY siqish) ──
+            # Word PDF ga fontlarni TO'LIQ joylashtiradi (Times/Cambria/Calibri ~360 KB).
+            # PDF_STRIP_FONTS ga qarab: olib tashlaymiz (eng kichik) yoki subset qilamiz.
             try:
                 import fitz  # pymupdf
                 _tmp_fitz = pdf_path + ".fz.tmp"
                 _fdoc = fitz.open(pdf_path)
-                # DIQQAT: fontlarni (FontFile) O'CHIRMAYMIZ — telefonda buzilmasligi uchun.
-                # Faqat orphan streamlarni yig'ishtirib, hajmni kichraytiramiz.
-                # garbage=4: orphan streamlarni tozalash, deflate+clean
-                _fdoc.save(_tmp_fitz, garbage=4, deflate=True, clean=True)
+                if PDF_STRIP_FONTS:
+                    # Fontlarni EMBED QILMASLIK — barcha FontFile streamlarini olib tashlash.
+                    # Eng kichik hajm (~15–40 KB). Windows viewerlar Times ni tizimdan oladi.
+                    _nff = 0
+                    for _x in range(1, _fdoc.xref_length()):
+                        try:
+                            _ks = _fdoc.xref_get_keys(_x)
+                        except Exception:
+                            continue
+                        for _ff in ("FontFile", "FontFile2", "FontFile3"):
+                            if _ff in _ks:
+                                try:
+                                    _fdoc.xref_set_key(_x, _ff, "null")
+                                    _nff += 1
+                                except Exception:
+                                    pass
+                else:
+                    # Fontlarni subset qilish — faqat ishlatilgan glyphlar (har qurilmada bir xil)
+                    try:
+                        _fdoc.subset_fonts()
+                    except Exception as _se:
+                        print(f"[PDF] subset_fonts o'tkazildi: {_se}")
+                # Logoni kichraytirish: Word logoni 288px (~228 DPI) da joylashtiradi — ortiqcha.
+                # Faqat lossy (JPEG logo) 110 DPI ga tushiriladi; PNG/bitonal (barcode/QR)
+                # TEGILMAYDI — skanerlanishi buzilmasligi uchun. ~15 KB tejaydi.
+                try:
+                    _fdoc.rewrite_images(dpi_threshold=150, dpi_target=110, quality=82,
+                                         lossless=False, bitonal=False)
+                except Exception as _re:
+                    print(f"[PDF] rewrite_images o'tkazildi: {_re}")
+                # garbage=4: orphan (olib tashlangan font) streamlarni tozalash, deflate+clean
+                _fdoc.save(_tmp_fitz, garbage=4, deflate=True, clean=True, deflate_images=True)
                 _fdoc.close()
                 if os.path.exists(_tmp_fitz) and os.path.getsize(_tmp_fitz) > 1000:
                     _sz_fz = os.path.getsize(_tmp_fitz) / 1024
                     if _sz_fz < _sz_before:
                         os.replace(_tmp_fitz, pdf_path)
-                        print(f"[PDF] pymupdf: {_sz_before:.0f} KB -> {_sz_fz:.0f} KB")
+                        _mode = "font-strip" if PDF_STRIP_FONTS else "subset"
+                        print(f"[PDF] pymupdf {_mode}: {_sz_before:.0f} KB -> {_sz_fz:.0f} KB")
                     else:
                         os.remove(_tmp_fitz)
                 elif os.path.exists(_tmp_fitz):
@@ -5972,6 +6131,7 @@ def generate_unified_blank(order_id):
             doc = Document()
         else:
             doc = Document(template_path)
+        _set_document_default_font(doc)  # Cambria/Calibri o'rniga faqat Times New Roman embed bo'lsin
         insert_blanka_ustuni_header(doc, order_info)
 
         # KLINIK MA'LUMOTLAR — blankada qizil katak (menstrual sikl, emizikli, menopauza, homiladorlik, gormon dori)
@@ -14133,6 +14293,11 @@ Sana: {_sana_fmt}"""
             self.show_blood_group_dialog(test_id, test_name, test_data)
             return
 
+        # UZI (vrach qabuli) — protokol + MKB-10 xulosa
+        if 'uzi' in test_name_lower or 'узи' in test_name_lower:
+            self.show_uzi_protokol_form(test_id, test_name, test_data)
+            return
+
         # Maxsus tkinter dialog lar
         if any(k in test_name_lower for k in ['brutsellez', 'heddelson', 'xeddelson', 'rayta', 'wright']):
             self.show_brusellez_form(test_id, test_name, test_data)
@@ -15523,6 +15688,117 @@ Sana: {_sana_fmt}"""
                 vals[2] = "[OK] Tayyor"
                 self.tests_tree.item(tree_item, values=vals, tags=('tayyor',))
                 break
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  UZI PROTOKOL (vrach qabuli) + MKB-10
+    # ─────────────────────────────────────────────────────────────────────────
+    def get_mkb10_list(self):
+        """MKB-10 kodlari ro'yxatini bazadan oladi ('kod — nomi' ko'rinishida)."""
+        try:
+            conn = db_conn()
+            if not conn:
+                return []
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SELECT kod, nomi FROM mkb10 WHERE aktiv=1 ORDER BY kod")
+            rows = cursor.fetchall()
+            cursor.close()
+            conn.close()
+            return [f"{r['kod']} — {r['nomi']}" for r in rows]
+        except Exception as e:
+            print(f"[OGOHLANTIRISH] MKB-10 ro'yxatini olishda xato: {e}")
+            return []
+
+    def show_uzi_protokol_form(self, test_id, test_name, test_data):
+        """UZI tekshiruvi uchun protokol + MKB-10 xulosa kiritish dialogi."""
+        import json
+        old_result = {}
+        existing = self.test_results.get(test_id, '')
+        if existing and str(existing).strip().startswith('{'):
+            try:
+                old_result = json.loads(str(existing))
+            except:
+                old_result = {}
+
+        test_name_lower = (test_name or '').lower()
+        shablon = _uzi_shablon_matni(test_name_lower)
+        mkb_list = self.get_mkb10_list()
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"{test_name} — Protokol")
+        dialog.geometry("720x680")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.focus_set()
+
+        tk.Label(dialog, text=test_name.upper(),
+                 font=("Times New Roman", 13, "bold"), pady=8).pack()
+
+        # Protokol matni (tayyor shablon + erkin tahrirlash)
+        text_frame = tk.Frame(dialog, padx=10)
+        text_frame.pack(fill="both", expand=True)
+        tk.Label(text_frame, text="Protokol:", font=("Arial", 10, "bold"), anchor="w").pack(fill="x")
+        protokol_text = scrolledtext.ScrolledText(text_frame, wrap="word", font=("Arial", 10),
+                                                    height=16, undo=True)
+        protokol_text.pack(fill="both", expand=True, pady=(2, 8))
+        protokol_text.insert("1.0", old_result.get('protokol') or shablon)
+
+        # Pastki forma: xulosa + MKB-10
+        bottom_frame = tk.Frame(dialog, padx=10)
+        bottom_frame.pack(fill="x")
+
+        tk.Label(bottom_frame, text="Xulosa:", font=("Arial", 10, "bold"), anchor="w").grid(
+            row=0, column=0, sticky="w", pady=(4, 2))
+        xulosa_var = tk.StringVar(value=old_result.get('xulosa', ''))
+        xulosa_entry = tk.Entry(bottom_frame, textvariable=xulosa_var, font=("Arial", 10))
+        xulosa_entry.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+
+        tk.Label(bottom_frame, text="MKB-10 (kodni yozib qidiring):", font=("Arial", 10, "bold"),
+                 anchor="w").grid(row=2, column=0, sticky="w", pady=(0, 2))
+        mkb_var = tk.StringVar(value=old_result.get('mkb', ''))
+        mkb_combo = ttk.Combobox(bottom_frame, textvariable=mkb_var, values=mkb_list,
+                                  font=("Arial", 10))
+        mkb_combo.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        bottom_frame.columnconfigure(0, weight=1)
+
+        def _mkb_filter(event=None):
+            if event is not None and event.keysym in ("Up", "Down", "Return", "Escape"):
+                return
+            typed = mkb_var.get().strip().lower()
+            mkb_combo['values'] = mkb_list if not typed else [v for v in mkb_list if typed in v.lower()]
+        mkb_combo.bind("<KeyRelease>", _mkb_filter)
+
+        btn_frame = tk.Frame(dialog, pady=8)
+        btn_frame.pack(fill="x")
+
+        def saqlash():
+            protokol_matn = protokol_text.get("1.0", "end").rstrip()
+            xulosa = xulosa_var.get().strip()
+            mkb = mkb_var.get().strip()
+            mkb_kod = mkb.split(" — ", 1)[0].strip() if " — " in mkb else mkb
+
+            if not protokol_matn and not xulosa:
+                messagebox.showwarning("Ogohlantirish", "Protokol matni yoki xulosa kiritilmagan!")
+                return
+
+            data = {
+                'protokol': protokol_matn,
+                'xulosa': xulosa,
+                'mkb': mkb,
+                'mkb_kod': mkb_kod,
+            }
+            result_json = json.dumps(data, ensure_ascii=False)
+            natija_str = xulosa if xulosa else (f"MKB-10: {mkb_kod}" if mkb_kod else "Protokol kiritildi")
+            self._save_test_result_to_tree(test_id, result_json, natija_str)
+            dialog.destroy()
+            self.status_var.set(f"{test_name} protokoli saqlandi")
+
+        tk.Button(btn_frame, text="Saqlash", command=saqlash,
+                  bg="#28a745", fg="white", font=("Arial", 11, "bold"),
+                  width=15, pady=5).pack(side="left", padx=20)
+        tk.Button(btn_frame, text="Bekor", command=dialog.destroy,
+                  bg="#dc3545", fg="white", font=("Arial", 11),
+                  width=12, pady=5).pack(side="left")
+        dialog.bind('<Escape>', lambda e: dialog.destroy())
 
     # ─────────────────────────────────────────────────────────────────────────
     #  UROLOGIK SURTMA (MUJSKOY MAZOK)
@@ -18325,6 +18601,7 @@ Sana: {_sana_fmt}"""
                     "connection_timeout": 15,
                     "raise_on_warnings": False,
                     "autocommit": False,
+                    "use_pure": True,   # C-extension "Failed raising error" nosozligidan saqlanish
                 })
                 conn = mysql.connector.connect(**config)
 

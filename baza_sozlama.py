@@ -246,6 +246,7 @@ def test_ulanish(cfg: dict):
         conn = mysql.connector.connect(
             host=cfg["host"], user=cfg["user"], password=cfg["password"],
             database=cfg["database"], port=int(cfg["port"]), connection_timeout=5,
+            use_pure=True,   # C-extension "Failed raising error" nosozligidan saqlanish
         )
         conn.close()
         return True, "Ulanish muvaffaqiyatli ✅"

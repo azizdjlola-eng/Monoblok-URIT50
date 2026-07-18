@@ -139,6 +139,9 @@ def save_config(cfg: dict) -> bool:
                 "password": db.get("password", DEFAULT_CONFIG["database"]["password"]),
                 "database": db.get("database", DEFAULT_CONFIG["database"]["database"]),
                 "port": int(db.get("port", DEFAULT_CONFIG["database"]["port"])),
+                # C-extension (_mysql_connector.pyd) "Failed raising error" beradi —
+                # barcha mysql.connector consumer'lari pure-Python ishlatsin.
+                "use_pure": True,
             })
         return True
     except Exception as e:
@@ -165,4 +168,9 @@ DB_CONFIG = {
     "password": _db.get("password", "azizmed2026"),
     "database": _db.get("database", "lab_tizim"),
     "port": int(_db.get("port", 3306)),
+    # C-extension (_mysql_connector.pyd) "Failed raising error" beradi — barcha
+    # mysql.connector consumer'lari (analizator listenerlar ham) pure-Python ishlatsin.
+    # pymysql modullari (bk280, asus_lis_server) o'z config'ini aniq kalitlar bilan
+    # quradi, shuning uchun bu kalitni olmaydi — ular buzilmaydi.
+    "use_pure": True,
 }

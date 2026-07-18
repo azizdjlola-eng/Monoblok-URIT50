@@ -1,0 +1,890 @@
+[
+ {
+  "nomi": "ACHTV",
+  "narxi": 20000,
+  "sample": "COAG",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Alanin aminotransferaza (ALT)",
+  "narxi": 20000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Albumin",
+  "narxi": 20000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Alfa-amilaza",
+  "narxi": 30000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Alfa-amilaza pankreaticheskiy",
+  "narxi": 30000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Anti HBsAg (Antitelo) immunitet  IFA  ИФА",
+  "narxi": 40000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Askarida IgG IFA ИФА",
+  "narxi": 40000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "ASLO (Antistreptolizin-O) avtomat",
+  "narxi": 30000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Aspartat aminotransferaza (AST)",
+  "narxi": 20000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "AT-TPO IFA ИФА",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Axlatdan yashirin qon testi",
+  "narxi": 60000,
+  "sample": "TEST",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Bilirubin",
+  "narxi": 30000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Brutselyoz (Reaktsiya Xedelson +  Rayta)",
+  "narxi": 60000,
+  "sample": "TEST",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "BUYRAK PANELI",
+  "narxi": 115000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Buyrak UZI",
+  "narxi": 50000,
+  "sample": "",
+  "turi": "test",
+  "soha": "uzi",
+  "aktiv": 1
+ },
+ {
+  "nomi": "CA 72-4 (oshqozon onkomarkeri)  ИФА",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "CA15-3 (ko'krak saratoni belgisi) ИФА",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "CRP (S-reaktivniy belok) avtomat",
+  "narxi": 30000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Demodikozni aniqlash",
+  "narxi": 30000,
+  "sample": "TEST",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Endokrinolog qabuli",
+  "narxi": 70000,
+  "sample": "",
+  "turi": "test",
+  "soha": "ambulator",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Eritrotsitlar cho'kish tezligi (ECHT)",
+  "narxi": 20000,
+  "sample": "GEM",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Estradiol IFA ИФА",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "EXOKG (yurak UZI)",
+  "narxi": 100000,
+  "sample": "",
+  "turi": "test",
+  "soha": "uzi",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Ferritin ИФА",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Fibrinogen",
+  "narxi": 20000,
+  "sample": "COAG",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Fizioterapiya seansi",
+  "narxi": 30000,
+  "sample": "",
+  "turi": "test",
+  "soha": "muolaja",
+  "aktiv": 1
+ },
+ {
+  "nomi": "FSG (FSH) IFA ИФА",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Gamma-glutamil transferaza (GGT)",
+  "narxi": 25000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Gepatit A (IgG, IFA) ИФА",
+  "narxi": 40000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Gepatit B (HBsAg, ekspress)",
+  "narxi": 30000,
+  "sample": "TEST",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Gepatit B (HBsAg, IFA ИФА)",
+  "narxi": 40000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Gepatit C (Anti-HCV, IFA ИФА)",
+  "narxi": 40000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Gepatit C (HCV-Ab, ekspress)",
+  "narxi": 30000,
+  "sample": "TEST",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Gepatit D (D-antitela, IFA ИФА)",
+  "narxi": 40000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Ginekolog qabuli",
+  "narxi": 60000,
+  "sample": "",
+  "turi": "test",
+  "soha": "ambulator",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Ginekologik surtma",
+  "narxi": 50000,
+  "sample": "TEST",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Glyukoza",
+  "narxi": 20000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Glyukozaga tolerantlik testi",
+  "narxi": 25000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "H.Pylori Test (axlatdan)",
+  "narxi": 50000,
+  "sample": "TEST",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "HDL-Yuqori zichlikli lipoprotein",
+  "narxi": 30000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Helicobakter pylori AB (ekspress)",
+  "narxi": 50000,
+  "sample": "TEST",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Helicobakter pylori IgG IFA ИФА",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "IgE umumiy (Allergiya uchun) ИФА",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Insulin IFA ИФА",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Ishqoriy fosfataza (IF)",
+  "narxi": 25000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Kaliy K",
+  "narxi": 25000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Kalsiy Ca",
+  "narxi": 25000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Kardiolog qabuli",
+  "narxi": 70000,
+  "sample": "",
+  "turi": "test",
+  "soha": "ambulator",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Kichik tos a'zolari UZI",
+  "narxi": 60000,
+  "sample": "",
+  "turi": "test",
+  "soha": "uzi",
+  "aktiv": 1
+ },
+ {
+  "nomi": "KOAGULOGRAMMA to'liq",
+  "narxi": 80000,
+  "sample": "COAG",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Kortizol IFA ИФА",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Kreatinin",
+  "narxi": 20000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Kunduzgi statsionar (1 kun)",
+  "narxi": 100000,
+  "sample": "",
+  "turi": "test",
+  "soha": "statsionar",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Laktatdegidrogrenaza (LDG)",
+  "narxi": 25000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "LDL-Past zichlikli lipoprotein",
+  "narxi": 40000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "LG (LH) IFA ИФА",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "LIPID SPEKTRI",
+  "narxi": 110000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Lyambliya-antitela IFA ИФА",
+  "narxi": 40000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Magniy Mg",
+  "narxi": 25000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Massaj seansi",
+  "narxi": 40000,
+  "sample": "",
+  "turi": "test",
+  "soha": "muolaja",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Mochevina",
+  "narxi": 20000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Mujskoy mazok (Erkaklar surtmasi)",
+  "narxi": 50000,
+  "sample": "TEST",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Mushak ichiga ukol",
+  "narxi": 10000,
+  "sample": "",
+  "turi": "test",
+  "soha": "muolaja",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Najas tahlili (Gijja uchun)",
+  "narxi": 30000,
+  "sample": "TEST",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Natriy Na",
+  "narxi": 25000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Nevrolog qabuli",
+  "narxi": 70000,
+  "sample": "",
+  "turi": "test",
+  "soha": "ambulator",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Palata lyuks (1 kun)",
+  "narxi": 300000,
+  "sample": "",
+  "turi": "test",
+  "soha": "statsionar",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Pepsinogen I (PGI) IFA",
+  "narxi": 100000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Pepsinogen II (PGII) IFA",
+  "narxi": 100000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Progesteron IFA ИФА",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Prolaktin IFA ИФА",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Protrombin Time (PTI, PT/MNO)",
+  "narxi": 30000,
+  "sample": "COAG",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Qalqonsimon bez UZI",
+  "narxi": 50000,
+  "sample": "",
+  "turi": "test",
+  "soha": "uzi",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Qo'tir kanasi aniqlash",
+  "narxi": 30000,
+  "sample": "TEST",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Qon guruhi va rezus faktorini aniqlash",
+  "narxi": 30000,
+  "sample": "GEM",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Qondan mazok (morfologiya) ko'rish",
+  "narxi": 50000,
+  "sample": "GEM",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Qonning ivish vaqti  QIB",
+  "narxi": 20000,
+  "sample": "GEM",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Qonning umumiy tahlili",
+  "narxi": 30000,
+  "sample": "GEM",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Qorin bo'shlig'i UZI",
+  "narxi": 60000,
+  "sample": "",
+  "turi": "test",
+  "soha": "uzi",
+  "aktiv": 1
+ },
+ {
+  "nomi": "REVMOPROBA to'liq (avtomat)",
+  "narxi": 90000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "REVMOPROBA to'liq (qo'lda)",
+  "narxi": 60000,
+  "sample": "TEST",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "RF (Revmatoidniy faktor) avtomat",
+  "narxi": 30000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "RW sifilis (ekspress)",
+  "narxi": 30000,
+  "sample": "TEST",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Siydik kislota (Mochevaya kislota)",
+  "narxi": 25000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Siydikning Nicheporenko tahlili",
+  "narxi": 30000,
+  "sample": "URINE",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Siydikning umumiy tahlili",
+  "narxi": 30000,
+  "sample": "URINE",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Siydikning Zimnitskiy tahlili",
+  "narxi": 30000,
+  "sample": "URINE",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Spermogramma",
+  "narxi": 50000,
+  "sample": "TEST",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Statsionar yotoq (1 kun)",
+  "narxi": 150000,
+  "sample": "",
+  "turi": "test",
+  "soha": "statsionar",
+  "aktiv": 1
+ },
+ {
+  "nomi": "T3 erkin IFA ИФА",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "T4 erkin IFA ИФА",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Temir  Fe",
+  "narxi": 25000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Terapevt qabuli",
+  "narxi": 50000,
+  "sample": "",
+  "turi": "test",
+  "soha": "ambulator",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Testesteron Erkin IFA ИФА",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Testesteron IFA ИФА",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Timol proba",
+  "narxi": 25000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Tomchi (kapelnitsa)",
+  "narxi": 40000,
+  "sample": "",
+  "turi": "test",
+  "soha": "muolaja",
+  "aktiv": 1
+ },
+ {
+  "nomi": "TORCH test IgM va IgG (to'liq)",
+  "narxi": 100000,
+  "sample": "TEST",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Trigliserid-TG",
+  "narxi": 20000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Trombinovoe vremya (TT)",
+  "narxi": 20000,
+  "sample": "COAG",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Troponin T",
+  "narxi": 70000,
+  "sample": "TEST",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "TTG (TSH) IFA ИФА",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Umumiy oqsil",
+  "narxi": 20000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Umumiy PSA IFA ИФА",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Umumiy xolesterin (TC)",
+  "narxi": 20000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Vena ichiga in'eksiya",
+  "narxi": 15000,
+  "sample": "",
+  "turi": "test",
+  "soha": "muolaja",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Vitamin B12 ИФА",
+  "narxi": 70000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Vitamin D (25-OH) ИФА",
+  "narxi": 110000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "XGCh (Homiladorlik gormoni) IFA ИФА",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Xolinesteraza (CHE)",
+  "narxi": 30000,
+  "sample": "BIO",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "nomi": "Zamburug' tekshiruvi",
+  "narxi": 30000,
+  "sample": "TEST",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ }
+]
