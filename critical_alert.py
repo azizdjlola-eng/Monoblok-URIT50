@@ -38,17 +38,13 @@ DEFAULT_CONFIG = {
     "sound_file": "signals/alarm_clock.wav",
 
     "hematology": {
-        # low/high — 🟡 "Diqqat" chegaralari
+        # Faqat sodda kam/ko'p chegaralari — chegaradan chiqsa signal beradi.
+        # (HGB/RBC nisbati va "ko'p ko'rsatkich past" qoidalari olib tashlangan —
+        #  ular normal natijalarga ham yolg'on signal berardi.)
         "WBC": {"low": 4.0,  "high": 20.0},
-        "RBC": {"low": 2.0,  "high": 6.0},
+        "RBC": {"low": 2.5,  "high": 6.0},
         "HGB": {"low": 80.0, "high": 160.0},
         "PLT": {"low": 100.0, "high": 600.0},
-        # 🔴 "Xatolik shubhasi" — tirik odamda bo'lmaydigan darajada past
-        "hard_low": {"RBC": 1.0, "HGB": 30.0},
-        # HGB(g/L) ≈ RBC × 30 ("uchlik qoidasi"). Bu oraliqdan chiqsa — namuna muammosi
-        "hb_rbc_ratio": {"min": 25.0, "max": 37.0},
-        # Nechta ko'rsatkich (RBC/HGB/PLT) birdaniga past bo'lsa -> kuchli signal
-        "multi_low_count": 2,
     },
 
     "biochemistry": {
@@ -161,70 +157,35 @@ def check_hematology(values, cfg=None):
     """
     values: {'WBC': '7.1', 'RBC': '4.9', 'HGB': '137', 'PLT': '247', ...}
     Qaytaradi: (alerts, offending_keys)
-      alerts        — [{'level': 'critical'|'warn', 'msg': str}, ...]
+      alerts        — [{'level': 'critical', 'msg': str}, ...]
       offending_keys — {'RBC', 'HGB', ...}  (qizil qilish uchun)
+
+    Faqat sodda kam/ko'p tekshiruvi: qiymat [low, high] oralig'idan chiqsa (yoki 0/manfiy)
+    signal beriladi. Boshqa hech qanday qoida (nisbat va h.k.) yo'q.
     """
     cfg = cfg or load_config()
     h = cfg.get("hematology", {})
     alerts = []
     offending = set()
 
-    v = {k: _to_float(values.get(k)) for k in ("WBC", "RBC", "HGB", "PLT")}
-    hard_low = h.get("hard_low", {})
-
-    def _rng(key, unit=""):
-        lo = h.get(key, {}).get("low")
-        hi = h.get(key, {}).get("high")
-        val = v.get(key)
+    for key in ("WBC", "RBC", "HGB", "PLT"):
+        conf = h.get(key)
+        if not conf:
+            continue
+        val = _to_float(values.get(key))
         if val is None:
-            return
-        # 🔴 Xatolik: nol yoki tirik odamda bo'lmaydigan past
-        hl = hard_low.get(key)
+            continue
+        lo = conf.get("low")
+        hi = conf.get("high")
         if val <= 0:
             alerts.append({"level": "critical", "msg": f"{key} = {val:g} — nol/manfiy (o'lchov xatosi)"})
             offending.add(key)
-            return
-        if hl is not None and val < hl:
-            alerts.append({"level": "critical", "msg": f"{key} = {val:g} — juda past ({hl:g} dan past), namuna muammosi shubhasi"})
-            offending.add(key)
-            return
-        # 🟡 Diqqat: normadan chetlashgan
-        if lo is not None and val < lo:
-            alerts.append({"level": "warn", "msg": f"{key} = {val:g} — past ({lo:g} dan past)"})
+        elif lo is not None and val < lo:
+            alerts.append({"level": "critical", "msg": f"{key} = {val:g} — past ({lo:g} dan past)"})
             offending.add(key)
         elif hi is not None and val > hi:
-            alerts.append({"level": "warn", "msg": f"{key} = {val:g} — baland ({hi:g} dan baland)"})
+            alerts.append({"level": "critical", "msg": f"{key} = {val:g} — baland ({hi:g} dan baland)"})
             offending.add(key)
-
-    _rng("WBC")
-    _rng("RBC")
-    _rng("HGB")
-    _rng("PLT")
-
-    # HGB ↔ RBC balansi ("uchlik qoidasi": HGB ≈ RBC × 30)
-    rr = h.get("hb_rbc_ratio", {})
-    rbc, hgb = v.get("RBC"), v.get("HGB")
-    if rbc and hgb and rbc > 0:
-        ratio = hgb / rbc
-        rmin, rmax = rr.get("min", 25), rr.get("max", 37)
-        if ratio < rmin or ratio > rmax:
-            alerts.append({"level": "critical",
-                           "msg": f"HGB/RBC nisbati = {ratio:.1f} (norma {rmin:g}-{rmax:g}) — namuna muammosi (laxta/suyultirish) shubhasi"})
-            offending.add("RBC")
-            offending.add("HGB")
-
-    # Bir nechta ko'rsatkich birdaniga past -> laxtalanish belgisi
-    low_now = []
-    for key in ("RBC", "HGB", "PLT"):
-        lo = h.get(key, {}).get("low")
-        val = v.get(key)
-        if val is not None and lo is not None and 0 < val < lo:
-            low_now.append(key)
-    need = h.get("multi_low_count", 2)
-    if len(low_now) >= need:
-        alerts.append({"level": "critical",
-                       "msg": f"Bir vaqtda past: {', '.join(low_now)} — namuna sifati shubhali, qayta oling"})
-        offending.update(low_now)
 
     return alerts, offending
 

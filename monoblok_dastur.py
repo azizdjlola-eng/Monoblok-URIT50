@@ -4643,7 +4643,7 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
                                 ("PT sekundalarda",          kd.get('pt_sek'),     "13 – 15",     "sek"),
                                 ("PT bo'yicha Kviku (%)",    kd.get('pt_kviku'),   "70,0 – 100,0", "%"),
                                 ("MNO / INR",               kd.get('pt_mno'),     "0,90 – 1,15",  "INR"),
-                                ("TT (Tromboplastin vaqti)", kd.get('tt'),         "11 – 18",     "sek"),
+                                ("Trombin vaqti (TT)", kd.get('tt'),         "11 – 18",     "sek"),
                                 ("ACHTV",                    kd.get('achtv'),      "25 – 40",     "sek"),
                                 ("Fibrinogen",               kd.get('fibrinogen'), "2,0 – 4,0",   "g/l"),
                             ]
@@ -4689,7 +4689,7 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
                 ("PT sekundalarda",          'pt_sek',     "13 \u2013 15",     "sek"),
                 ("PT bo\u2019yicha Kviku (%)", 'pt_kviku', "70,0 \u2013 100,0", "%"),
                 ("MNO / INR",                'pt_mno',     "0,90 \u2013 1,15", "INR"),
-                ("TT (Tromboplastin vaqti)", 'tt',         "11 \u2013 18",     "sek"),
+                ("Trombin vaqti (TT)", 'tt',         "11 \u2013 18",     "sek"),
                 ("ACHTV",                    'achtv',      "25 \u2013 40",     "sek"),
                 ("Fibrinogen",               'fibrinogen', "2,0 \u2013 4,0",   "g/l"),
             ]
@@ -6485,7 +6485,7 @@ def generate_unified_blank(order_id):
                                     ("PT sekundalarda",          kd2.get('pt_sek'),     _koag_norma['pt_sek'][0],     _koag_norma['pt_sek'][1]),
                                     ("PT bo'yicha Kviku (%)",    kd2.get('pt_kviku'),   _koag_norma['pt_kviku'][0],   _koag_norma['pt_kviku'][1]),
                                     ("MNO / INR",               kd2.get('pt_mno'),     _koag_norma['pt_mno'][0],     _koag_norma['pt_mno'][1]),
-                                    ("TT (Tromboplastin vaqti)", kd2.get('tt'),         _koag_norma['tt'][0],         _koag_norma['tt'][1]),
+                                    ("Trombin vaqti (TT)", kd2.get('tt'),         _koag_norma['tt'][0],         _koag_norma['tt'][1]),
                                     ("ACHTV",                    kd2.get('achtv'),      _koag_norma['achtv'][0],      _koag_norma['achtv'][1]),
                                     ("Fibrinogen",               kd2.get('fibrinogen'), _koag_norma['fibrinogen'][0], _koag_norma['fibrinogen'][1]),
                                 ]
@@ -7934,7 +7934,7 @@ class TahlilKiritishOynasi:
                 ("pt_sek",     "PT sekundalarda",           "sek"),
                 ("pt_kviku",   "PT bo'yicha Kviku",         "%"),
                 ("pt_mno",     "MNO/INR",                   "INR"),
-                ("tt",         "TT (Tromboplastin vaqti)",  "sek"),
+                ("tt",         "Trombin vaqti (TT)",  "sek"),
                 ("achtv",      "ACHTV",                     "sek"),
                 ("fibrinogen", "Fibrinogen",                 "g/l"),
             ])
@@ -8078,7 +8078,7 @@ class TahlilKiritishOynasi:
                  "norma": _v("pt_kviku"),   "readonly": False, "group": "PT"},
                 {"name": "MNO/INR",                  "key": "pt_mno",     "unit": "INR",
                  "norma": _v("pt_mno"),     "readonly": False, "group": "PT"},
-                {"name": "TT (Tromboplastin vaqti)", "key": "tt",         "unit": "sek",
+                {"name": "Trombin vaqti (TT)", "key": "tt",         "unit": "sek",
                  "norma": _v("tt"),         "readonly": False},
                 {"name": "ACHTV",                    "key": "achtv",      "unit": "sek",
                  "norma": _v("achtv"),      "readonly": False},
@@ -11588,7 +11588,7 @@ Sana: {_sana_fmt}"""
                     _insert_sub_row("PT sekundalarda",          "pt_sek",     str(rd.get('pt_sek', '')),     "13-15 sek")
                     _insert_sub_row("PT bo\u2018yicha Kviku (%)", "pt_kviku",   str(rd.get('pt_kviku', '')),   "70-100 %")
                     _insert_sub_row("MNO / INR",                "pt_mno",     str(rd.get('pt_mno', '')),     "0.9-1.15 INR")
-                    _insert_sub_row("TT (Tromboplastin vaqti)", "tt",         str(rd.get('tt', '')),         "11-18 sek")
+                    _insert_sub_row("Trombin vaqti (TT)", "tt",         str(rd.get('tt', '')),         "11-18 sek")
                     _insert_sub_row("ACHTV",                    "achtv",      str(rd.get('achtv', '')),      "25-40 sek")
                     _insert_sub_row("Fibrinogen",               "fibrinogen", str(rd.get('fibrinogen', '')), "2.0-4.0 g/l")
 
@@ -12630,7 +12630,7 @@ Sana: {_sana_fmt}"""
             ]
             if any(k in test_name_lower for k in ['koagulogramma', 'koagul']):
                 _coag_components += [
-                    {"name": "TT (Tromboplastin vaqti)", "key": "tt",         "unit": "sek", "norma": "11-18",   "readonly": False},
+                    {"name": "Trombin vaqti (TT)", "key": "tt",         "unit": "sek", "norma": "11-18",   "readonly": False},
                     {"name": "ACHTV",                    "key": "achtv",      "unit": "sek", "norma": "25-40",   "readonly": False},
                     {"name": "Fibrinogen",               "key": "fibrinogen", "unit": "g/l", "norma": "2.0-4.0", "readonly": False},
                 ]
@@ -14183,7 +14183,7 @@ Sana: {_sana_fmt}"""
             ]
             if any(k in tname_lower for k in ['koagulogramma', 'koagul']):
                 _coag_components += [
-                    {"name": "TT (Tromboplastin vaqti)", "key": "tt",         "unit": "sek", "norma": "11-18",   "readonly": False},
+                    {"name": "Trombin vaqti (TT)", "key": "tt",         "unit": "sek", "norma": "11-18",   "readonly": False},
                     {"name": "ACHTV",                    "key": "achtv",      "unit": "sek", "norma": "25-40",   "readonly": False},
                     {"name": "Fibrinogen",               "key": "fibrinogen", "unit": "g/l", "norma": "2.0-4.0", "readonly": False},
                 ]
@@ -14327,7 +14327,7 @@ Sana: {_sana_fmt}"""
                          "norma": "70-100",     "readonly": False},
                         {"name": "MNO / INR",                "key": "pt_mno",     "unit": "INR",
                          "norma": "0.9-1.15",   "readonly": False},
-                        {"name": "TT (Tromboplastin vaqti)", "key": "tt",         "unit": "sek",
+                        {"name": "Trombin vaqti (TT)", "key": "tt",         "unit": "sek",
                          "norma": "11-18",      "readonly": False},
                         {"name": "ACHTV",                    "key": "achtv",      "unit": "sek",
                          "norma": "25-40",      "readonly": False},
@@ -14367,7 +14367,7 @@ Sana: {_sana_fmt}"""
                     {"name": "PT sekundalarda",          "key": "pt_sek",     "unit": "sek", "norma": "13-15",    "readonly": False},
                     {"name": "PT bo'yicha Kviku (%)",    "key": "pt_kviku",   "unit": "%",   "norma": "70-100",   "readonly": False},
                     {"name": "MNO / INR",                "key": "pt_mno",     "unit": "INR", "norma": "0.9-1.15", "readonly": False},
-                    {"name": "TT (Tromboplastin vaqti)", "key": "tt",         "unit": "sek", "norma": "11-18",    "readonly": False},
+                    {"name": "Trombin vaqti (TT)", "key": "tt",         "unit": "sek", "norma": "11-18",    "readonly": False},
                     {"name": "ACHTV",                    "key": "achtv",      "unit": "sek", "norma": "25-40",    "readonly": False},
                     {"name": "Fibrinogen",               "key": "fibrinogen", "unit": "g/l", "norma": "2.0-4.0",  "readonly": False},
                 ]
