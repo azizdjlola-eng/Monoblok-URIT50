@@ -135,85 +135,6 @@ TEST_GROUPS = ['GEM', 'BIO', 'IFA', 'URINE', 'TEST', 'COAG']
 LIPID_PANEL_MEMBER_IDS = {43, 44, 123, 124}   # TC=43, TG=44, LDL=123, HDL=124
 BUYRAK_PANEL_MEMBER_IDS = {42, 41, 35, 50}    # Mochevina=42, Kreatinin=41, Albumin=35, Siydik kislota=50
 
-# ── UZI (vrach qabuli) protokol shablonlari ─────────────────────────────────
-# Test nomida quyidagi kalit so'z topilsa, mos shablon Text widget'ga
-# oldindan to'ldiriladi (vrach kerakli joyini tahrirlaydi). Kalit so'zlar
-# tekshiruv tartibida — birinchi mos kelgani ishlatiladi.
-UZI_PROTOKOL_SHABLONLARI = [
-    ("exokg", "EXOKG (YURAK) PROTOKOLI\n\n"
-        "Chap qorincha (LV): KDO ____ ml, KSO ____ ml, EF (chiqarish fraktsiyasi): ____ %\n"
-        "Devorlar qalinligi: MJP ____ mm, orqa devor ____ mm\n"
-        "Chap bo'lmacha (LA): ____ mm\n"
-        "O'ng qorincha/bo'lmacha: kattalashmagan\n\n"
-        "Klapanlar:\n"
-        "  Mitral klapan: yopilishi to'liq, regurgitatsiya: yo'q / I / II / III daraja\n"
-        "  Aorta klapani: yopilishi to'liq, regurgitatsiya: yo'q / I / II / III daraja, stenoz: yo'q / bor\n"
-        "  Trikuspidal klapan: regurgitatsiya: yo'q / I / II / III daraja\n"
-        "  Pulmonal klapan: o'zgarishsiz\n\n"
-        "Perikard bo'shlig'ida suyuqlik: aniqlanmadi / aniqlandi (____ mm)\n"
-        "Yurak qisqarish ritmi: to'g'ri, YUS: ____ /min"),
-    ("qalqonsimon", "QALQONSIMON BEZ UZI PROTOKOLI\n\n"
-        "O'ng bo'lak: o'lchami ____ x ____ x ____ mm, hajmi: ____ sm3\n"
-        "Chap bo'lak: o'lchami ____ x ____ x ____ mm, hajmi: ____ sm3\n"
-        "Istmus qalinligi: ____ mm\n"
-        "Umumiy hajm: ____ sm3\n\n"
-        "Kontur: tekis      Ekogenligi: normal / diffuz pasaygan / diffuz oshgan\n"
-        "Struktura: bir jinsli / notekis (geterogen)\n"
-        "Tugunlar: yo'q / bor (joylashuvi: ____, o'lchami: ____ mm, ekogenligi: ____, konturi: ____)\n\n"
-        "Mintaqaviy limfa tugunlari: kattalashmagan"),
-    ("kichik tos", "KICHIK TOS A'ZOLARI UZI PROTOKOLI\n\n"
-        "Bachadon: joylashuvi — anteflexio / retroflexio, o'lchami: ____ x ____ x ____ mm\n"
-        "Konturi: tekis      Miometriy: bir jinsli / o'choqli o'zgargan (____)\n"
-        "Endometriy: qalinligi ____ mm, tsikl faziga mos / mos emas\n"
-        "Bachadon bo'shlig'i: deformatsiyasiz\n\n"
-        "O'ng tuxumdon: o'lchami ____ x ____ mm, follikulyar apparat: saqlangan\n"
-        "Kistalar/o'simtalar: yo'q / bor (____)\n\n"
-        "Chap tuxumdon: o'lchami ____ x ____ mm, follikulyar apparat: saqlangan\n"
-        "Kistalar/o'simtalar: yo'q / bor (____)\n\n"
-        "Dominant follikula (follikulometriya uchun): o'ng / chap tuxumdonda, o'lchami ____ mm, "
-        "sikl kuni: ____\n\n"
-        "Erkin suyuqlik retrouterin bo'shliqda: aniqlanmadi / aniqlandi (____ mm)"),
-    ("qorin", "QORIN BO'SHLIG'I A'ZOLARI UZI PROTOKOLI\n\n"
-        "Jigar: o'lchami — o'ng bo'lak: ____ mm, chap bo'lak: ____ mm\n"
-        "Konturi: tekis, qirralari: o'tkir      Parenxima ekogenligi: normal / oshgan / diffuz o'zgargan\n"
-        "Tomirlar: portal vena ____ mm, kengaymagan\n"
-        "O'choqli o'zgarishlar: yo'q / bor (____)\n\n"
-        "O't pufagi: o'lchami: ____ x ____ mm, devori: ____ mm (qalinlashmagan / qalinlashgan)\n"
-        "Bo'shlig'i: bir jinsli / cho'kindili      Konkrementlar: yo'q / bor (____)\n\n"
-        "Taloq: o'lchami: ____ x ____ mm, parenxima bir jinsli, o'choqli o'zgarishsiz\n\n"
-        "Pankreas: bosh ____ mm, tana ____ mm, dum ____ mm\n"
-        "Konturi: tekis, ekogenligi: normal / oshgan\n"
-        "Virsung yo'li: kengaymagan\n\n"
-        "Erkin suyuqlik qorin bo'shlig'ida: aniqlanmadi / aniqlandi (____)"),
-    ("buyrak", "BUYRAK UZI PROTOKOLI\n\n"
-        "O'ng buyrak: joylashuvi — odatiy, o'lchami: ____ x ____ mm\n"
-        "Kontur: tekis / notekis      Harakatchanligi: saqlangan / cheklangan\n"
-        "Parenxima qalinligi: ____ mm      Ekogenligi: normal / oshgan / pasaygan\n"
-        "CHLS (chashka-laxanka sistemasi): kengaymagan / kengaygan (____ mm)\n"
-        "Konkrementlar: yo'q / bor (soni: ____, o'lchami: ____ mm, joylashuvi: ____)\n"
-        "Kistalar/o'simtalar: yo'q / bor (____)\n\n"
-        "Chap buyrak: joylashuvi — odatiy, o'lchami: ____ x ____ mm\n"
-        "Kontur: tekis / notekis      Harakatchanligi: saqlangan / cheklangan\n"
-        "Parenxima qalinligi: ____ mm      Ekogenligi: normal / oshgan / pasaygan\n"
-        "CHLS: kengaymagan / kengaygan (____ mm)\n"
-        "Konkrementlar: yo'q / bor (soni: ____, o'lchami: ____ mm, joylashuvi: ____)\n"
-        "Kistalar/o'simtalar: yo'q / bor (____)\n\n"
-        "Siydik pufagi: shakli odatiy, devori tekis, bo'shlig'i bir jinsli, qoldiq siydik: ____ ml"),
-]
-
-_UZI_GENERIK_SHABLON = ("UZI TEKSHIRUVI PROTOKOLI\n\n"
-    "Tekshirilgan a'zo: ____\n"
-    "Topilmalar: ____\n\n"
-    "Xulosa uchun ma'lumot pastdagi maydonlarda kiritiladi.")
-
-
-def _uzi_shablon_matni(test_name_lower: str) -> str:
-    """Test nomiga qarab mos UZI protokol shablonini qaytaradi."""
-    for kalit, matn in UZI_PROTOKOL_SHABLONLARI:
-        if kalit in test_name_lower:
-            return matn
-    return _UZI_GENERIK_SHABLON
-
 GROUP_NAMES = {
     "GEM": "GEMOTOLOGIK TEKSHIRUVLAR",
     "BIO": "QONNING BIOKIMYOVIY TAHLILI",
@@ -12168,7 +12089,7 @@ Sana: {_sana_fmt}"""
             if not test_data:
                 messagebox.showerror("Xato", f"Test '{test_name}' topilmadi!")
                 return
-            
+
             # Popup yaratish
             popup = tk.Toplevel(self.root)
             popup.title(f"Natija Kiritish")
@@ -12590,7 +12511,7 @@ Sana: {_sana_fmt}"""
                 test_name = test.get('nomi', 'Tahlil')
                 test_data = test
                 break
-        
+
         # Siydik / Umumiy qon: Natija ustuniga bosilganda popup ochish (Natijani ko'rish)
         result_json = self.test_results.get(test_id, '')
         if result_json and isinstance(result_json, str) and result_json.strip().startswith('{'):
@@ -12602,7 +12523,7 @@ Sana: {_sana_fmt}"""
                     return
             except Exception:
                 pass
-        
+
         test_name_lower = test_name.lower()
         
         # Test turini aniqlash (DB so'rovi YO'Q - test_data dan o'qish)
@@ -14284,7 +14205,7 @@ Sana: {_sana_fmt}"""
                 test_name = test.get('nomi', 'Tahlil')
                 test_data = test
                 break
-        
+
         # Maxsus testlarni tekshirish
         test_name_lower = test_name.lower()
         
@@ -14293,9 +14214,9 @@ Sana: {_sana_fmt}"""
             self.show_blood_group_dialog(test_id, test_name, test_data)
             return
 
-        # UZI (vrach qabuli) — protokol + MKB-10 xulosa
+        # UZI (vrach qabuli) — a'zo-guruhlangan protokol + MKB-10 xulosa
         if 'uzi' in test_name_lower or 'узи' in test_name_lower:
-            self.show_uzi_protokol_form(test_id, test_name, test_data)
+            self.show_uzi_protokol_form_v2(test_id, test_name, test_data)
             return
 
         # Maxsus tkinter dialog lar
@@ -15708,24 +15629,64 @@ Sana: {_sana_fmt}"""
             print(f"[OGOHLANTIRISH] MKB-10 ro'yxatini olishda xato: {e}")
             return []
 
-    def show_uzi_protokol_form(self, test_id, test_name, test_data):
-        """UZI tekshiruvi uchun protokol + MKB-10 xulosa kiritish dialogi."""
-        import json
+    def _uzi_component_frame(self, parent, component, old_components, component_vars):
+        """Bitta o'lchov/tanlov maydoni uchun LabelFrame yaratadi (show_template_based_dialog
+        bilan bir xil chizish uslubi: options bo'lsa Combobox, bo'lmasa Entry)."""
+        comp_key = component.get("key")
+        comp_name = component.get("name", comp_key)
+        comp_unit = component.get("unit", "")
+
+        comp_frame = ttk.LabelFrame(parent, text=comp_name, padding=6)
+        comp_frame.pack(fill="x", pady=3, padx=6)
+
+        old_val = old_components.get(comp_key, "") if isinstance(old_components, dict) else ""
+        var = tk.StringVar(value=str(old_val) if old_val is not None else "")
+        component_vars[comp_key] = var
+
+        entry_row = ttk.Frame(comp_frame)
+        entry_row.pack(fill="x")
+
+        comp_options = component.get("options")
+        if comp_options:
+            entry = ttk.Combobox(entry_row, textvariable=var, values=comp_options,
+                                  state="readonly", font=("Arial", 10))
+            entry.pack(side="left", fill="x", expand=True)
+            if not var.get():
+                var.set(comp_options[0])
+        else:
+            entry = ttk.Entry(entry_row, textvariable=var, font=("Arial", 10))
+            entry.pack(side="left", fill="x", expand=True)
+
+        if comp_unit:
+            ttk.Label(entry_row, text=comp_unit, font=("Arial", 9)).pack(side="left", padx=5)
+
+        comp_norma = component.get("norma", "")
+        if comp_norma:
+            ttk.Label(comp_frame, text=f"Norma: {comp_norma}", font=("Arial", 8),
+                      foreground="gray").pack(anchor="w")
+
+    def show_uzi_protokol_form_v2(self, test_id, test_name, test_data):
+        """UZI tekshiruvi uchun a'zo-bo'yicha guruhlangan strukturaviy protokol
+        (har guruh alohida Notebook tabida) + Xulosa + MKB-10.
+        Komponent-ro'yxati tahlillar_norma.result_template dan olinadi — xuddi
+        bilirubin/koagulogramma panellarida ishlatiladigan mexanizm (bu yerda
+        faqat guruhlash/tablarga bo'lish qo'shilgan)."""
         old_result = {}
         existing = self.test_results.get(test_id, '')
         if existing and str(existing).strip().startswith('{'):
             try:
                 old_result = json.loads(str(existing))
-            except:
+            except Exception:
                 old_result = {}
+        old_components = old_result.get('components', {}) if isinstance(old_result, dict) else {}
 
-        test_name_lower = (test_name or '').lower()
-        shablon = _uzi_shablon_matni(test_name_lower)
+        template = self.get_result_template_from_db(test_name)
+        components = template.get('components', []) if template else []
         mkb_list = self.get_mkb10_list()
 
         dialog = tk.Toplevel(self.root)
         dialog.title(f"{test_name} — Protokol")
-        dialog.geometry("720x680")
+        dialog.geometry("720x640")
         dialog.transient(self.root)
         dialog.grab_set()
         dialog.focus_set()
@@ -15733,16 +15694,36 @@ Sana: {_sana_fmt}"""
         tk.Label(dialog, text=test_name.upper(),
                  font=("Times New Roman", 13, "bold"), pady=8).pack()
 
-        # Protokol matni (tayyor shablon + erkin tahrirlash)
-        text_frame = tk.Frame(dialog, padx=10)
-        text_frame.pack(fill="both", expand=True)
-        tk.Label(text_frame, text="Protokol:", font=("Arial", 10, "bold"), anchor="w").pack(fill="x")
-        protokol_text = scrolledtext.ScrolledText(text_frame, wrap="word", font=("Arial", 10),
-                                                    height=16, undo=True)
-        protokol_text.pack(fill="both", expand=True, pady=(2, 8))
-        protokol_text.insert("1.0", old_result.get('protokol') or shablon)
+        component_vars = {}
 
-        # Pastki forma: xulosa + MKB-10
+        if components:
+            nb = ttk.Notebook(dialog)
+            nb.pack(fill="both", expand=True, padx=10, pady=(0, 6))
+            groups = {}
+            for comp in components:
+                guruh = comp.get('guruh') or 'Umumiy'
+                groups.setdefault(guruh, []).append(comp)
+            for guruh, comps in groups.items():
+                tab = ttk.Frame(nb)
+                nb.add(tab, text=guruh)
+                canvas = tk.Canvas(tab, borderwidth=0, highlightthickness=0)
+                vscroll = ttk.Scrollbar(tab, orient="vertical", command=canvas.yview)
+                canvas.configure(yscrollcommand=vscroll.set)
+                vscroll.pack(side="right", fill="y")
+                canvas.pack(side="left", fill="both", expand=True)
+                inner = ttk.Frame(canvas)
+                canvas_window = canvas.create_window((0, 0), window=inner, anchor="nw")
+                inner.bind("<Configure>",
+                           lambda e, c=canvas: c.configure(scrollregion=c.bbox("all")))
+                canvas.bind("<Configure>",
+                            lambda e, c=canvas, w=canvas_window: c.itemconfig(w, width=e.width))
+                for comp in comps:
+                    self._uzi_component_frame(inner, comp, old_components, component_vars)
+        else:
+            ttk.Label(dialog, text="Bu tekshiruv uchun shablon topilmadi — faqat xulosa kiriting.",
+                      foreground="#b71c1c", font=("Arial", 9)).pack(padx=10, pady=(0, 6))
+
+        # Pastki forma: xulosa + MKB-10 (guruh-tablardan tashqarida, doim ko'rinadi)
         bottom_frame = tk.Frame(dialog, padx=10)
         bottom_frame.pack(fill="x")
 
@@ -15771,17 +15752,17 @@ Sana: {_sana_fmt}"""
         btn_frame.pack(fill="x")
 
         def saqlash():
-            protokol_matn = protokol_text.get("1.0", "end").rstrip()
             xulosa = xulosa_var.get().strip()
             mkb = mkb_var.get().strip()
             mkb_kod = mkb.split(" — ", 1)[0].strip() if " — " in mkb else mkb
+            comp_values = {k: v.get().strip() for k, v in component_vars.items()}
 
-            if not protokol_matn and not xulosa:
-                messagebox.showwarning("Ogohlantirish", "Protokol matni yoki xulosa kiritilmagan!")
+            if not any(comp_values.values()) and not xulosa:
+                messagebox.showwarning("Ogohlantirish", "Hech qanday ma'lumot yoki xulosa kiritilmagan!")
                 return
 
             data = {
-                'protokol': protokol_matn,
+                'components': comp_values,
                 'xulosa': xulosa,
                 'mkb': mkb,
                 'mkb_kod': mkb_kod,
@@ -20002,7 +19983,7 @@ def main():
         root.lift()
         root.attributes('-topmost', True)
         root.update()  # Oynani darhol ko'rsatish
-        
+
         try:
             print("   MonoblokApp yaratilmoqda...")
             app = MonoblokApp(root)

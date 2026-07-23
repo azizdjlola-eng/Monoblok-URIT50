@@ -80,9 +80,7 @@ def seed_avto() -> int:
             _ensure_norma_table(conn)     # tahlillar_norma KAFOLATLI mavjud bo'lsin
             n1 = seed_normalar(conn)      # tahlillar_norma (normalar)
             n2 = seed_katalog(conn)       # tahlillar (xizmat katalogi + narxlar)
-            _ensure_mkb10_table(conn)     # mkb10 KAFOLATLI mavjud bo'lsin
-            n3 = seed_mkb10(conn)         # mkb10 (UZI protokol xulosa kodlari)
-            return n1 + n2 + n3
+            return n1 + n2
         finally:
             conn.close()
     except Exception:
@@ -193,82 +191,30 @@ def seed_katalog(conn, faqat_yoq: bool = True) -> int:
             nom = (r.get("nomi") or "").strip()
             if not nom or (faqat_yoq and nom in mavjud):
                 continue
+            # id — MASHINALARARO BIR XIL katalog ID (Natija oynasi natijani tahlil_id
+            # bo'yicha bog'laydi). Seed'da id bo'lsa AYNAN o'sha id bilan qo'shamiz →
+            # har o'rnatishda ALT=39 va h.k. Agar id band bo'lsa (kam ehtimol) id'siz.
+            _sid = r.get("id")
             try:
-                cur.execute(
-                    "INSERT INTO tahlillar(nomi, narxi, sample, turi, soha, aktiv) "
-                    "VALUES(%s,%s,%s,%s,%s,%s)",
-                    (nom, int(r.get("narxi") or 0), r.get("sample"), r.get("turi"),
-                     r.get("soha"), 1 if r.get("aktiv", 1) else 0))
+                if _sid is not None:
+                    cur.execute(
+                        "INSERT INTO tahlillar(id, nomi, narxi, sample, turi, soha, aktiv) "
+                        "VALUES(%s,%s,%s,%s,%s,%s,%s)",
+                        (int(_sid), nom, int(r.get("narxi") or 0), r.get("sample"),
+                         r.get("turi"), r.get("soha"), 1 if r.get("aktiv", 1) else 0))
+                else:
+                    raise ValueError("id yo'q")
             except Exception:
-                cur.execute("INSERT INTO tahlillar(nomi, narxi) VALUES(%s,%s)",
-                            (nom, int(r.get("narxi") or 0)))
+                try:
+                    cur.execute(
+                        "INSERT INTO tahlillar(nomi, narxi, sample, turi, soha, aktiv) "
+                        "VALUES(%s,%s,%s,%s,%s,%s)",
+                        (nom, int(r.get("narxi") or 0), r.get("sample"), r.get("turi"),
+                         r.get("soha"), 1 if r.get("aktiv", 1) else 0))
+                except Exception:
+                    cur.execute("INSERT INTO tahlillar(nomi, narxi) VALUES(%s,%s)",
+                                (nom, int(r.get("narxi") or 0)))
             mavjud.add(nom)
-            qoshildi += 1
-        conn.commit()
-        return qoshildi
-    finally:
-        cur.close()
-
-
-# ─────────────────── MKB-10 (UZI/vrach qabuli protokollari uchun) ───────────
-# `mkb10_seed.json` — boshlang'ich kodlar to'plami (UZI yo'nalishlariga oid).
-# Dastur ichida (kelajakda) qo'shish/tahrirlash mumkin bo'ladi — jadval shu
-# maqsadda alohida saqlanadi (norma_seed.json bilan aralashtirilmaydi).
-
-def _mkb10_json_yol() -> str:
-    if getattr(sys, "frozen", False):
-        base = os.path.dirname(sys.executable)
-        for c in (base, os.path.join(base, "_internal")):
-            p = os.path.join(c, "mkb10_seed.json")
-            if os.path.exists(p):
-                return p
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "mkb10_seed.json")
-
-
-def mkb10_yukla() -> list:
-    try:
-        with open(_mkb10_json_yol(), "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return []
-
-
-def _ensure_mkb10_table(conn):
-    """mkb10 jadvalini yaratadi (agar yo'q bo'lsa)."""
-    try:
-        cur = conn.cursor()
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS mkb10 (
-              id INT AUTO_INCREMENT PRIMARY KEY,
-              kod VARCHAR(10) NOT NULL,
-              nomi VARCHAR(255) NOT NULL,
-              aktiv TINYINT(1) DEFAULT 1,
-              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-              UNIQUE KEY unique_kod (kod)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """)
-        conn.commit(); cur.close()
-    except Exception:
-        pass
-
-
-def seed_mkb10(conn, faqat_yoq: bool = True) -> int:
-    """mkb10 jadvaliga boshlang'ich kodlarni qo'shadi. Idempotent."""
-    rows = mkb10_yukla()
-    if not rows:
-        return 0
-    cur = conn.cursor()
-    try:
-        cur.execute("SELECT kod FROM mkb10")
-        mavjud = set((r[0] or "").strip() for r in cur.fetchall())
-        qoshildi = 0
-        for r in rows:
-            kod = (r.get("kod") or "").strip()
-            nomi = (r.get("nomi") or "").strip()
-            if not kod or not nomi or (faqat_yoq and kod in mavjud):
-                continue
-            cur.execute("INSERT INTO mkb10(kod, nomi) VALUES(%s,%s)", (kod, nomi))
-            mavjud.add(kod)
             qoshildi += 1
         conn.commit()
         return qoshildi
