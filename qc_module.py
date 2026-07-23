@@ -133,6 +133,14 @@ def _ensure_qc_tables_sync():
                 UNIQUE KEY uk_lot (lot_number, analyzer_type, level)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """)
+        # Migratsiya: control_name ustuni (analizatorga qo'yiladigan bemor/kontrol nomi)
+        cursor.execute("""
+            SELECT COUNT(*) FROM information_schema.columns
+            WHERE table_schema = DATABASE() AND table_name = 'qc_lots'
+              AND column_name = 'control_name'
+        """)
+        if cursor.fetchone()[0] == 0:
+            cursor.execute("ALTER TABLE qc_lots ADD COLUMN control_name VARCHAR(100) DEFAULT NULL")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS qc_lot_params (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -344,22 +352,56 @@ def open_qc_window(parent=None):
     desc_var = tk.StringVar()
     ttk.Entry(lot_create_frame, textvariable=desc_var, width=50).grid(row=1, column=1, columnspan=5, padx=5, pady=3, sticky=tk.W)
 
+    ttk.Label(lot_create_frame, text="Kontrol nomi:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=3)
+    control_name_var = tk.StringVar()
+    ttk.Entry(lot_create_frame, textvariable=control_name_var, width=50).grid(row=2, column=1, columnspan=5, padx=5, pady=3, sticky=tk.W)
+    ttk.Label(lot_create_frame, text="(analizatorda qo'yiladigan F.I.SH, mas: human kon norma)",
+              font=("Arial", 8), foreground="#666").grid(row=3, column=1, columnspan=6, sticky=tk.W, padx=5)
+
     # --- Lotlar ro'yxati ---
     lots_list_frame = ttk.LabelFrame(tab_lots, text="Mavjud Lotlar", padding=5)
     lots_list_frame.pack(fill=tk.X, pady=5)
 
-    lots_cols = ("ID", "Lot", "Analizator", "Level", "Muddat", "Izoh", "Yaratilgan")
+    lots_cols = ("ID", "Lot", "Analizator", "Level", "Kontrol nomi", "Muddat", "Izoh", "Yaratilgan")
     lots_tree = ttk.Treeview(lots_list_frame, columns=lots_cols, show="headings", height=5)
     for c in lots_cols:
         lots_tree.heading(c, text=c)
     lots_tree.column("ID", width=40)
-    lots_tree.column("Lot", width=100)
-    lots_tree.column("Analizator", width=100)
-    lots_tree.column("Level", width=80)
-    lots_tree.column("Muddat", width=100)
-    lots_tree.column("Izoh", width=250)
-    lots_tree.column("Yaratilgan", width=150)
+    lots_tree.column("Lot", width=90)
+    lots_tree.column("Analizator", width=95)
+    lots_tree.column("Level", width=70)
+    lots_tree.column("Kontrol nomi", width=150)
+    lots_tree.column("Muddat", width=90)
+    lots_tree.column("Izoh", width=200)
+    lots_tree.column("Yaratilgan", width=140)
     lots_tree.pack(fill=tk.X)
+
+    # Tanlangan lotga kontrol nomini biriktirish (mavjud lotlar uchun)
+    lot_cn_frame = ttk.Frame(lots_list_frame)
+    lot_cn_frame.pack(fill=tk.X, pady=3)
+    ttk.Label(lot_cn_frame, text="Tanlangan lot kontrol nomi:").pack(side=tk.LEFT, padx=5)
+    edit_cn_var = tk.StringVar()
+    ttk.Entry(lot_cn_frame, textvariable=edit_cn_var, width=40).pack(side=tk.LEFT, padx=5)
+
+    def save_control_name():
+        sel = lots_tree.selection()
+        if not sel:
+            messagebox.showwarning("Diqqat", "Avval lotni tanlang!", parent=win)
+            return
+        lid = lots_tree.item(sel[0], 'values')[0]
+        newcn = edit_cn_var.get().strip() or None
+        def _s():
+            conn = _db_conn()
+            if not conn:
+                return
+            try:
+                cur = conn.cursor()
+                cur.execute("UPDATE qc_lots SET control_name=%s WHERE id=%s", (newcn, lid))
+                conn.commit()
+            finally:
+                conn.close()
+        _run_in_bg(_s, lambda _: load_lots())
+    ttk.Button(lot_cn_frame, text="Kontrol nomini saqlash", command=save_control_name).pack(side=tk.LEFT, padx=5)
 
     def load_lots():
         def _fetch():
@@ -380,7 +422,8 @@ def open_qc_window(parent=None):
             for r in rows:
                 lots_tree.insert('', tk.END, values=(
                     r['id'], r['lot_number'], r['analyzer_type'],
-                    r['level'], r.get('expiry_date', ''),
+                    r['level'], r.get('control_name', '') or '',
+                    r.get('expiry_date', ''),
                     r.get('description', '') or '', r['created_at']
                 ))
         _run_in_bg(_fetch, _update)
@@ -445,6 +488,7 @@ def open_qc_window(parent=None):
         if sel:
             vals = lots_tree.item(sel[0], 'values')
             load_params(vals[0])
+            edit_cn_var.set(vals[4] if len(vals) > 4 else '')
     lots_tree.bind("<<TreeviewSelect>>", on_lot_select)
 
     # --- Target/SD kiritish ---
@@ -486,6 +530,41 @@ def open_qc_window(parent=None):
         _run_in_bg(_save, _done)
 
     ttk.Button(param_edit_frame, text="Saqlash", command=save_param_values).pack(side=tk.LEFT, padx=10)
+
+    def compute_target_sd():
+        """Tanlangan parametr uchun to'plangan o'lchovlardan o'rtacha va SD ni hisoblab,
+        Target/1SD maydonlariga qo'yadi (foydalanuvchi 'Saqlash' bilan tasdiqlaydi)."""
+        sel = params_tree.selection()
+        if not sel:
+            messagebox.showwarning("Diqqat", "Parametrni tanlang!", parent=win)
+            return
+        pid = params_tree.item(sel[0], 'values')[0]
+        def _f():
+            conn = _db_conn()
+            if not conn:
+                return None
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT measured_value FROM qc_results WHERE lot_param_id=%s", (pid,))
+                return [float(r[0]) for r in cur.fetchall()]
+            finally:
+                conn.close()
+        def _u(vals):
+            if not vals or len(vals) < 2:
+                messagebox.showinfo("Ma'lumot", "Hisoblash uchun kamida 2 ta o'lchov kerak.\n"
+                                    "Avval 'Analizatordan Yuklash' bilan natijalarni yuklang.", parent=win)
+                return
+            m = sum(vals) / len(vals)
+            sd = math.sqrt(sum((v - m) ** 2 for v in vals) / (len(vals) - 1))
+            target_entry_var.set(str(round(m, 3)))
+            sd_entry_var.set(str(round(sd, 3)))
+            messagebox.showinfo("Hisoblandi",
+                                f"{len(vals)} ta o'lchovdan:\n"
+                                f"O'rtacha (Target) = {round(m, 3)}\n"
+                                f"SD = {round(sd, 3)}\n\n"
+                                f"Qiymatlar maydonlarga qo'yildi. 'Saqlash' bilan tasdiqlang.", parent=win)
+        _run_in_bg(_f, _u)
+    ttk.Button(param_edit_frame, text="O'lchovlardan hisoblash", command=compute_target_sd).pack(side=tk.LEFT, padx=5)
 
     def on_param_select(event):
         sel = params_tree.selection()
@@ -548,6 +627,7 @@ def open_qc_window(parent=None):
         lvl = level_var.get()
         exp = expiry_var.get().strip() or None
         desc = desc_var.get().strip() or None
+        cname = control_name_var.get().strip() or None
         if not lot_num:
             messagebox.showwarning("Diqqat", "Lot raqamini kiriting!", parent=win)
             return
@@ -557,8 +637,8 @@ def open_qc_window(parent=None):
                 return 'no_conn'
             try:
                 cursor = conn.cursor()
-                cursor.execute("INSERT INTO qc_lots (lot_number, analyzer_type, level, expiry_date, description) VALUES (%s,%s,%s,%s,%s)",
-                               (lot_num, a_type, lvl, exp, desc))
+                cursor.execute("INSERT INTO qc_lots (lot_number, analyzer_type, level, expiry_date, description, control_name) VALUES (%s,%s,%s,%s,%s,%s)",
+                               (lot_num, a_type, lvl, exp, desc, cname))
                 lot_id = cursor.lastrowid
                 if a_type == 'hematology':
                     for pn, pu in HEMATOLOGY_PARAMS:
@@ -582,6 +662,7 @@ def open_qc_window(parent=None):
                 lot_number_var.set("")
                 expiry_var.set("")
                 desc_var.set("")
+                control_name_var.set("")
             elif res == 'duplicate':
                 messagebox.showwarning("Xato", f"Lot '{lot_num}' ({a_type}, {lvl}) allaqachon mavjud!", parent=win)
             elif res and res != 'no_conn':
@@ -850,7 +931,14 @@ def open_qc_window(parent=None):
             if lot_info['analyzer_type'] == 'hematology':
                 _import_hematology_qc(lot_id, lot_info['lot_number'], win)
             else:
-                _import_biochemistry_qc(lot_id, lot_info['lot_number'], win)
+                cname = lot_info.get('control_name')
+                if cname and cname.strip():
+                    # Kontrol nomi bo'yicha (analizatorga bemor nomi bilan qo'yilgan)
+                    _import_biochemistry_qc_by_name(lot_id, lot_info['lot_number'],
+                                                    cname, win, refresh_cb=update_param_info)
+                else:
+                    # Eski usul: sample_id (barkod) == lot raqami
+                    _import_biochemistry_qc(lot_id, lot_info['lot_number'], win)
 
         _run_in_bg(_do, _then)
 
@@ -1248,6 +1336,145 @@ def _import_biochemistry_qc(lot_id, lot_number, parent_win):
         elif res and res.startswith('ok:'):
             parts = res.split(':')
             messagebox.showinfo("Tayyor", f"BK-280 dan {parts[1]} ta QC natija yuklandi.\nFayl: {parts[2]}", parent=parent_win)
+    _run_in_bg(_do, _done)
+
+
+# ══════════════════════════════════════════════════════════════════
+# BIOXIMIYA QC IMPORT — KONTROL NOMI BO'YICHA (human kon norma/patologiya)
+# ══════════════════════════════════════════════════════════════════
+def _import_biochemistry_qc_by_name(lot_id, lot_number, control_name, parent_win, refresh_cb=None):
+    """
+    BK-280 RAW fayllardan kontrolni ANALIZATOR BEMOR NOMI bo'yicha topib QC ga yuklaydi.
+    Kontrollar analizatorga barkodsiz, faqat F.I.SH bilan qo'yiladi (mas: "human kon norma"),
+    shuning uchun sample_id emas, PID ismi bo'yicha qidiriladi.
+    Har bir o'lchov o'z sana-vaqti bilan saqlanadi (tarixiy backfill), takroriy import da
+    (lot_param + measured_at) bo'yicha dublikatlar o'tkazib yuboriladi.
+    """
+    cname = (control_name or '').strip().lower()
+
+    def _do():
+        if not cname:
+            return ('err', "Bu lotga kontrol nomi biriktirilmagan")
+        try:
+            import biochemistry_window as bw
+            try:
+                bw.load_db_names()  # LIS_CODE_MAP ni DB dagi haqiqiy nomlar bilan yangilash
+            except Exception:
+                pass
+        except Exception as e:
+            return ('err', f"biochemistry_window yuklanmadi: {e}")
+
+        # Barcha RAW fayllarni to'g'ridan-to'g'ri yig'amiz (load_raw_files 1000 ta bilan cheklaydi,
+        # to'liq tarix backfill uchun bu cheklovni aylanib o'tamiz)
+        import glob as _glob
+        files = []
+        for _root in getattr(bw, 'BK280_RAW_PATHS', []):
+            if _root and os.path.exists(_root):
+                files += _glob.glob(os.path.join(_root, "**", "*.txt"), recursive=True)
+                files += _glob.glob(os.path.join(_root, "*.txt"))
+        files = list(dict.fromkeys(files))  # dublikat yo'llarni olib tashlash
+        if not files:
+            return ('no_files', None)
+        files.sort(key=os.path.getmtime)  # eski→yangi
+
+        runs = []  # [(measured_at, {db_param_name: value})]
+        for fp in files:
+            try:
+                parsed = bw.parse_hl7_file(fp)
+            except Exception:
+                continue
+            for _key, info in parsed.items():
+                nm = (info.get('name') or '').replace('^', ' ').strip().lower()
+                if not nm or cname not in nm:
+                    continue
+                try:
+                    dt = datetime.strptime(info['time'], "%d.%m.%Y %H:%M")
+                except Exception:
+                    dt = datetime.fromtimestamp(os.path.getmtime(fp)).replace(second=0, microsecond=0)
+                pvals = {}
+                for _code, td in (info.get('tests') or {}).items():
+                    dnm = (td.get('name') or '').strip()
+                    raw_v = td.get('value')
+                    if not dnm or raw_v in (None, ''):
+                        continue
+                    try:
+                        pvals[dnm] = float(str(raw_v).replace(',', '.'))
+                    except (ValueError, TypeError):
+                        continue
+                if pvals:
+                    runs.append((dt, pvals))
+
+        if not runs:
+            return ('not_found', None)
+
+        conn = _db_conn()
+        if not conn:
+            return ('err', "DB ulanmadi")
+        imported = 0
+        skipped = 0
+        try:
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SELECT id, parameter_name, target_value, sd_value FROM qc_lot_params WHERE lot_id=%s", (lot_id,))
+            pm = {}  # UPPER(param_name) → (id, target, sd)
+            for r in cursor.fetchall():
+                pm[r['parameter_name'].upper()] = (r['id'], float(r['target_value'] or 0), float(r['sd_value'] or 0))
+
+            for dt, pvals in runs:
+                for dnm, val in pvals.items():
+                    key = dnm.upper()
+                    match = pm.get(key)
+                    if not match:
+                        for pk in pm:
+                            if len(key) >= 3 and (key in pk or pk in key):
+                                match = pm[pk]
+                                break
+                    if not match:
+                        continue
+                    pid, tgt, sdd = match
+                    # Dublikat tekshiruvi: shu param + shu vaqt allaqachon bormi?
+                    cursor.execute(
+                        "SELECT id FROM qc_results WHERE lot_param_id=%s AND measured_at=%s AND source='BK-280' LIMIT 1",
+                        (pid, dt))
+                    if cursor.fetchone():
+                        skipped += 1
+                        continue
+                    cursor.execute("SELECT measured_value FROM qc_results WHERE lot_param_id=%s ORDER BY measured_at", (pid,))
+                    prev = [float(x['measured_value']) for x in cursor.fetchall()]
+                    prev.append(val)
+                    st, rl = evaluate_westgard(prev, tgt, sdd) if tgt > 0 and sdd > 0 else ('in_control', '')
+                    cursor.execute(
+                        "INSERT INTO qc_results (lot_param_id, measured_value, measured_at, source, westgard_status, note) "
+                        "VALUES (%s,%s,%s,'BK-280',%s,%s)",
+                        (pid, val, dt, st, rl or None))
+                    imported += 1
+            conn.commit()
+            return ('ok', (imported, skipped, len(runs)))
+        finally:
+            conn.close()
+
+    def _done(res):
+        tag, data = res if isinstance(res, tuple) else ('err', res)
+        if tag == 'err':
+            messagebox.showerror("Xato", str(data), parent=parent_win)
+        elif tag == 'no_files':
+            messagebox.showinfo("Ma'lumot", "BK-280 RAW fayllari topilmadi.", parent=parent_win)
+        elif tag == 'not_found':
+            messagebox.showinfo("Topilmadi",
+                                f"'{control_name}' nomli kontrol RAW fayllarda topilmadi.\n"
+                                f"Analizatorda qo'yilgan F.I.SH bilan aynan mos kelishini tekshiring.",
+                                parent=parent_win)
+        elif tag == 'ok':
+            imp, skp, nruns = data
+            messagebox.showinfo("Tayyor",
+                                f"'{control_name}' — {nruns} ta o'lchov topildi.\n"
+                                f"Yangi qo'shildi: {imp}\n"
+                                f"Oldin mavjud (o'tkazildi): {skp}",
+                                parent=parent_win)
+            if refresh_cb:
+                try:
+                    refresh_cb()
+                except Exception:
+                    pass
     _run_in_bg(_do, _done)
 
 

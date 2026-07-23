@@ -9,7 +9,7 @@
       "high": 20.0
     },
     "RBC": {
-      "low": 2.0,
+      "low": 2.5,
       "high": 6.0
     },
     "HGB": {
@@ -19,16 +19,7 @@
     "PLT": {
       "low": 100.0,
       "high": 600.0
-    },
-    "hard_low": {
-      "RBC": 1.0,
-      "HGB": 30.0
-    },
-    "hb_rbc_ratio": {
-      "min": 25.0,
-      "max": 37.0
-    },
-    "multi_low_count": 2
+    }
   },
   "biochemistry": {
     "tests": [
