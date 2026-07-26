@@ -83,6 +83,15 @@ DEFAULT_CONFIG = {
         "lis_port": 8088,                  # LIS so'rov (barcode -> bemor) porti
         "encoding": "utf-8",
     },
+
+    # Pechat (chop etish) sozlamalari
+    "printer": {
+        # Natija blankasi AVTO-pechati uchun printer nomi.
+        # "" (bo'sh) = Windows'ning standart (asosiy) printeri ishlatiladi.
+        # Aniq nom yozilsa (masalan "\\LABSERVER\EPSON L8050 kassa") —
+        # natija blankalari doim shu printerdan chiqadi.
+        "blanka_printer": "",
+    },
 }
 
 

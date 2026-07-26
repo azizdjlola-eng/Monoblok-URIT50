@@ -1,6 +1,6 @@
 {
   "database": {
-    "host": "192.168.13.42",
+    "host": "192.168.0.40",
     "user": "lims",
     "password": "azizmed2026",
     "database": "lab_tizim",
@@ -35,5 +35,8 @@
     "port": 8087,
     "lis_port": 8088,
     "encoding": "utf-8"
+  },
+  "printer": {
+    "blanka_printer": "EPSON L8050 Series"
   }
 }

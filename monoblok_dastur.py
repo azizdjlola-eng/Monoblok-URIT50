@@ -308,6 +308,45 @@ def save_blanka_config(config: dict = None):
     # Saqlashdan keyin global blanka ranglarini yangilash
     refresh_blanka_colors()
 
+
+def get_blanka_printer():
+    """Natija blankasi AVTO-pechati uchun ishlatiladigan printer nomini qaytaradi.
+
+    Sozlamalarda (Tizim Sozlamalari → 🖨 Printer) aniq printer tanlangan bo'lsa —
+    o'shani qaytaradi. Tanlanmagan bo'lsa yoki tanlangan printer topilmasa —
+    Windows'ning standart (asosiy) printeriga o'tadi. Bu tufayli hamshira
+    printerni faqat sozlamalardan almashtiradi, kompyuterga tegmasdan."""
+    default_printer = None
+    try:
+        import win32print
+        default_printer = win32print.GetDefaultPrinter()
+    except Exception:
+        pass
+
+    try:
+        cfg = load_config()
+        name = ((cfg.get("printer", {}) or {}).get("blanka_printer", "") or "").strip()
+    except Exception:
+        name = ""
+
+    if not name:
+        return default_printer
+
+    # Tanlangan printer haqiqatan mavjudmi? Yo'q bo'lsa (masalan tarmoq printeri
+    # o'chgan) — standart printerga qaytamiz, chop etish umuman to'xtab qolmasin.
+    try:
+        import win32print
+        flags = win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS
+        names = {p[2] for p in win32print.EnumPrinters(flags)}
+        if name in names:
+            return name
+        print(f"[OGOHLANTIRISH] Tanlangan printer topilmadi: '{name}' — "
+              f"standart printerga ({default_printer}) o'tildi.")
+        return default_printer
+    except Exception:
+        # Tekshirib bo'lmasa — baribir tanlangan nomni ishonib qaytaramiz
+        return name
+
 # ----------------------------------------------------------------------------
 # BLANKA RANGLARI — config dan yuklanadigan markaziy ranglar (printer siyoh
 # balansi uchun sozlanadi). Bu ranglar kod bo'ylab qattiq yozilgan emas — bir
@@ -17816,6 +17855,101 @@ Sana: {_sana_fmt}"""
         ttk.Button(tab_b, text="Port holatini tekshirish", command=test_tcp_server).grid(
             row=7, column=0, columnspan=2, pady=12)
 
+        # ───────────────────────── PRINTER (avto-pechat) ─────────────────
+        tab_p = ttk.Frame(nb)
+        nb.add(tab_p, text="🖨 Printer")
+
+        # Kompyuterga ulangan barcha printerlar (lokal + tarmoq)
+        _printer_list = []
+        _sys_default = ""
+        try:
+            import win32print as _wp
+            _flags = _wp.PRINTER_ENUM_LOCAL | _wp.PRINTER_ENUM_CONNECTIONS
+            _printer_list = sorted({p[2] for p in _wp.EnumPrinters(_flags)})
+            _sys_default = _wp.GetDefaultPrinter()
+        except Exception as _pe:
+            print(f"[OGOHLANTIRISH] Printerlar ro'yxatini olishda xato: {_pe}")
+
+        PRINTER_DEFAULT_LABEL = "— Windows standart printeri —"
+        _printer_options = [PRINTER_DEFAULT_LABEL] + _printer_list
+
+        ttk.Label(tab_p, text="Natija blankasi avtomatik chop etiladigan printer:",
+                  font=("Arial", 10, "bold")).grid(
+            row=0, column=0, columnspan=2, sticky=tk.W, padx=8, pady=(14, 2))
+
+        _cur_printer = ((cfg.get("printer", {}) or {}).get("blanka_printer", "") or "").strip()
+        _blanka_pv = tk.StringVar(
+            value=(_cur_printer if _cur_printer in _printer_list else
+                   (_cur_printer if _cur_printer else PRINTER_DEFAULT_LABEL)))
+        _blanka_combo = ttk.Combobox(tab_p, textvariable=_blanka_pv,
+                                     values=_printer_options, width=48, state="readonly")
+        _blanka_combo.grid(row=1, column=0, columnspan=2, sticky=tk.W, padx=8, pady=4)
+        vars_map[("printer", "blanka_printer")] = _blanka_pv
+
+        ttk.Label(tab_p, text=f"🖨 Hozirgi Windows standart printeri: {_sys_default or '—'}",
+                  foreground="#1f8a4c").grid(
+            row=2, column=0, columnspan=2, sticky=tk.W, padx=8, pady=(2, 4))
+
+        def _printer_refresh():
+            try:
+                import win32print as _wp2
+                _fl = _wp2.PRINTER_ENUM_LOCAL | _wp2.PRINTER_ENUM_CONNECTIONS
+                names = sorted({p[2] for p in _wp2.EnumPrinters(_fl)})
+                _blanka_combo["values"] = [PRINTER_DEFAULT_LABEL] + names
+                messagebox.showinfo("Printer", "Printerlar ro'yxati yangilandi.", parent=dialog)
+            except Exception as e:
+                messagebox.showerror("Printer", f"Ro'yxatni yangilab bo'lmadi:\n{e}", parent=dialog)
+
+        def _printer_test():
+            target = _blanka_pv.get()
+            if target == PRINTER_DEFAULT_LABEL:
+                target = _sys_default
+            if not target:
+                messagebox.showwarning("Printer", "Printer tanlanmagan.", parent=dialog)
+                return
+            # win32ui GDI orqali AYNAN tanlangan printerga yuboramiz.
+            # (ShellExecute "print" verbi /d parametrini e'tiborsiz qoldirib,
+            #  har doim standart printerga chiqarardi — shuning uchun ishlatmaymiz.)
+            try:
+                import win32ui
+                hDC = win32ui.CreateDC()
+                hDC.CreatePrinterDC(target)
+                hDC.StartDoc("AzizMedLine — Printer sinovi")
+                hDC.StartPage()
+                hDC.TextOut(300, 300, "AzizMedLine — Printer sinovi")
+                hDC.TextOut(300, 500, f"Printer: {target}")
+                hDC.TextOut(300, 700, "Agar bu sahifa SHU printerdan chiqsa — sozlama to'g'ri.")
+                hDC.EndPage()
+                hDC.EndDoc()
+                hDC.DeleteDC()
+                messagebox.showinfo(
+                    "Printer",
+                    f"Sinov sahifasi yuborildi:\n{target}\n\n"
+                    "ℹ Doimiy o'rnatish uchun pastdagi «Saqlash» tugmasini bosing.",
+                    parent=dialog)
+            except Exception as e:
+                messagebox.showerror(
+                    "Printer",
+                    f"«{target}» printeriga sinov chop etilmadi:\n{e}\n\n"
+                    "Printer o'chiq yoki ulanmagan bo'lishi mumkin.", parent=dialog)
+
+        _p_btns = ttk.Frame(tab_p)
+        _p_btns.grid(row=3, column=0, columnspan=2, sticky=tk.W, padx=8, pady=(4, 8))
+        ttk.Button(_p_btns, text="↻ Ro'yxatni yangilash",
+                   command=_printer_refresh).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(_p_btns, text="🖨 Sinov sahifasini chiqarish",
+                   command=_printer_test).pack(side=tk.LEFT)
+
+        ttk.Label(
+            tab_p,
+            text="• «Windows standart printeri» — dastur kompyuterning asosiy printeriga chiqaradi.\n"
+                 "• Aniq printer tanlansa (masalan tarmoqdagi Epson L8050 yoki oq-qora printer) —\n"
+                 "  natija blankalari doim shu printerdan chiqadi.\n"
+                 "• Tarmoq printeri ro'yxatda ko'rinmasa: avval Windows «Устройства и принтеры»\n"
+                 "  orqali ulang, so'ng «Ro'yxatni yangilash» tugmasini bosing.",
+            foreground="#555", justify=tk.LEFT, wraplength=580).grid(
+            row=4, column=0, columnspan=2, sticky=tk.W, padx=8, pady=(4, 8))
+
         # ───────────────────────── LITSENZIYA ───────────────────────────
         tab_lic = ttk.Frame(nb)
         nb.add(tab_lic, text="🔑 Litsenziya")
@@ -17939,6 +18073,13 @@ Sana: {_sana_fmt}"""
             except ValueError as e:
                 messagebox.showerror("Xato", f"Raqamli maydon noto'g'ri: {e}", parent=dialog)
                 return
+
+            # Printer: sentinel yorlig'i -> "" (Windows standart printeri)
+            try:
+                if new_cfg.get("printer", {}).get("blanka_printer", "") == PRINTER_DEFAULT_LABEL:
+                    new_cfg["printer"]["blanka_printer"] = ""
+            except Exception:
+                pass
 
             if save_config(new_cfg):
                 # Bazani jonli yangilash uchun pool ulanishini tiklaymiz
@@ -18498,14 +18639,21 @@ Sana: {_sana_fmt}"""
             printer_name = None
             printed_ok = False
 
+            # Sozlamalarda tanlangan printer (yo'q bo'lsa — Windows standart printeri)
+            printer_name = get_blanka_printer()
+
             # 1-usul: win32com orqali Word ni ko'rinmas rejimda ishlatish (eng ishonchli)
             try:
                 import win32com.client
-                import win32print
-                printer_name = win32print.GetDefaultPrinter()
                 word_app = win32com.client.DispatchEx("Word.Application")
                 word_app.Visible = False
                 word_app.DisplayAlerts = False
+                # Tanlangan printerga yo'naltiramiz (tanlanmagan bo'lsa standart qoladi)
+                if printer_name:
+                    try:
+                        word_app.ActivePrinter = printer_name
+                    except Exception as _ap_err:
+                        print(f"[OGOHLANTIRISH] ActivePrinter o'rnatilmadi ({printer_name}): {_ap_err}")
                 doc = word_app.Documents.Open(abs_path)
                 doc.PrintOut(Background=False)
                 doc.Close(SaveChanges=False)
@@ -18526,8 +18674,9 @@ Sana: {_sana_fmt}"""
             if not printed_ok:
                 try:
                     import win32api
-                    import win32print
-                    printer_name = win32print.GetDefaultPrinter()
+                    if not printer_name:
+                        import win32print
+                        printer_name = win32print.GetDefaultPrinter()
                     win32api.ShellExecute(0, "print", abs_path, f'/d:"{printer_name}"', ".", 0)
                     printed_ok = True
                     print(f"[OK] Blanka chop etishga yuborildi (ShellExecute): {printer_name}")
@@ -19945,8 +20094,10 @@ class NatijaKiritish:
             if output_path:
                 try:
                     import win32api
-                    import win32print
-                    printer = win32print.GetDefaultPrinter()
+                    printer = get_blanka_printer()
+                    if not printer:
+                        import win32print
+                        printer = win32print.GetDefaultPrinter()
                     win32api.ShellExecute(0, "print", output_path, f'/d:"{printer}"', ".", 0)
                     messagebox.showinfo("Muvaffaqiyat", f"Chop etilmoqda...\n{printer}")
                 except ImportError:
