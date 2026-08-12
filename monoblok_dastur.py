@@ -118,6 +118,22 @@ except ImportError as e:
     QC_AVAILABLE = False
     _open_qc_window = None
 
+# Natija kiritish xatoligini aniqlash (format + lineynost chegarasi).
+# Chegaralar `result_limits.json` da (yoki result_validator.py -> DEFAULT_CONFIG da).
+try:
+    import result_validator
+except ImportError as e:
+    print(f"[OGOHLANTIRISH] result_validator import qilinmadi: {e}")
+    result_validator = None
+
+# Delta-check (oldingi natija bilan solishtirish) + kritik qiymat (panic value).
+# Sozlamalar `lab_quality.json` da.
+try:
+    import lab_quality
+except ImportError as e:
+    print(f"[OGOHLANTIRISH] lab_quality import qilinmadi: {e}")
+    lab_quality = None
+
 # Database sozlamalari + markaziy konfiguratsiya (analizator ulanishlari)
 from monoblok_db_config import DB_CONFIG, load_config, save_config, get_analyzer
 
@@ -859,6 +875,94 @@ def _get_norma_bold_hints(norma_text: str, jins: str = "", yosh=None, emizikli: 
     return list(dict.fromkeys(hints))
 
 
+# ══════════════════════════════════════════════════════════════════════════
+#  NORMANI KATALOG ID GA BOG'LASH  (tahlillar_norma.tahlil_id)
+#
+#  Muammo: norma faqat NOM bo'yicha topilardi. Nomi bir-biri bilan
+#  boshlanadigan tahlillarda (masalan ekspress "Troponin T" va miqdoriy
+#  "Troponin I miqdoriy ИФА") qisqa nomli testning normasi ("Manfiy (-)")
+#  miqdoriy testga tortilib ketardi.
+#
+#  Yechim: har bir norma qatori `tahlillar.id` ga bog'lanadi va qidiruv
+#  AVVAL ID bo'yicha boradi. Nom bo'yicha taxminiy (prefiks) qidiruv endi
+#  faqat tahlil_id umuman noma'lum bo'lganda ishlaydi.
+# ══════════════════════════════════════════════════════════════════════════
+_NORMA_TAHLIL_ID_HOLATI = {"tekshirildi": False, "bor": False}
+
+
+def ensure_norma_tahlil_id(conn=None, verbose=True):
+    """
+    `tahlillar_norma` da `tahlil_id` ustunini yaratadi va nom bo'yicha
+    bir ma'noli mos keladigan qatorlarni katalog ID ga bog'laydi.
+    Idempotent — har ishga tushganda xavfsiz chaqirilaveradi.
+
+    Returns: True — ustun mavjud (yoki yaratildi), False — yo'q/xato.
+    """
+    if _NORMA_TAHLIL_ID_HOLATI["tekshirildi"]:
+        return _NORMA_TAHLIL_ID_HOLATI["bor"]
+
+    _own_conn = False
+    if conn is None:
+        conn = db_conn()
+        _own_conn = False   # db_conn() global ulanish — yopmaymiz
+    if not conn:
+        return False
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT COUNT(*) FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'tahlillar_norma'
+              AND COLUMN_NAME = 'tahlil_id'
+        """)
+        _row = cursor.fetchone()
+        _bor = bool(_row and _row[0])
+
+        if not _bor:
+            cursor.execute(
+                "ALTER TABLE tahlillar_norma "
+                "ADD COLUMN tahlil_id INT NULL DEFAULT NULL AFTER id, "
+                "ADD INDEX idx_norma_tahlil_id (tahlil_id)"
+            )
+            conn.commit()
+            _bor = True
+            if verbose:
+                print("[YANGILANDI] tahlillar_norma.tahlil_id ustuni qo'shildi")
+
+        # Bo'sh (NULL) qatorlarni nom bo'yicha bog'lash — faqat katalogda
+        # nomi TAKRORLANMAYDIGAN tahlillar (chalkashmasligi uchun)
+        cursor.execute("""
+            UPDATE tahlillar_norma n
+            JOIN (
+                SELECT nomi, MIN(id) AS id
+                FROM tahlillar
+                GROUP BY nomi
+                HAVING COUNT(*) = 1
+            ) t ON t.nomi = n.tahlil_nomi
+            SET n.tahlil_id = t.id
+            WHERE n.tahlil_id IS NULL
+        """)
+        _n = cursor.rowcount
+        conn.commit()
+        cursor.close()
+        if verbose and _n:
+            print(f"[YANGILANDI] {_n} ta norma katalog ID ga bog'landi")
+
+        _NORMA_TAHLIL_ID_HOLATI.update({"tekshirildi": True, "bor": _bor})
+        return _bor
+    except Exception as e:
+        print(f"[OGOHLANTIRISH] tahlillar_norma.tahlil_id tayyorlashda xato: {e}")
+        _NORMA_TAHLIL_ID_HOLATI.update({"tekshirildi": True, "bor": False})
+        return False
+    finally:
+        if _own_conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
 def get_test_norma(test_name: str, jins: str = "", guruh: str = "", yosh: int = None, norma_from_window: str = None, unit_from_window: str = None, tahlil_id: int = None, emizikli: int = 0, cycle_note: str = "", menopauza: int = 0, homiladorlik_hafta=None):
     """
     Norma olish: tahlil_id bo'lsa DB birinchi (har doim); yo'q bo'lsa oynadan, so'ng DB.
@@ -907,27 +1011,49 @@ def get_test_norma(test_name: str, jins: str = "", guruh: str = "", yosh: int = 
             if not db_name:
                 db_name = test_name_clean
             result = None
-            if guruh and db_name:
+            _id_ustuni = ensure_norma_tahlil_id(conn, verbose=False)
+
+            # 0) ENG ANIQ YO'L — katalog ID bo'yicha (tahlillar_norma.tahlil_id).
+            #    Nomi bir-biriga o'xshash tahlillar chalkashmasligi uchun shu birinchi.
+            if tahlil_id and _id_ustuni:
+                cursor.execute(
+                    "SELECT * FROM tahlillar_norma WHERE tahlil_id = %s LIMIT 1",
+                    (tahlil_id,))
+                result = cursor.fetchone()
+            if not result and guruh and db_name:
                 cursor.execute("SELECT * FROM tahlillar_norma WHERE guruh = %s AND tahlil_nomi = %s", (guruh, db_name))
                 result = cursor.fetchone()
             if not result and db_name:
                 cursor.execute("SELECT * FROM tahlillar_norma WHERE tahlil_nomi = %s", (db_name,))
                 result = cursor.fetchone()
+
             # Nom variantini qidirish — order nomi DB nomidan qisqargan bo'lishi mumkin.
-            # Masalan order_items da 'Askarida IgG IFA' (tahlil_id=NULL) saqlangan, lekin
-            # tahlillar_norma da 'Askarida IgG IFA ИФА' bo'lishi mumkin. Bu blok faqat aniq
-            # moslik topilmaganda ishlaydi, shuning uchun mavjud xatti-harakatga ta'sir qilmaydi.
+            # Masalan order_items da 'Askarida IgG IFA' saqlangan, lekin
+            # tahlillar_norma da 'Askarida IgG IFA ИФА' bo'lishi mumkin.
+            #
+            # DIQQAT: bu TAXMINIY qidiruv BOSHQA tahlilga biriktirilgan norma
+            # qatorini OLA OLMAYDI. Aks holda ekspress "Troponin T" normasi
+            # ("Manfiy (-)") miqdoriy "Troponin I miqdoriy ИФА" ga tortilib
+            # ketardi. Biriktirilmagan (tahlil_id IS NULL) alias qatorlar —
+            # 'ALT', 'Xolesterin' kabi qisqa nomlar — avvalgidek ishlaydi.
+            _band_filtr, _band_args = "", ()
+            if tahlil_id and _id_ustuni:
+                _band_filtr = " AND (tahlil_id IS NULL OR tahlil_id = %s)"
+                _band_args = (tahlil_id,)
+
             if not result and db_name:
                 # 1) DB nomi order nomi bilan boshlanadi (order nomi qisqaroq) — eng qisqa moslik
                 cursor.execute(
-                    "SELECT * FROM tahlillar_norma WHERE tahlil_nomi LIKE %s ORDER BY CHAR_LENGTH(tahlil_nomi) LIMIT 1",
-                    (db_name + '%',))
+                    "SELECT * FROM tahlillar_norma WHERE tahlil_nomi LIKE %s" + _band_filtr +
+                    " ORDER BY CHAR_LENGTH(tahlil_nomi) LIMIT 1",
+                    (db_name + '%',) + _band_args)
                 result = cursor.fetchone()
             if not result and db_name:
                 # 2) order nomi DB nomi bilan boshlanadi (order nomi uzunroq) — eng uzun moslik
                 cursor.execute(
-                    "SELECT * FROM tahlillar_norma WHERE %s LIKE CONCAT(tahlil_nomi, '%%') ORDER BY CHAR_LENGTH(tahlil_nomi) DESC LIMIT 1",
-                    (db_name,))
+                    "SELECT * FROM tahlillar_norma WHERE %s LIKE CONCAT(tahlil_nomi, '%%')" + _band_filtr +
+                    " ORDER BY CHAR_LENGTH(tahlil_nomi) DESC LIMIT 1",
+                    (db_name,) + _band_args)
                 result = cursor.fetchone()
             cursor.close()
             # conn.close() QILMAYMIZ - bu global db_conn() ulanishi
@@ -2411,7 +2537,11 @@ def _set_cell_margins(cell, top=0, bottom=0, left=0, right=0):
 
 def _format_result_value(raw_value):
     """JSON natijani 'result:' prefikssiz to'g'ri formatlash."""
-    if not raw_value:
+    # `if not raw_value` EMAS — raw_value raw (JSON'siz) 0/0.0 bo'lib kelsa
+    # ("natija" to'g'ridan-to'g'ri son sifatida uzatilgan holat), Python buni
+    # falsy deb hisoblab bo'sh natija bilan adashtirib yuboradi. Faqat
+    # None/bo'sh-matn haqiqatan natija yo'qligini bildiradi.
+    if raw_value is None or raw_value == '':
         return ""
     raw_str = str(raw_value).strip()
     if raw_str.startswith('{'):
@@ -2436,17 +2566,30 @@ def _format_result_value(raw_value):
             pass
     return raw_str
 
+# Laborant kiritgan natijada kamida shuncha kasr xonasi saqlanadi —
+# norma kam xonali yozilgan bo'lsa ham (masalan Kaliy: norma "3.6-5.4",
+# natija "4.59" → "4.6" bo'lib ketmasin).
+_MIN_KASR_XONA = 2
+
+
 def _round_result_to_norma(result_str, norma_text):
     """Natija qiymatini norma kasr aniqligiga moslab yaxlitlash.
-    Masalan: result='6.353', norma='3.89 - 6.1' → '6.35'
-             result='11.88', norma='0 - 41' → '12'
+
+    Qoida:  ko'rsatiladigan xona = max(norma xonasi, natija xonasi[eng ko'pi 2])
+
+    Masalan: result='6.353', norma='3.89 - 6.1'  → '6.35'
+             result='4.59',  norma='3.6-5.4'     → '4.59'  (yaxlitlanmaydi)
+             result='2.27',  norma='1.7-2.4'     → '2.27'  (yaxlitlanmaydi)
+             result='1.355', norma='0.000-0.100' → '1.355' (norma 3 xonali)
+             result='48',    norma='0 - 41'      → '48'    (butun — nol qo'shilmaydi)
+             result='11.88', norma='0 - 41'      → '11.88'
     """
     if not result_str or not norma_text or norma_text.strip() == '-':
         return result_str
     try:
         fv = float(str(result_str).replace(',', '.').strip())
     except (ValueError, TypeError):
-        return result_str
+        return result_str   # diapazon ("2.20-3.00") yoki matn — tegilmaydi
     try:
         import re as _re
         nums = _re.findall(r'\d+\.?\d*', str(norma_text).split('\n')[0])
@@ -2458,6 +2601,13 @@ def _round_result_to_norma(result_str, norma_text):
                 dec = len(n.split('.')[1])
                 if dec > max_dec:
                     max_dec = dec
+
+        # Natijaning O'Z kasr xonasi (eng ko'pi _MIN_KASR_XONA gacha) —
+        # normadan ko'p bo'lsa, aniqlik yo'qotilmaydi.
+        _rs = str(result_str).replace(',', '.').strip()
+        res_dec = len(_rs.split('.')[1]) if '.' in _rs else 0
+        max_dec = max(max_dec, min(res_dec, _MIN_KASR_XONA))
+
         return f"{fv:.{max_dec}f}"
     except Exception:
         return result_str
@@ -2543,15 +2693,27 @@ def _get_result_color_and_arrow(result_value, norma_info, jins=''):
     return None, ''
 
 
+# Chegaraviy ("kulrang") zona — na manfiy, na musbat. Troponin kabi
+# testlarda bu zonaga tushgan natija KO'RINIB turishi shart, aks holda
+# u me'yordagidek qora bo'lib, e'tibordan chetda qoladi.
+_IFA_SHUBHALI_SOZLAR = ('shubhali', 'chegaraviy', 'kulrang', 'qayta')
+
+
 def _get_ifa_result_color(result_str, norma_text):
     """IFA testlar uchun natija rangini aniqlash (strelkasiz).
 
     Norma formati: '0-1 Manfiy (-)\n1.1-30 Musbat (+)' yoki teskari
     (Gepatit D kabi: '1.1-10 Manfiy (-)\n0-1 Musbat (+)').
 
+    Uch bosqichli talqin ham qo'llab-quvvatlanadi (Troponin I kabi):
+        '0.000-0.100 Manfiy (-),
+         0.101-0.400 Shubhali — 3 soatdan keyin takrorlash,
+         >0.400 Musbat (+)'
+
     Qaytaradi:
-        RGBColor(255,0,0) — Musbat (+) diapazonida
-        None              — Manfiy (-) diapazonida yoki aniqlab bo'lmasa (qora)
+        RGBColor(255,0,0)   — Musbat (+) diapazonida
+        RGBColor(230,126,34) — Shubhali (chegaraviy/kulrang zona)
+        None                — Manfiy (-) diapazonida yoki aniqlab bo'lmasa (qora)
     """
     try:
         result_float = float(str(result_str).replace(',', '.').strip())
@@ -2585,18 +2747,22 @@ def _get_ifa_result_color(result_str, norma_text):
         if not line:
             continue
         line_lower = line.lower()
-        is_manfiy = 'manfiy' in line_lower
-        is_musbat = 'musbat' in line_lower
-        if not is_manfiy and not is_musbat:
+        is_manfiy   = 'manfiy' in line_lower
+        is_musbat   = 'musbat' in line_lower
+        is_shubhali = any(w in line_lower for w in _IFA_SHUBHALI_SOZLAR)
+        if not is_manfiy and not is_musbat and not is_shubhali:
             continue
         min_v, max_v = _parse_range_bounds(line)
         if min_v is None:
             continue
         if min_v <= result_float <= max_v:
+            # Shubhali birinchi tekshiriladi — "kuchsiz musbat (shubhali)"
+            # kabi aralash yozuvda ham chegaraviy zona ustun bo'lsin
+            if is_shubhali:
+                return RGBColor(0xE6, 0x7E, 0x22)   # To'q sariq — chegaraviy zona
             if is_musbat:
                 return RGBColor(0xFF, 0x00, 0x00)   # Qizil — Musbat (+)
-            else:
-                return None                          # Qora  — Manfiy (-)
+            return None                              # Qora  — Manfiy (-)
 
     return None  # Moslik topilmadi — qora
 
@@ -4505,7 +4671,13 @@ def _add_revmo_row_to_table(table, sub_name, val_str, norma_str, unit_str, jins)
     p1 = cells_r[1].paragraphs[0]
     p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _set_para_spacing(p1, 0, 0, line_spacing=1)
-    val_display = str(val_str).strip() if val_str else '-'
+    # DIQQAT: `if val_str else '-'` ISHLATILMAYDI — natija 0 yoki 0.0 (haqiqatan
+    # o'lchangan, masalan CRP=0.4 avtomat analizatordan butun songa yaqinlashib
+    # keladigan holatlar) Python'da FALSY hisoblanadi va noto'g'ri "-" (tekshirilmagan)
+    # ko'rinishida chiqib ketardi. Faqat None/bo'sh qiymat "-" bo'lishi kerak.
+    val_display = '-' if val_str is None or val_str == '' else str(val_str).strip()
+    if val_display == '':
+        val_display = '-'
     # Norma ob'ektini tuzish (rang/o'q uchun)
     _rm_min, _rm_max = _parse_norma_min_max(norma_str, jins)
     _norma_info = {"norma": norma_str, "unit": unit_str, "type": "text", "min": _rm_min, "max": _rm_max}
@@ -4842,8 +5014,19 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
                 result_value = _round_result_to_norma(result_value, norma_text_for_color)
             elif result_value and analyzer_ref:
                 result_value = _round_result_to_norma(result_value, analyzer_ref)
-            if group == "IFA":
-                # IFA testlar: Manfiy=qora, Musbat=qizil, strelka yo'q
+            # IFA guruhidagi testlarning ko'pi (Ferritin, Vitamin D/B12, TSH,
+            # gormonlar, PSA, Troponin I miqdoriy...) MIQDORIY — ularda norma
+            # oddiy "min-max" oraliq, "Manfiy"/"Musbat" so'zi yo'q. Faqat
+            # serologik testlarda (Gepatit B/C/D, HBsAg immunitet...) norma
+            # "0-1 Manfiy (-), 1.1-40 Musbat (+)" ko'rinishida bo'ladi.
+            # Shu ikki holatni ANIQ ajratamiz: so'z bo'lsa — sifat rangi
+            # (qora/qizil, strelkasiz); bo'lmasa — miqdoriy rang (↑/↓ strelka).
+            _ifa_sifat = group == "IFA" and any(
+                w in norma_text_for_color.lower()
+                for w in (('manfiy', 'musbat') + _IFA_SHUBHALI_SOZLAR)
+            )
+            if _ifa_sifat:
+                # Sifat (serologik) IFA testlar: Manfiy=qora, Musbat=qizil, strelka yo'q
                 result_color = _get_ifa_result_color(result_value, norma_text_for_color)
                 display_result = result_value if result_value else ""
             else:
@@ -7111,6 +7294,67 @@ def generate_unified_blank(order_id):
 # TAHLIL KIRITISH FUNKSIYALARI (tahlil_kiritish.py dan)
 # ============================================================================
 
+# ── "Ogohlantirish" va "O'lchash chegarasi" maydonlari uchun matn<->son ──────
+# 2026-08-11 qo'shildi. Format: "Ogohlantirish" — "<1, >600" (past/baland,
+# ikkalasi ham ixtiyoriy); "O'lchash chegarasi" — "1-4000" (min-max, ikkalasi
+# ham birga bo'lishi kerak). Bu funksiyalar TahlilKiritishOynasi.save_or_update()
+# va .load_tahlil_from_db() da ishlatiladi.
+def _parse_ogohlantirish_text(text):
+    """'<1, >600' -> (1.0, 600.0). Topilmasa None."""
+    past = baland = None
+    if not text:
+        return past, baland
+    m_lo = re.search(r"<\s*(-?\d+(?:[.,]\d+)?)", text)
+    m_hi = re.search(r">\s*(-?\d+(?:[.,]\d+)?)", text)
+    if m_lo:
+        try:
+            past = float(m_lo.group(1).replace(",", "."))
+        except (ValueError, TypeError):
+            pass
+    if m_hi:
+        try:
+            baland = float(m_hi.group(1).replace(",", "."))
+        except (ValueError, TypeError):
+            pass
+    return past, baland
+
+
+def _format_ogohlantirish_text(past, baland):
+    """(1.0, 600.0) -> '<1, >600'. Ikkalasi ham None bo'lsa — bo'sh matn.
+    DB dan DECIMAL(14,4) sifatida keladi (Decimal turi) — :g formati Decimal'da
+    ortiqcha nollarni kesmaydi ("1.0000" chiqadi), shuning uchun avval float'ga
+    o'giramiz."""
+    parts = []
+    if past is not None:
+        parts.append(f"<{float(past):g}")
+    if baland is not None:
+        parts.append(f">{float(baland):g}")
+    return ", ".join(parts)
+
+
+def _parse_olchash_text(text):
+    """'1-4000' -> (1.0, 4000.0). Noto'g'ri format/bo'sh bo'lsa (None, None)."""
+    if not text or not text.strip():
+        return None, None
+    t = text.strip()
+    parts = t.split("-")
+    if len(parts) == 2 and parts[0].strip() and parts[1].strip():
+        try:
+            return (float(parts[0].replace(",", ".")),
+                    float(parts[1].replace(",", ".")))
+        except (ValueError, TypeError):
+            return None, None
+    return None, None
+
+
+def _format_olchash_text(mn, mx):
+    """(1.0, 4000.0) -> '1-4000'. Ikkalasi ham bo'lmasa bo'sh matn.
+    DB dan Decimal turida keladi — avval float'ga o'girib formatlaymiz."""
+    if mn is None or mx is None:
+        return ""
+    return f"{float(mn):g}-{float(mx):g}"
+
+
 class TahlilKiritishOynasi:
     def __init__(self, root):
         self.root = root
@@ -7133,6 +7377,10 @@ class TahlilKiritishOynasi:
         self.is_calculated_var = tk.BooleanVar()
         self.formula_var = tk.StringVar()
         self.response_options_var = tk.StringVar()
+        # Ogohlantirish (klinik chegara) va O'lchash chegarasi (lineynost/
+        # xatolik ehtimoli) — 2026-08-11 qo'shildi.
+        self.ogohlantirish_var = tk.StringVar()
+        self.olchash_var = tk.StringVar()
 
         # Sub-norma vars (Bilirubin, Revmoproba, Koagulogramma uchun)
         self.sub_norma_vars = {}
@@ -7227,6 +7475,27 @@ class TahlilKiritishOynasi:
                 conn.commit()
             except:
                 pass
+
+            # Ogohlantirish (klinik xavotir chegarasi) va O'lchash chegarasi
+            # (lineynost / xatolik ehtimoli) maydonlari — 2026-08-11 qo'shildi.
+            # "Tahlil Qo'shish" oynasida to'ldiriladi, result_validator.py va
+            # lab_quality.py bularni STATIK config'dan USTUN qo'yib o'qiydi
+            # (qarang: apply_db_overrides() ikkala modulda ham).
+            for _col_sql in (
+                "ALTER TABLE tahlillar_norma ADD COLUMN ogohlantirish_past DECIMAL(14,4) NULL AFTER response_options",
+                "ALTER TABLE tahlillar_norma ADD COLUMN ogohlantirish_baland DECIMAL(14,4) NULL AFTER ogohlantirish_past",
+                "ALTER TABLE tahlillar_norma ADD COLUMN olchash_min DECIMAL(14,4) NULL AFTER ogohlantirish_baland",
+                "ALTER TABLE tahlillar_norma ADD COLUMN olchash_max DECIMAL(14,4) NULL AFTER olchash_min",
+            ):
+                try:
+                    cursor.execute(_col_sql)
+                    conn.commit()
+                except:
+                    pass
+
+            # Normani katalog ID ga bog'lash (nomi o'xshash tahlillar
+            # chalkashmasligi uchun) — 2026-08-12 qo'shildi
+            ensure_norma_tahlil_id(conn)
             
             # Birliklar jadvali
             query_birlik = """
@@ -7381,15 +7650,31 @@ class TahlilKiritishOynasi:
         ttk.Label(main_frame, text="Masalan: 3.2-6.1 yoki E: 44-115, A: 44-97",
                  font=("Arial", 8), foreground="gray").grid(row=3, column=1, sticky=tk.W)
 
+        # Ogohlantirish — klinik xavotir chegarasi (past/baland). Bu qiymat
+        # saqlanganda lab_quality.py "panic" ro'yxatiga qo'shiladi (DB override).
+        ttk.Label(main_frame, text="Ogohlantirish:", font=("Arial", 10)).grid(row=4, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(main_frame, textvariable=self.ogohlantirish_var, width=40).grid(row=4, column=1, sticky=tk.EW, pady=5)
+        ttk.Label(main_frame,
+                 text="Masalan: <1, >600 — natija hayotga xavfli/shubhali chiqsa signal beriladi",
+                 font=("Arial", 8), foreground="gray").grid(row=5, column=1, sticky=tk.W)
+
+        # O'lchash chegarasi — lineynost/xatolik ehtimoli. Bu qiymat saqlanganda
+        # result_validator.py "single" ro'yxatiga qo'shiladi (DB override).
+        ttk.Label(main_frame, text="O'lchash chegarasi:", font=("Arial", 10)).grid(row=6, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(main_frame, textvariable=self.olchash_var, width=40).grid(row=6, column=1, sticky=tk.EW, pady=5)
+        ttk.Label(main_frame,
+                 text="Masalan: 1-4000 — analizator/reagent shu diapazondan tashqarini o'lchay olmaydi",
+                 font=("Arial", 8), foreground="gray").grid(row=7, column=1, sticky=tk.W)
+
         # Sub-norma frame (Bilirubin / Revmoproba / Koagulogramma fraksiyalari uchun)
         self.sub_norma_frame = ttk.LabelFrame(main_frame, text="Fraksiyalar Normasi", padding="8")
-        self.sub_norma_frame.grid(row=4, column=0, columnspan=2, sticky=tk.EW, padx=5, pady=3)
+        self.sub_norma_frame.grid(row=8, column=0, columnspan=2, sticky=tk.EW, padx=5, pady=3)
         self.sub_norma_frame.grid_remove()
 
         # Birlik
-        ttk.Label(main_frame, text="Birlik:", font=("Arial", 10)).grid(row=5, column=0, sticky=tk.W, pady=5)
+        ttk.Label(main_frame, text="Birlik:", font=("Arial", 10)).grid(row=9, column=0, sticky=tk.W, pady=5)
         birlik_frame = ttk.Frame(main_frame)
-        birlik_frame.grid(row=5, column=1, sticky=tk.EW, pady=5)
+        birlik_frame.grid(row=9, column=1, sticky=tk.EW, pady=5)
         
         birlik_combo = ttk.Combobox(
             birlik_frame,
@@ -7403,47 +7688,47 @@ class TahlilKiritishOynasi:
         birlik_btn.pack(side=tk.LEFT, padx=5)
         
         # Yosh
-        ttk.Label(main_frame, text="Yosh:", font=("Arial", 10)).grid(row=6, column=0, sticky=tk.W, pady=5)
+        ttk.Label(main_frame, text="Yosh:", font=("Arial", 10)).grid(row=10, column=0, sticky=tk.W, pady=5)
         yosh_entry = ttk.Entry(main_frame, textvariable=self.yosh_var, width=40)
-        yosh_entry.grid(row=6, column=1, sticky=tk.EW, pady=5)
+        yosh_entry.grid(row=10, column=1, sticky=tk.EW, pady=5)
         ttk.Label(main_frame, text="Masalan: <3 yosh 46-70, >3 yosh 66-85",
-                 font=("Arial", 8), foreground="gray").grid(row=7, column=1, sticky=tk.W)
+                 font=("Arial", 8), foreground="gray").grid(row=11, column=1, sticky=tk.W)
 
         # Jins
-        ttk.Label(main_frame, text="Jins:", font=("Arial", 10)).grid(row=8, column=0, sticky=tk.W, pady=5)
+        ttk.Label(main_frame, text="Jins:", font=("Arial", 10)).grid(row=12, column=0, sticky=tk.W, pady=5)
         jins_combo = ttk.Combobox(
             main_frame,
             textvariable=self.jins_var,
             values=["", "Erkak", "Ayol", "E: 44-115, A: 44-97"],
             width=40
         )
-        jins_combo.grid(row=8, column=1, sticky=tk.EW, pady=5)
+        jins_combo.grid(row=12, column=1, sticky=tk.EW, pady=5)
         
         # Fazasikli
-        ttk.Label(main_frame, text="Fazasikli:", font=("Arial", 10)).grid(row=9, column=0, sticky=tk.W, pady=5)
+        ttk.Label(main_frame, text="Fazasikli:", font=("Arial", 10)).grid(row=13, column=0, sticky=tk.W, pady=5)
         fazasikli_combo = ttk.Combobox(
             main_frame,
             textvariable=self.fazasikli_var,
             values=["", "Follikulyar", "Ovulyatsiya", "Lyutein", "Menopauza"],
             width=40
         )
-        fazasikli_combo.grid(row=9, column=1, sticky=tk.EW, pady=5)
+        fazasikli_combo.grid(row=13, column=1, sticky=tk.EW, pady=5)
 
         # 1-trimestr
-        ttk.Label(main_frame, text="1-trimestr:", font=("Arial", 10)).grid(row=10, column=0, sticky=tk.W, pady=5)
-        ttk.Entry(main_frame, textvariable=self.trimestr1_var, width=40).grid(row=10, column=1, sticky=tk.EW, pady=5)
+        ttk.Label(main_frame, text="1-trimestr:", font=("Arial", 10)).grid(row=14, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(main_frame, textvariable=self.trimestr1_var, width=40).grid(row=14, column=1, sticky=tk.EW, pady=5)
 
         # 2-trimestr
-        ttk.Label(main_frame, text="2-trimestr:", font=("Arial", 10)).grid(row=11, column=0, sticky=tk.W, pady=5)
-        ttk.Entry(main_frame, textvariable=self.trimestr2_var, width=40).grid(row=11, column=1, sticky=tk.EW, pady=5)
+        ttk.Label(main_frame, text="2-trimestr:", font=("Arial", 10)).grid(row=15, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(main_frame, textvariable=self.trimestr2_var, width=40).grid(row=15, column=1, sticky=tk.EW, pady=5)
 
         # 3-trimestr
-        ttk.Label(main_frame, text="3-trimestr:", font=("Arial", 10)).grid(row=12, column=0, sticky=tk.W, pady=5)
-        ttk.Entry(main_frame, textvariable=self.trimestr3_var, width=40).grid(row=12, column=1, sticky=tk.EW, pady=5)
+        ttk.Label(main_frame, text="3-trimestr:", font=("Arial", 10)).grid(row=16, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(main_frame, textvariable=self.trimestr3_var, width=40).grid(row=16, column=1, sticky=tk.EW, pady=5)
 
         # Hisob-kitobli tahlil (checkbox)
         is_calc_frame = ttk.Frame(main_frame)
-        is_calc_frame.grid(row=13, column=0, columnspan=2, sticky=tk.W, pady=5)
+        is_calc_frame.grid(row=17, column=0, columnspan=2, sticky=tk.W, pady=5)
         ttk.Checkbutton(
             is_calc_frame,
             text="Hisob-kitobli tahlil (Formula orqali)",
@@ -7453,7 +7738,7 @@ class TahlilKiritishOynasi:
 
         # Formula maydoni (hisob-kitobli bo'lsa ko'rinadi)
         self.formula_frame = ttk.LabelFrame(main_frame, text="Formula", padding="5")
-        self.formula_frame.grid(row=14, column=0, columnspan=2, sticky=tk.EW, pady=5)
+        self.formula_frame.grid(row=18, column=0, columnspan=2, sticky=tk.EW, pady=5)
         self.formula_frame.grid_remove()
         
         formula_label = ttk.Label(
@@ -7473,9 +7758,9 @@ class TahlilKiritishOynasi:
         formula_entry.pack(fill=tk.X, padx=5, pady=5)
         
         # Standart blanka tanlash
-        ttk.Label(main_frame, text="Standart blanka:", font=("Arial", 10)).grid(row=15, column=0, sticky=tk.W, pady=5)
+        ttk.Label(main_frame, text="Standart blanka:", font=("Arial", 10)).grid(row=19, column=0, sticky=tk.W, pady=5)
         standard_blank_frame = ttk.Frame(main_frame)
-        standard_blank_frame.grid(row=15, column=1, sticky=tk.EW, pady=5)
+        standard_blank_frame.grid(row=19, column=1, sticky=tk.EW, pady=5)
 
         self.standard_blank_var = tk.StringVar()
         standard_blank_entry = ttk.Entry(standard_blank_frame, textvariable=self.standard_blank_var, width=35, state="readonly")
@@ -7494,15 +7779,15 @@ class TahlilKiritishOynasi:
         ttk.Button(standard_blank_frame, text="Faylni belgilash", command=select_standard_blank).pack(side=tk.LEFT, padx=5)
 
         # Javob variantlari (response_options)
-        ttk.Label(main_frame, text="Javob variantlari:", font=("Arial", 10)).grid(row=16, column=0, sticky=tk.W, pady=5)
+        ttk.Label(main_frame, text="Javob variantlari:", font=("Arial", 10)).grid(row=20, column=0, sticky=tk.W, pady=5)
         response_options_entry = ttk.Entry(main_frame, textvariable=self.response_options_var, width=40)
-        response_options_entry.grid(row=16, column=1, sticky=tk.EW, pady=5)
+        response_options_entry.grid(row=20, column=1, sticky=tk.EW, pady=5)
         ttk.Label(main_frame, text="Masalan: Manfiy, Kuchsiz musbat, Musbat (vergul bilan ajratilgan)",
-                 font=("Arial", 8), foreground="gray").grid(row=17, column=1, sticky=tk.W)
+                 font=("Arial", 8), foreground="gray").grid(row=21, column=1, sticky=tk.W)
 
         # Multi-Ref.Range tugmasi
         multi_ref_frame = ttk.Frame(main_frame)
-        multi_ref_frame.grid(row=18, column=0, columnspan=2, pady=10)
+        multi_ref_frame.grid(row=22, column=0, columnspan=2, pady=10)
         
         ttk.Button(
             multi_ref_frame,
@@ -7630,16 +7915,33 @@ class TahlilKiritishOynasi:
             
             tahlil_nomi = self.tahlil_nomi_var.get().strip()
             guruh = self.guruh_var.get().strip()
+
+            # Katalogdagi ID ni topamiz — norma NOM emas, ID bo'yicha bog'lanadi
+            # (aks holda nomi bir xil so'z bilan boshlanadigan tahlillar
+            #  bir-birining normasini tortib oladi).
+            katalog_tahlil_id = None
+            for _t in self.tahlillar_list:
+                if (_t.get('nomi') or '').strip() == tahlil_nomi:
+                    katalog_tahlil_id = _t.get('id')
+                    break
+
             is_calculated = 1 if self.is_calculated_var.get() else 0
             formula = self.formula_var.get().strip() if self.is_calculated_var.get() else None
             standard_blank_path = self.standard_blank_var.get().strip() if hasattr(self, 'standard_blank_var') else ""
             response_options = self.response_options_var.get().strip() if hasattr(self, 'response_options_var') else ""
             # Sub-norma template
             result_template_json = self.get_sub_norma_result_template(tahlil_nomi.lower()) or ""
-            
+
+            # Ogohlantirish ("<1, >600") va O'lchash chegarasi ("1-4000") — matndan songa
+            ogohlantirish_past, ogohlantirish_baland = _parse_ogohlantirish_text(
+                self.ogohlantirish_var.get().strip() if hasattr(self, 'ogohlantirish_var') else "")
+            olchash_min, olchash_max = _parse_olchash_text(
+                self.olchash_var.get().strip() if hasattr(self, 'olchash_var') else "")
+
             if self.current_tahlil_id:
                 query = """
                 UPDATE tahlillar_norma SET
+                    tahlil_id = COALESCE(%s, tahlil_id),
                     guruh = %s,
                     tahlil_nomi = %s,
                     norma = %s,
@@ -7662,17 +7964,24 @@ class TahlilKiritishOynasi:
                     response_options = %s,
                     standard_blank_path = %s,
                     result_template = %s,
+                    ogohlantirish_past = %s,
+                    ogohlantirish_baland = %s,
+                    olchash_min = %s,
+                    olchash_max = %s,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = %s
                 """
                 values = (
+                    katalog_tahlil_id,
                     guruh, tahlil_nomi, norma_final, self.birlik_var.get().strip(),
                     self.yosh_var.get().strip(), self.jins_var.get().strip(),
                     self.fazasikli_var.get().strip(), self.trimestr1_var.get().strip(),
                     self.trimestr2_var.get().strip(), self.trimestr3_var.get().strip(),
                     type_val, min_val, max_val, min_val_m, max_val_m, min_val_f, max_val_f,
                     is_calculated, formula, response_options, standard_blank_path,
-                    result_template_json or None, self.current_tahlil_id
+                    result_template_json or None,
+                    ogohlantirish_past, ogohlantirish_baland, olchash_min, olchash_max,
+                    self.current_tahlil_id
                 )
                 action = "yangilandi"
             else:
@@ -7692,23 +8001,26 @@ class TahlilKiritishOynasi:
                     cursor.close()
                     conn.close()
                     return
-                
+
                 query = """
                 INSERT INTO tahlillar_norma
-                (guruh, tahlil_nomi, norma, birlik, yosh, jins, fazasikli,
+                (tahlil_id, guruh, tahlil_nomi, norma, birlik, yosh, jins, fazasikli,
                  trimestr1, trimestr2, trimestr3, type, min_val, max_val,
                  min_val_m, max_val_m, min_val_f, max_val_f, is_calculated, formula,
-                 response_options, standard_blank_path, result_template)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 response_options, standard_blank_path, result_template,
+                 ogohlantirish_past, ogohlantirish_baland, olchash_min, olchash_max)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """
                 values = (
+                    katalog_tahlil_id,
                     guruh, tahlil_nomi, norma_final, self.birlik_var.get().strip(),
                     self.yosh_var.get().strip(), self.jins_var.get().strip(),
                     self.fazasikli_var.get().strip(), self.trimestr1_var.get().strip(),
                     self.trimestr2_var.get().strip(), self.trimestr3_var.get().strip(),
                     type_val, min_val, max_val, min_val_m, max_val_m, min_val_f, max_val_f,
                     is_calculated, formula, response_options, standard_blank_path,
-                    result_template_json or None
+                    result_template_json or None,
+                    ogohlantirish_past, ogohlantirish_baland, olchash_min, olchash_max
                 )
                 action = "qo'shildi"
             
@@ -7889,6 +8201,12 @@ class TahlilKiritishOynasi:
                     self.response_options_var.set(result.get('response_options', '') or "")
                 if hasattr(self, 'standard_blank_var'):
                     self.standard_blank_var.set(result.get('standard_blank_path', '') or "")
+                if hasattr(self, 'ogohlantirish_var'):
+                    self.ogohlantirish_var.set(_format_ogohlantirish_text(
+                        result.get('ogohlantirish_past'), result.get('ogohlantirish_baland')))
+                if hasattr(self, 'olchash_var'):
+                    self.olchash_var.set(_format_olchash_text(
+                        result.get('olchash_min'), result.get('olchash_max')))
                 # Sub-norma varlarini result_template'dan yuklash
                 rt_str = result.get('result_template', '') or ''
                 if rt_str:
@@ -7929,6 +8247,10 @@ class TahlilKiritishOynasi:
         self.response_options_var.set("")
         if hasattr(self, 'standard_blank_var'):
             self.standard_blank_var.set("")
+        if hasattr(self, 'ogohlantirish_var'):
+            self.ogohlantirish_var.set("")
+        if hasattr(self, 'olchash_var'):
+            self.olchash_var.set("")
         # Sub-norma tozalash
         for w in self.sub_norma_widgets:
             try:
@@ -8733,6 +9055,12 @@ class MonoblokApp:
             if mysql_ok:
                 print("   [OK] MySQL serverga ulanildi")
                 self.root.after(0, lambda: self.status_var.set("[OK] MySQL serverga ulanildi"))
+                # Norma jadvalini katalog ID ga bog'lash (bir martalik migratsiya,
+                # keyingi ishga tushishlarda hech narsa qilmaydi)
+                try:
+                    ensure_norma_tahlil_id()
+                except Exception as _me:
+                    print(f"   [OGOHLANTIRISH] norma ID migratsiyasi: {_me}")
             else:
                 print("   [XATO] MySQL serverga ulanib bo'lmadi")
                 self.root.after(0, lambda: self.status_var.set("[OGOHLANTIRISH] MySQL serverga ulanib bo'lmadi"))
@@ -11448,33 +11776,74 @@ Sana: {_sana_fmt}"""
             _all_test_names = [t.get('nomi', '') for t in self.current_tests if t.get('nomi')]
             _norma_cache = {}      # {test_name: norma_row}
             _blank_cache = {}      # {test_name: standard_blank_path}
+            _NORMA_USTUNLAR = ("tahlil_nomi, norma, birlik, type, "
+                               "standard_blank_path, response_options")
+            # Katalog ID bo'yicha bog'langan tahlillar — taxminiy nom qidiruvi
+            # ULARGA QO'LLANMAYDI (nomi o'xshash testlar chalkashmasligi uchun)
+            _id_bilan_topildi = set()
             if _all_test_names:
+                # ── 1) ENG ANIQ: katalog ID bo'yicha (tahlillar_norma.tahlil_id) ──
+                _tid_map = {t.get('tahlil_id'): t.get('nomi', '')
+                            for t in self.current_tests if t.get('tahlil_id')}
+                if _tid_map:
+                    try:
+                        _ph_id = ','.join(['%s'] * len(_tid_map))
+                        cursor.execute(
+                            f"SELECT tahlil_id, {_NORMA_USTUNLAR} "
+                            f"FROM tahlillar_norma WHERE tahlil_id IN ({_ph_id})",
+                            list(_tid_map.keys())
+                        )
+                        for _nr in cursor.fetchall():
+                            _order_nomi = _tid_map.get(_nr.get('tahlil_id'))
+                            if not _order_nomi:
+                                continue
+                            _norma_cache[_order_nomi] = _nr
+                            _id_bilan_topildi.add(_order_nomi)
+                            _bp = (_nr.get('standard_blank_path') or '').strip()
+                            if _bp:
+                                _blank_cache[_order_nomi] = _bp
+                    except Exception:
+                        pass   # tahlil_id ustuni hali yo'q — nom bo'yicha davom etamiz
+
                 _ph = ','.join(['%s'] * len(_all_test_names))
                 try:
+                    # ── 2) Aniq nom bo'yicha (ID topilmaganlar uchun) ──
                     cursor.execute(
-                        f"SELECT tahlil_nomi, norma, birlik, type, "
-                        f"standard_blank_path, response_options "
+                        f"SELECT {_NORMA_USTUNLAR} "
                         f"FROM tahlillar_norma WHERE tahlil_nomi IN ({_ph})",
                         _all_test_names
                     )
                     for _nr in cursor.fetchall():
                         _tn = _nr.get('tahlil_nomi', '')
+                        if _tn in _id_bilan_topildi:
+                            continue   # ID bo'yicha topilgani ustunroq
                         _norma_cache[_tn] = _nr
                         _bp = (_nr.get('standard_blank_path') or '').strip()
                         if _bp:
                             _blank_cache[_tn] = _bp
-                    # Aniq mos kelmagan nomlar uchun variant (prefiks) qidirish —
-                    # order_items da nom qisqargan bo'lishi mumkin (masalan ' ИФА'siz:
-                    # 'Askarida IgG IFA' vs 'Askarida IgG IFA ИФА'). ORDER nomi kaliti bilan saqlanadi.
-                    _missing_norma = [n for n in _all_test_names if n and n not in _norma_cache]
+                    # ── 3) TAXMINIY (prefiks) qidiruv — order_items da nom
+                    #    qisqargan bo'lishi mumkin ('Askarida IgG IFA' vs
+                    #    'Askarida IgG IFA ИФА').
+                    #    BOSHQA tahlilga biriktirilgan norma qatori OLINMAYDI
+                    #    (ekspress "Troponin T" normasi miqdoriy testga
+                    #     tortilib ketmasligi uchun).
+                    _nom_tid = {t.get('nomi', ''): t.get('tahlil_id')
+                                for t in self.current_tests}
+                    _missing_norma = [n for n in _all_test_names
+                                      if n and n not in _norma_cache]
                     for _mn in _missing_norma:
                         try:
+                            _tid_mn = _nom_tid.get(_mn)
+                            _flt, _arg = "", ()
+                            if _tid_mn:
+                                _flt = " AND (tahlil_id IS NULL OR tahlil_id = %s)"
+                                _arg = (_tid_mn,)
                             cursor.execute(
                                 "SELECT tahlil_nomi, norma, birlik, type, "
                                 "standard_blank_path, response_options "
-                                "FROM tahlillar_norma WHERE tahlil_nomi LIKE %s "
-                                "ORDER BY CHAR_LENGTH(tahlil_nomi) LIMIT 1",
-                                (_mn + '%',))
+                                "FROM tahlillar_norma WHERE tahlil_nomi LIKE %s" + _flt +
+                                " ORDER BY CHAR_LENGTH(tahlil_nomi) LIMIT 1",
+                                (_mn + '%',) + _arg)
                             _vr = cursor.fetchone()
                             if _vr:
                                 _norma_cache[_mn] = _vr
@@ -11485,6 +11854,17 @@ Sana: {_sana_fmt}"""
                             pass
                 except Exception as _e:
                     print(f"[OGOHLANTIRISH] Norma batch yuklashda xato: {_e}")
+
+            # Katalog ID bo'yicha topilgan norma qatoridagi `type` va
+            # `response_options` asosiy so'rovdagi NOM bo'yicha JOIN dan
+            # USTUN turadi — natija kiritish oynasi to'g'ri tanlanishi uchun
+            # (masalan miqdoriy ИФА testiga ekspress "Manfiy/Musbat" ochilmasin).
+            for _t in self.current_tests:
+                _nm = _t.get('nomi', '')
+                if _nm in _id_bilan_topildi:
+                    _row_id = _norma_cache.get(_nm) or {}
+                    _t['type'] = _row_id.get('type') or ''
+                    _t['response_options'] = _row_id.get('response_options') or ''
 
             # Kesh yordamida norma oluvchi ichki funksiya (DB so'rovi YO'Q)
             def _get_norma_fast(tn):
@@ -14450,6 +14830,22 @@ Sana: {_sana_fmt}"""
         def save_and_close():
             result = result_entry.get().strip()
             if result:
+                # ── Xatolik ehtimoli tekshiruvi (saqlashdan OLDIN) ────────
+                # Chegaralar: result_limits.json -> "single" bo'limi,
+                # kalit = tahlillar.id
+                if result_validator is not None:
+                    try:
+                        _tid = test_data.get('tahlil_id') if test_data else None
+                        _issues = result_validator.validate_result(_tid, test_name, result)
+                        if _issues and not result_validator.confirm_save(
+                            dialog, _issues, title_extra=test_name
+                        ):
+                            result_entry.focus_set()
+                            result_entry.select_range(0, tk.END)
+                            return  # laborant tuzatmoqchi — dialog ochiq qoladi
+                    except Exception as _ve:
+                        print(f"[OGOHLANTIRISH] Natija tekshiruvida xato: {_ve}")
+
                 self.test_results[test_id] = result
 
                 # DB ga ham darhol saqlash (qayta tahrirlash imkonini berish uchun)
@@ -17313,7 +17709,6 @@ Sana: {_sana_fmt}"""
                 old_result = self.test_results.get(test_id, "")
                 if old_result:
                     try:
-                        import json
                         old_data = json.loads(old_result)
                         if comp_key in old_data:
                             var.set(str(old_data[comp_key]))
@@ -17430,7 +17825,6 @@ Sana: {_sana_fmt}"""
         old_result = self.test_results.get(test_id, "")
         if old_result:
             try:
-                import json
                 old_data = json.loads(old_result)
                 for comp_key, var in component_vars.items():
                     if comp_key in _formula_keys:
@@ -17463,7 +17857,22 @@ Sana: {_sana_fmt}"""
                     except:
                         result_data[comp_key] = value
 
-            import json
+            # ── Xatolik ehtimoli tekshiruvi (saqlashdan OLDIN) ────────────
+            # Chegaralar: result_limits.json -> "multi" bo'limi,
+            # kalit = "{tahlil_id}.{komponent_kaliti}"
+            if result_validator is not None:
+                try:
+                    _tid = test_data.get('tahlil_id') if test_data else None
+                    _issues = result_validator.validate_result(
+                        _tid, test_name, json.dumps(result_data, ensure_ascii=False)
+                    )
+                    if _issues and not result_validator.confirm_save(
+                        dialog, _issues, title_extra=test_name
+                    ):
+                        return  # laborant tuzatmoqchi — dialog ochiq qoladi
+                except Exception as _ve:
+                    print(f"[OGOHLANTIRISH] Natija tekshiruvida xato: {_ve}")
+
             result_json = json.dumps(result_data, ensure_ascii=False)
             self.test_results[test_id] = result_json
 
@@ -18491,7 +18900,12 @@ Sana: {_sana_fmt}"""
         if not self.current_order_id:
             messagebox.showwarning("Diqqat", "Avval bemor ma'lumotlarini yuklang")
             return
-        
+
+        # Natijasi kiritilmagan / chala tahlillar bo'lsa — ogohlantirish + tasdiqlash
+        if not self._confirm_incomplete_tests("Blanka yaratish"):
+            self.status_var.set("[TO'XTATILDI] Avval tahlil natijalarini kiriting")
+            return
+
         # blanka_generator.py dan to'g'ridan-to'g'ri foydalanish (hech qanday pre-state kerak emas)
         try:
             
@@ -18657,12 +19071,21 @@ Sana: {_sana_fmt}"""
         if not self.test_results:
             messagebox.showwarning("Diqqat", "Saqlash uchun natijalar yo'q")
             return
-        
-        # Avval bazaga saqlash
+
+        # Natijasi kiritilmagan / chala tahlillar bo'lsa — ogohlantirish + tasdiqlash.
+        # Chop etish bosqichida takrorlanmasligi uchun bayroq qo'yiladi.
+        if not self._confirm_incomplete_tests("Chop etish va saqlash"):
+            self.status_var.set("[TO'XTATILDI] Avval tahlil natijalarini kiriting")
+            return
+        self._skip_next_incomplete_check = True
+
+        # Avval bazaga saqlash (xatolik ehtimoli tekshiruvi shu yerda bo'ladi)
         if not self.save_to_db():
             return  # Agar saqlash muvaffaqiyatsiz bo'lsa, chop etishni to'xtatamiz
 
-        # Keyin chop etish (avtomatik, Word oynasisiz)
+        # Keyin chop etish (avtomatik, Word oynasisiz).
+        # Tekshiruv save_to_db() da o'tdi — ogohlantirishni takrorlamaymiz.
+        self._skip_next_print_validation = True
         self.print_results()
 
         # Flag'larni o'rnatish
@@ -18675,7 +19098,24 @@ Sana: {_sana_fmt}"""
         if not self.current_order_id:
             messagebox.showwarning("Diqqat", "Avval bemor ma'lumotlarini yuklang")
             return
-        
+
+        # ── Tahlillar to'liqligi (save_and_print() da tekshirilgan bo'lsa —
+        #    ikkinchi marta so'ramaymiz) ─────────────────────────────────
+        if getattr(self, '_skip_next_incomplete_check', False):
+            self._skip_next_incomplete_check = False
+        elif not self._confirm_incomplete_tests("Chop etish"):
+            self.status_var.set("[TO'XTATILDI] Avval tahlil natijalarini kiriting")
+            return
+
+        # ── Xatolik ehtimoli tekshiruvi (chop etishdan OLDIN) ─────────────
+        # save_and_print() da save_to_db() allaqachon tekshirgan bo'lsa,
+        # oynani ikki marta ko'rsatmaymiz (bayroq bir marta ishlatiladi).
+        if getattr(self, '_skip_next_print_validation', False):
+            self._skip_next_print_validation = False
+        elif not self._validate_results_before_save("Chop etish"):
+            self.status_var.set("[TO'XTATILDI] Natijani tuzating va qayta chop eting")
+            return
+
         # create_blanks_for_order orqali blanka yaratish (Blanka Yaratish tugmasi bilan bir xil format)
         try:
             created = create_blanks_for_order(self.current_order_id, self.test_results)
@@ -18802,6 +19242,308 @@ Sana: {_sana_fmt}"""
         print(f"[XATO] 3 ta urinishdan keyin ham ulanib bo'lmadi: {last_err}")
         return None
 
+    # ══════════════════════════════════════════════════════════════════════
+    #  NATIJA KIRITISH XATOLIGINI TEKSHIRISH
+    #  Chegaralar (lineynost) `result_limits.json` da — kodga tegmasdan
+    #  o'zgartirsa bo'ladi. Standart qiymatlar: result_validator.DEFAULT_CONFIG
+    # ══════════════════════════════════════════════════════════════════════
+    def _build_validation_rows(self):
+        """
+        Tekshiruv uchun [(tahlil_id, tahlil_nomi, natija), ...] ro'yxati.
+        test_results kaliti = order_items.id, sozlamalar esa tahlillar.id
+        bo'yicha yozilgan — shuning uchun tahlil_id ni topib uzatamiz.
+        """
+        by_item_id = {t['id']: t for t in self.current_tests}
+        rows = []
+        for item_id, raw in self.test_results.items():
+            td = by_item_id.get(item_id)
+            if not td:
+                continue
+            rows.append((td.get('tahlil_id'), td.get('nomi', ''), raw))
+        return rows
+
+    def _fetch_norma_db_overrides(self):
+        """
+        `tahlillar_norma` jadvalidan "Ogohlantirish" va "O'lchash chegarasi"
+        ustunlarini o'qiydi ("Tahlil Qo'shish" oynasida to'ldiriladi).
+        Qaytaradi: (olchash_rows, ogohlantirish_rows) — ikkalasi ham
+        [(tahlil_nomi, low, high, birlik), ...] formatida, mos ravishda
+        result_validator.apply_db_overrides() va lab_quality.apply_db_overrides()
+        ga uzatiladi. Xato/ulanish yo'q bo'lsa — ikkalasi ham bo'sh ro'yxat
+        (tekshiruv jim o'tkaziladi, saqlash bloklanmaydi).
+        """
+        conn = None
+        try:
+            conn = db_conn()
+            if not conn:
+                return [], []
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT tahlil_nomi, olchash_min, olchash_max,
+                          ogohlantirish_past, ogohlantirish_baland, birlik
+                   FROM tahlillar_norma
+                   WHERE olchash_min IS NOT NULL OR olchash_max IS NOT NULL
+                      OR ogohlantirish_past IS NOT NULL OR ogohlantirish_baland IS NOT NULL"""
+            )
+            olchash_rows, ogohlantirish_rows = [], []
+            for nomi, o_min, o_max, og_past, og_baland, birlik in cursor.fetchall():
+                if o_min is not None or o_max is not None:
+                    olchash_rows.append((nomi, o_min, o_max, birlik))
+                if og_past is not None or og_baland is not None:
+                    ogohlantirish_rows.append((nomi, og_past, og_baland, birlik))
+            cursor.close()
+            return olchash_rows, ogohlantirish_rows
+        except Exception as e:
+            print(f"[OGOHLANTIRISH] tahlillar_norma dan chegara o'qishda xato: {e}")
+            return [], []
+        finally:
+            try:
+                if conn:
+                    conn.close()
+            except Exception:
+                pass
+
+    # ══════════════════════════════════════════════════════════════════════
+    #  TAHLILLAR TO'LIQLIGI (blanka/chop etishdan oldin)
+    # ══════════════════════════════════════════════════════════════════════
+    # Ko'p komponentli tahlillar — BARCHA komponenti to'ldirilishi kutiladi.
+    # Bu ro'yxatga kirmagan tahlillarda bo'sh maydon odatiy hol (surtma, najas,
+    # spermogramma — ixtiyoriy maydonlar ko'p), shuning uchun ularning ichki
+    # maydonlari tekshirilmaydi, faqat natija umuman yo'qligi tekshiriladi.
+    _TOLIQ_KUTILADIGAN_TESTLAR = ('bilirubin', 'koagulogramma', 'revmoproba',
+                                  'lipid spektri', 'buyrak paneli')
+
+    # Natija JSON idagi XIZMAT kalitlari — bular natija emas, meta-ma'lumot
+    # (analizatordan kelgan natija shunday saqlanadi).
+    _META_NATIJA_KALITLARI = {
+        'type', 'source', 'sid', 'sno', 'unit', 'flag', 'lis_code', 'analyzer_ref',
+        'patient_age', 'patient_gender', 'abnormal_params', 'all_analytes', 'vazn_kg',
+    }
+
+    # AVTOMATIK hisoblanadigan komponentlar — qo'lda kiritilmaydi, manba
+    # maydonlari to'ldirilishi bilan o'zi to'ladi. Shu sababli "chala"
+    # ro'yxatida ko'rsatilmaydi (laborantni chalg'itmaslik uchun).
+    _HISOBLANADIGAN_KALITLAR = {
+        'erkin', 'vldl', 'non_hdl', 'ka', 'tc_hdl', 'ldl_hdl', 'tg_hdl',
+        'bun', 'gfr', 'pg_ratio', 'xulosa',
+    }
+
+    # Komponent kaliti -> laborantga ko'rsatiladigan nom
+    _KOMPONENT_NOMLARI = {
+        'umumiy': "Umumiy bilirubin", 'bog_langan': "Bog'langan bilirubin",
+        'pt_sek': "PT sek", 'pt_kviku': "PT Kviku", 'pt_mno': "MNO/INR",
+        'tt': "Trombin vaqti (TT)", 'achtv': "ACHTV", 'fibrinogen': "Fibrinogen",
+        'rf': "RF", 'crp': "CRP", 'aslo': "ASLO",
+        'tc': "Umumiy xolesterin (TC)", 'hdl': "HDL", 'ldl': "LDL", 'tg': "Trigliseridlar",
+        'mochevina': "Mochevina", 'kreatinin': "Kreatinin",
+        'siydik_kislota': "Siydik kislotasi", 'albumin': "Albumin",
+    }
+
+    def _find_incomplete_tests(self):
+        """
+        Buyurtmadagi natijasi YO'Q yoki chala to'ldirilgan tahlillarni topadi.
+        Qaytaradi: [(tahlil_nomi, sabab), ...] — bo'sh ro'yxat = hammasi tayyor.
+        """
+        incomplete = []
+        for test in self.current_tests:
+            nomi = test.get('nomi', '')
+            raw = self.test_results.get(test['id'], '')
+
+            data = None
+            if isinstance(raw, dict):
+                data = raw
+            elif isinstance(raw, str) and raw.strip().startswith('{'):
+                try:
+                    data = json.loads(raw)
+                except Exception:
+                    data = None
+
+            # Oddiy (JSON bo'lmagan) natija — faqat bo'shligini tekshiramiz
+            if not isinstance(data, dict):
+                if not str(raw).strip():
+                    incomplete.append((nomi, "natija kiritilmagan"))
+                continue
+
+            komp = {k: v for k, v in data.items()
+                    if k not in self._META_NATIJA_KALITLARI}
+            bosh = [k for k, v in komp.items() if str(v).strip() in ('', 'None')]
+
+            if not komp or len(bosh) == len(komp):
+                incomplete.append((nomi, "natija kiritilmagan"))
+            elif any(kw in nomi.lower() for kw in self._TOLIQ_KUTILADIGAN_TESTLAR):
+                # Avtomatik hisoblanadiganlarni ro'yxatga kiritmaymiz
+                qolgan = [self._KOMPONENT_NOMLARI.get(k, k) for k in bosh
+                          if k not in self._HISOBLANADIGAN_KALITLAR]
+                if qolgan:
+                    incomplete.append((nomi, "chala to'ldirilgan: " + ", ".join(qolgan)))
+
+        return incomplete
+
+    def _confirm_incomplete_tests(self, amal="Davom etish"):
+        """
+        Natijasi to'liq bo'lmagan tahlillar bo'lsa — ogohlantirish + tasdiqlash.
+        Standart javob "Yo'q" (tasodifan Enter bosilib ketmasligi uchun).
+
+        Returns: True  — davom etish mumkin (hammasi tayyor yoki laborant tasdiqladi)
+                 False — laborant bekor qildi
+        """
+        # Tarix rejimida current_tests da boshqa buyurtmalar testlari ham bor —
+        # eski natijani qayta chop etishda ogohlantirish o'rinsiz.
+        if getattr(self, '_history_mode', False) or not self.current_tests:
+            return True
+
+        try:
+            incomplete = self._find_incomplete_tests()
+        except Exception as e:
+            # Tekshiruv o'zi xato bersa — ishni bloklamaymiz
+            print(f"[OGOHLANTIRISH] To'liqlik tekshiruvida xato: {e}")
+            return True
+
+        if not incomplete:
+            return True
+
+        n = len(incomplete)
+        satrlar = "\n".join(f"   • {nomi} — {sabab}" for nomi, sabab in incomplete[:15])
+        if n > 15:
+            satrlar += f"\n   ... va yana {n - 15} ta"
+
+        return messagebox.askyesno(
+            "⚠ Tahlillar to'liq emas",
+            f"{amal}: buyurtmadagi {n} ta tahlil natijasi to'liq emas:\n\n"
+            f"{satrlar}\n\n"
+            "Blanka bu tahlillar uchun BO'SH katakcha bilan chiqadi.\n\n"
+            "Baribir davom etaymi?",
+            icon=messagebox.WARNING,
+            default=messagebox.NO
+        )
+
+    def _validate_results_before_save(self, title_extra=""):
+        """
+        Saqlashdan oldin barcha natijalarni tekshiradi:
+          1. Xatolik ehtimoli — format + lineynost (result_validator, "Tahlil
+             Qo'shish" oynasidagi "O'lchash chegarasi" bilan kengaytirilgan)
+          2. Delta-check      — oldingi natija bilan solishtirish (lab_quality)
+        Ikkalasi ham bitta ogohlantirish oynasida ko'rsatiladi.
+
+        Returns: True  — davom etish mumkin (xato yo'q yoki laborant tasdiqladi)
+                 False — laborant "Tuzataman" ni tanladi, saqlash to'xtatilsin
+        """
+        if result_validator is None or not self.test_results:
+            return True
+        try:
+            rows = self._build_validation_rows()
+
+            # 1) Format + lineynost (+ DB'dan "O'lchash chegarasi" override)
+            cfg = result_validator.load_config()
+            olchash_rows, _ = self._fetch_norma_db_overrides()
+            if olchash_rows:
+                result_validator.apply_db_overrides(cfg, olchash_rows)
+            issues = result_validator.validate_many(rows, cfg=cfg)
+
+            # 2) Delta-check — oldingi natija bilan solishtirish
+            issues += self._delta_check_issues(rows)
+
+            if not issues:
+                return True
+            return result_validator.confirm_save(self.root, issues, title_extra=title_extra)
+        except Exception as e:
+            # Tekshiruv o'zi xato bersa — saqlashni bloklamaymiz
+            print(f"[OGOHLANTIRISH] Natija tekshiruvida xato: {e}")
+            return True
+
+    def _delta_check_issues(self, rows):
+        """
+        Bemorning oldingi natijalari bilan solishtirish. Chegaralar
+        `lab_quality.json` -> "delta" bo'limida.
+        Xato bo'lsa bo'sh ro'yxat — saqlash hech qachon shu sababdan to'xtamaydi.
+        """
+        if lab_quality is None or not rows:
+            return []
+        conn = None
+        try:
+            cfg = lab_quality.load_config()
+            if not cfg.get("delta", {}).get("enabled", True):
+                return []
+            bemor_id = (self.current_bemor_data or {}).get('bemor_id')
+            if not bemor_id:
+                return []
+
+            conn = db_conn()
+            if not conn:
+                return []
+            previous = lab_quality.fetch_previous_results(
+                conn, bemor_id, self.current_order_id,
+                max_days=cfg["delta"].get("max_days", 365)
+            )
+            return lab_quality.check_delta(rows, previous, cfg)
+        except Exception as e:
+            print(f"[OGOHLANTIRISH] Delta-check da xato: {e}")
+            return []
+        finally:
+            try:
+                if conn:
+                    conn.close()
+            except Exception:
+                pass
+
+    def _check_panic_values_after_save(self):
+        """
+        Saqlangandan KEYIN kritik (hayotga xavfli) qiymatlarni tekshiradi.
+        Topilsa — laborantga ko'rsatadi va shifokorga xabar berilganini
+        `kritik_xabar_log` jadvaliga yozadi.
+        Chegaralar `lab_quality.json` -> "panic" bo'limida.
+        """
+        if lab_quality is None or not self.test_results:
+            return
+        conn = None
+        try:
+            cfg = lab_quality.load_config()
+            if not cfg.get("panic", {}).get("enabled", True):
+                return
+
+            # DB'dan "Ogohlantirish" override ("Tahlil Qo'shish" oynasida to'ldiriladi)
+            _, ogohlantirish_rows = self._fetch_norma_db_overrides()
+            if ogohlantirish_rows:
+                lab_quality.apply_db_overrides(cfg, ogohlantirish_rows)
+
+            rows = self._build_validation_rows()
+            panics = lab_quality.check_panic(rows, cfg)
+            if not panics:
+                return
+
+            bd = self.current_bemor_data or {}
+            fish = bd.get('fish', '') or ''
+            vrach = bd.get('shifokor', '') or ''
+
+            answer = lab_quality.show_panic_dialog(self.root, fish, panics, default_vrach=vrach)
+            if answer is None:
+                return
+
+            if cfg["panic"].get("log_enabled", True):
+                conn = self._create_fresh_connection()
+                if conn:
+                    lab_quality.log_panic(
+                        conn, self.current_order_id, bd.get('bemor_id'), fish, panics,
+                        notified=answer.get('notified', False),
+                        kimga=answer.get('kimga', ''), kim=answer.get('kim', ''),
+                        usul=answer.get('usul', ''), izoh=answer.get('izoh', ''),
+                    )
+
+            if answer.get('notified'):
+                self.status_var.set(
+                    f"[KRITIK] {len(panics)} ta kritik qiymat — xabar berilgani qayd etildi")
+            else:
+                self.status_var.set(
+                    f"[KRITIK] {len(panics)} ta kritik qiymat — SHIFOKORGA XABAR BERILMAGAN!")
+        except Exception as e:
+            print(f"[OGOHLANTIRISH] Kritik qiymat tekshiruvida xato: {e}")
+        finally:
+            try:
+                if conn:
+                    conn.close()
+            except Exception:
+                pass
+
     def save_to_db(self):
         """Natijalarni bazaga saqlash - mustaqil connection bilan
         Returns: True if successful, False otherwise
@@ -18812,6 +19554,11 @@ Sana: {_sana_fmt}"""
 
         if not self.test_results:
             messagebox.showwarning("Diqqat", "Saqlash uchun natijalar yo'q")
+            return False
+
+        # ── Xatolik ehtimoli tekshiruvi (saqlashdan OLDIN) ────────────────
+        if not self._validate_results_before_save("Bazaga saqlash"):
+            self.status_var.set("[TO'XTATILDI] Natijani tuzating va qayta saqlang")
             return False
 
         # Mustaqil (fresh) connection yaratish - global db_conn() dan foydalanmaymiz
@@ -19068,6 +19815,12 @@ Sana: {_sana_fmt}"""
                     _vals[2] = "Saqlandi"
                     _new_tags = tuple('saqlandi' if t in ('tayyor', 'kutilmoqda') else t for t in _tags)
                     self.tests_tree.item(_item, values=_vals, tags=_new_tags)
+
+            # ── KRITIK QIYMAT (panic value) — saqlangandan KEYIN ─────────
+            # Natija to'g'ri, lekin hayotga xavfli bo'lsa: laborantni
+            # ogohlantiradi va shifokorga xabar berilganini jurnalga yozadi.
+            self._check_panic_values_after_save()
+
             return True
 
         except Exception as e:

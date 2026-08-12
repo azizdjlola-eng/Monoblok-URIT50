@@ -1,0 +1,274 @@
+{
+  "version": 1,
+  "delta": {
+    "enabled": true,
+    "max_days": 365,
+    "min_hours": 0,
+    "analytes": {
+      "41": {
+        "name": "Kreatinin",
+        "unit": "mkmol/l",
+        "pct": 50,
+        "abs_min": 30
+      },
+      "42": {
+        "name": "Mochevina",
+        "unit": "mmol/l",
+        "pct": 60,
+        "abs_min": 3
+      },
+      "48": {
+        "name": "Kaliy K",
+        "unit": "mmol/l",
+        "pct": 20,
+        "abs_min": 0.8
+      },
+      "52": {
+        "name": "Natriy Na",
+        "unit": "mmol/l",
+        "pct": 8,
+        "abs_min": 8
+      },
+      "47": {
+        "name": "Kalsiy Ca",
+        "unit": "mmol/l",
+        "pct": 15,
+        "abs_min": 0.3
+      },
+      "37": {
+        "name": "Glyukoza",
+        "unit": "mmol/l",
+        "pct": 60,
+        "abs_min": 2.5
+      },
+      "36": {
+        "name": "Umumiy oqsil",
+        "unit": "g/l",
+        "pct": 20,
+        "abs_min": 10
+      },
+      "35": {
+        "name": "Albumin",
+        "unit": "g/l",
+        "pct": 25,
+        "abs_min": 7
+      },
+      "39": {
+        "name": "ALT",
+        "unit": "E/l",
+        "pct": 100,
+        "abs_min": 40
+      },
+      "40": {
+        "name": "AST",
+        "unit": "E/l",
+        "pct": 100,
+        "abs_min": 40
+      },
+      "43": {
+        "name": "Umumiy xolesterin",
+        "unit": "mmol/l",
+        "pct": 35,
+        "abs_min": 1.5
+      },
+      "50": {
+        "name": "Siydik kislota",
+        "unit": "mkmol/l",
+        "pct": 40,
+        "abs_min": 80
+      },
+      "106": {
+        "name": "TTG (TSH)",
+        "unit": "mME/l",
+        "pct": 100,
+        "abs_min": 1.0
+      },
+      "105": {
+        "name": "Ferritin",
+        "unit": "ng/ml",
+        "pct": 80,
+        "abs_min": 30
+      },
+      "27.HGB": {
+        "name": "Gemoglobin (HGB)",
+        "unit": "g/l",
+        "pct": 15,
+        "abs_min": 20
+      },
+      "27.RBC": {
+        "name": "Eritrotsitlar (RBC)",
+        "unit": "10^12/l",
+        "pct": 20,
+        "abs_min": 0.8
+      },
+      "27.PLT": {
+        "name": "Trombotsitlar (PLT)",
+        "unit": "10^9/l",
+        "pct": 50,
+        "abs_min": 80
+      },
+      "27.WBC": {
+        "name": "Leykotsitlar (WBC)",
+        "unit": "10^9/l",
+        "pct": 70,
+        "abs_min": 4
+      },
+      "127.kreatinin": {
+        "name": "Kreatinin (panel)",
+        "unit": "mkmol/l",
+        "pct": 50,
+        "abs_min": 30
+      },
+      "127.mochevina": {
+        "name": "Mochevina (panel)",
+        "unit": "mmol/l",
+        "pct": 60,
+        "abs_min": 3
+      },
+      "126.tc": {
+        "name": "Xolesterin (panel)",
+        "unit": "mmol/l",
+        "pct": 35,
+        "abs_min": 1.5
+      }
+    }
+  },
+  "panic": {
+    "enabled": true,
+    "log_enabled": true,
+    "analytes": {
+      "37": {
+        "name": "Glyukoza",
+        "unit": "mmol/l",
+        "low": 2.5,
+        "high": 25
+      },
+      "48": {
+        "name": "Kaliy K",
+        "unit": "mmol/l",
+        "low": 2.8,
+        "high": 6.2
+      },
+      "52": {
+        "name": "Natriy Na",
+        "unit": "mmol/l",
+        "low": 120,
+        "high": 160
+      },
+      "47": {
+        "name": "Kalsiy Ca",
+        "unit": "mmol/l",
+        "low": 1.65,
+        "high": 3.5
+      },
+      "51": {
+        "name": "Magniy Mg",
+        "unit": "mmol/l",
+        "low": 0.4,
+        "high": 2.0
+      },
+      "41": {
+        "name": "Kreatinin",
+        "unit": "mkmol/l",
+        "low": null,
+        "high": 600
+      },
+      "42": {
+        "name": "Mochevina",
+        "unit": "mmol/l",
+        "low": null,
+        "high": 30
+      },
+      "39": {
+        "name": "ALT",
+        "unit": "E/l",
+        "low": null,
+        "high": 1000
+      },
+      "40": {
+        "name": "AST",
+        "unit": "E/l",
+        "low": null,
+        "high": 1000
+      },
+      "66": {
+        "name": "Troponin T",
+        "unit": "ng/ml",
+        "low": null,
+        "high": 0.1
+      },
+      "75": {
+        "name": "Fibrinogen",
+        "unit": "g/l",
+        "low": 1.0,
+        "high": null
+      },
+      "76": {
+        "name": "ACHTV",
+        "unit": "sek",
+        "low": null,
+        "high": 100
+      },
+      "27.HGB": {
+        "name": "Gemoglobin (HGB)",
+        "unit": "g/l",
+        "low": 60,
+        "high": 200
+      },
+      "27.PLT": {
+        "name": "Trombotsitlar (PLT)",
+        "unit": "10^9/l",
+        "low": 30,
+        "high": 1000
+      },
+      "27.WBC": {
+        "name": "Leykotsitlar (WBC)",
+        "unit": "10^9/l",
+        "low": 1.5,
+        "high": 50
+      },
+      "55.umumiy": {
+        "name": "Umumiy bilirubin",
+        "unit": "mkmol/l",
+        "low": null,
+        "high": 250
+      },
+      "73.pt_mno": {
+        "name": "MNO / INR",
+        "unit": "INR",
+        "low": null,
+        "high": 5
+      },
+      "73.fibrinogen": {
+        "name": "Fibrinogen (koag.)",
+        "unit": "g/l",
+        "low": 1.0,
+        "high": null
+      },
+      "73.achtv": {
+        "name": "ACHTV (koag.)",
+        "unit": "sek",
+        "low": null,
+        "high": 100
+      },
+      "74.pt_mno": {
+        "name": "MNO / INR",
+        "unit": "INR",
+        "low": null,
+        "high": 5
+      },
+      "127.kreatinin": {
+        "name": "Kreatinin (panel)",
+        "unit": "mkmol/l",
+        "low": null,
+        "high": 600
+      },
+      "127.mochevina": {
+        "name": "Mochevina (panel)",
+        "unit": "mmol/l",
+        "low": null,
+        "high": 30
+      }
+    }
+  }
+}

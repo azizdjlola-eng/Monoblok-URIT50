@@ -1,0 +1,798 @@
+{
+  "version": 2,
+  "enabled": true,
+  "sound": true,
+  "analytes": {
+    "kreatinin": {
+      "name": "Kreatinin",
+      "unit": "mkmol/l",
+      "min": 20,
+      "max": 2800,
+      "fmt": "decimal"
+    },
+    "mochevina": {
+      "name": "Mochevina",
+      "unit": "mmol/l",
+      "min": 0.5,
+      "max": 50,
+      "fmt": "decimal"
+    },
+    "siydik_kislota": {
+      "name": "Siydik kislotasi",
+      "unit": "mkmol/l",
+      "min": 30,
+      "max": 1500,
+      "fmt": "decimal"
+    },
+    "albumin": {
+      "name": "Albumin",
+      "unit": "g/l",
+      "min": 2,
+      "max": 60,
+      "fmt": "decimal"
+    },
+    "xolesterin_tc": {
+      "name": "Umumiy xolesterin (TC)",
+      "unit": "mmol/l",
+      "min": 0.5,
+      "max": 20,
+      "fmt": "decimal"
+    },
+    "hdl": {
+      "name": "HDL",
+      "unit": "mmol/l",
+      "min": 0.1,
+      "max": 5,
+      "fmt": "decimal"
+    },
+    "ldl": {
+      "name": "LDL",
+      "unit": "mmol/l",
+      "min": 0.2,
+      "max": 10,
+      "fmt": "decimal"
+    },
+    "trigliserid": {
+      "name": "Trigliseridlar (TG)",
+      "unit": "mmol/l",
+      "min": 0.1,
+      "max": 11.4,
+      "fmt": "decimal"
+    },
+    "achtv": {
+      "name": "ACHTV",
+      "unit": "sek",
+      "min": 10,
+      "max": 120,
+      "fmt": "decimal"
+    },
+    "fibrinogen": {
+      "name": "Fibrinogen",
+      "unit": "g/l",
+      "min": 0.3,
+      "max": 10,
+      "fmt": "decimal"
+    },
+    "tt": {
+      "name": "Trombin vaqti (TT)",
+      "unit": "sek",
+      "min": 9,
+      "max": 60,
+      "fmt": "decimal"
+    },
+    "pt_sek": {
+      "name": "PT sekundalarda",
+      "unit": "sek",
+      "min": 8,
+      "max": 120,
+      "fmt": "decimal"
+    },
+    "pt_kviku": {
+      "name": "PT bo'yicha Kviku",
+      "unit": "%",
+      "min": 5,
+      "max": 150,
+      "fmt": "decimal"
+    },
+    "pt_mno": {
+      "name": "MNO / INR",
+      "unit": "INR",
+      "min": 0.5,
+      "max": 8,
+      "fmt": "decimal"
+    },
+    "rf_avtomat": {
+      "name": "RF (Revmatoidniy faktor) avtomat",
+      "unit": "ME/ml",
+      "min": 0,
+      "max": 200,
+      "fmt": "decimal"
+    },
+    "crp_avtomat": {
+      "name": "CRP (S-reaktivniy belok) avtomat",
+      "unit": "mg/l",
+      "min": 0,
+      "max": 300,
+      "fmt": "decimal"
+    },
+    "aslo_avtomat": {
+      "name": "ASLO (Antistreptolizin-O) avtomat",
+      "unit": "ME/ml",
+      "min": 0,
+      "max": 1300,
+      "fmt": "decimal"
+    }
+  },
+  "single": {
+    "39": {
+      "name": "Alanin aminotransferaza (ALT)",
+      "unit": "E/l",
+      "min": 0,
+      "max": 4000,
+      "fmt": "decimal"
+    },
+    "35": {
+      "ref": "albumin"
+    },
+    "56": {
+      "name": "Alfa-amilaza",
+      "unit": "E/l",
+      "min": 0,
+      "max": 1200,
+      "fmt": "decimal"
+    },
+    "57": {
+      "name": "Alfa-amilaza pankreaticheskiy",
+      "unit": "E/l",
+      "min": 0,
+      "max": 1200,
+      "fmt": "decimal"
+    },
+    "40": {
+      "name": "Aspartat aminotransferaza (AST)",
+      "unit": "E/l",
+      "min": 0,
+      "max": 4000,
+      "fmt": "decimal"
+    },
+    "46": {
+      "name": "Gamma-glutamil transferaza (GGT)",
+      "unit": "E/l",
+      "min": 0,
+      "max": 1200,
+      "fmt": "decimal"
+    },
+    "37": {
+      "name": "Glyukoza",
+      "unit": "mmol/l",
+      "min": 0.3,
+      "max": 41.6,
+      "fmt": "decimal"
+    },
+    "38": {
+      "name": "Glyukozaga tolerantlik testi",
+      "unit": "mmol/l",
+      "min": 0.3,
+      "max": 41.6,
+      "fmt": "decimal"
+    },
+    "53": {
+      "name": "Ishqoriy fosfataza (IF)",
+      "unit": "E/l",
+      "min": 0,
+      "max": 1200,
+      "fmt": "decimal"
+    },
+    "48": {
+      "name": "Kaliy K",
+      "unit": "mmol/l",
+      "min": 1.5,
+      "max": 10,
+      "fmt": "decimal"
+    },
+    "47": {
+      "name": "Kalsiy Ca",
+      "unit": "mmol/l",
+      "min": 1,
+      "max": 4,
+      "fmt": "decimal"
+    },
+    "41": {
+      "ref": "kreatinin"
+    },
+    "45": {
+      "name": "Laktatdegidrogrenaza (LDG)",
+      "unit": "E/l",
+      "min": 0,
+      "max": 1000,
+      "fmt": "decimal"
+    },
+    "51": {
+      "name": "Magniy Mg",
+      "unit": "mg/dl",
+      "min": 0.2,
+      "max": 12,
+      "fmt": "decimal"
+    },
+    "42": {
+      "ref": "mochevina"
+    },
+    "52": {
+      "name": "Natriy Na",
+      "unit": "mmol/l",
+      "min": 100,
+      "max": 190,
+      "fmt": "decimal"
+    },
+    "50": {
+      "ref": "siydik_kislota",
+      "name": "Siydik kislota (Mochevaya kislota)"
+    },
+    "49": {
+      "name": "Temir  Fe",
+      "unit": "mkmol/l",
+      "min": 0,
+      "max": 100,
+      "fmt": "decimal"
+    },
+    "54": {
+      "name": "Timol proba",
+      "unit": "ye.",
+      "min": 0,
+      "max": 20,
+      "fmt": "decimal"
+    },
+    "44": {
+      "ref": "trigliserid",
+      "name": "Trigliserid-TG"
+    },
+    "36": {
+      "name": "Umumiy oqsil",
+      "unit": "g/l",
+      "min": 10,
+      "max": 150,
+      "fmt": "decimal"
+    },
+    "43": {
+      "ref": "xolesterin_tc"
+    },
+    "123": {
+      "ref": "ldl",
+      "name": "LDL-Past zichlikli lipoprotein"
+    },
+    "124": {
+      "ref": "hdl",
+      "name": "HDL-Yuqori zichlikli lipoprotein"
+    },
+    "128": {
+      "name": "Xolinesteraza (CHE)",
+      "unit": "E/l",
+      "min": 300,
+      "max": 19000,
+      "fmt": "int"
+    },
+    "76": {
+      "ref": "achtv"
+    },
+    "75": {
+      "ref": "fibrinogen"
+    },
+    "74": {
+      "ref": "pt_sek",
+      "name": "Protrombin Time (PTI, PT/MNO)"
+    },
+    "77": {
+      "ref": "tt",
+      "name": "Trombinovoe vremya (TT)"
+    },
+    "30": {
+      "name": "Qonning ivish vaqti  QIB",
+      "unit": "daq",
+      "min": 1,
+      "max": 30,
+      "fmt": "count_range"
+    },
+    "29": {
+      "name": "Eritrotsitlar cho'kish tezligi (ECHT)",
+      "unit": "mm/soat",
+      "min": 0,
+      "max": 140,
+      "fmt": "int"
+    },
+    "61": {
+      "ref": "aslo_avtomat"
+    },
+    "60": {
+      "ref": "crp_avtomat"
+    },
+    "59": {
+      "ref": "rf_avtomat"
+    },
+    "129": {
+      "name": "Anti HBsAg (Antitelo) immunitet IFA",
+      "unit": "mME/ml",
+      "min": 0,
+      "max": 1000,
+      "fmt": "decimal"
+    },
+    "99": {
+      "name": "Askarida IgG IFA",
+      "unit": "KP",
+      "min": 0,
+      "max": 15,
+      "fmt": "decimal"
+    },
+    "109": {
+      "name": "AT-TPO IFA",
+      "unit": "ME/ml",
+      "min": 0,
+      "max": 1000,
+      "fmt": "decimal"
+    },
+    "69": {
+      "name": "CA 72-4 (oshqozon onkomarkeri)",
+      "unit": "E/ml",
+      "min": 0,
+      "max": 300,
+      "fmt": "decimal"
+    },
+    "70": {
+      "name": "CA15-3 (ko'krak saratoni belgisi)",
+      "unit": "E/ml",
+      "min": 0,
+      "max": 300,
+      "fmt": "decimal"
+    },
+    "86": {
+      "name": "Gepatit A (IgG, IFA)",
+      "unit": "KP",
+      "min": 0,
+      "max": 15,
+      "fmt": "decimal"
+    },
+    "82": {
+      "name": "Gepatit B (HBsAg, IFA)",
+      "unit": "KP",
+      "min": 0,
+      "max": 15,
+      "fmt": "decimal"
+    },
+    "84": {
+      "name": "Gepatit C (Anti-HCV, IFA)",
+      "unit": "KP",
+      "min": 0,
+      "max": 15,
+      "fmt": "decimal"
+    },
+    "85": {
+      "name": "Gepatit D (D-antitela, IFA)",
+      "unit": "KP",
+      "min": 0,
+      "max": 15,
+      "fmt": "decimal"
+    },
+    "98": {
+      "name": "IgE umumiy (Allergiya uchun)",
+      "unit": "ME/ml",
+      "min": 0,
+      "max": 2500,
+      "fmt": "decimal"
+    },
+    "118": {
+      "name": "Insulin IFA",
+      "unit": "mkED/ml",
+      "min": 0,
+      "max": 300,
+      "fmt": "decimal"
+    },
+    "113": {
+      "name": "Estradiol IFA",
+      "unit": "pg/ml",
+      "min": 0,
+      "max": 3000,
+      "fmt": "decimal"
+    },
+    "105": {
+      "name": "Ferritin",
+      "unit": "ng/ml",
+      "min": 0,
+      "max": 1500,
+      "fmt": "decimal"
+    },
+    "111": {
+      "name": "FSG (FSH) IFA",
+      "unit": "mME/ml",
+      "min": 0,
+      "max": 200,
+      "fmt": "decimal"
+    },
+    "90": {
+      "name": "Helicobakter pylori IgG IFA",
+      "unit": "KP",
+      "min": 0,
+      "max": 15,
+      "fmt": "decimal"
+    },
+    "119": {
+      "name": "Kortizol IFA",
+      "unit": "nmol/l",
+      "min": 0,
+      "max": 1750,
+      "fmt": "decimal"
+    },
+    "110": {
+      "name": "LG (LH) IFA",
+      "unit": "mME/ml",
+      "min": 0,
+      "max": 200,
+      "fmt": "decimal"
+    },
+    "100": {
+      "name": "Lyambliya-antitela IFA",
+      "unit": "KP",
+      "min": 0,
+      "max": 15,
+      "fmt": "decimal"
+    },
+    "67": {
+      "name": "Pepsinogen I (PGI) IFA",
+      "unit": "ng/ml",
+      "min": 0,
+      "max": 500,
+      "fmt": "decimal"
+    },
+    "68": {
+      "name": "Pepsinogen II (PGII) IFA",
+      "unit": "ng/ml",
+      "min": 0,
+      "max": 200,
+      "fmt": "decimal"
+    },
+    "114": {
+      "name": "Progesteron IFA",
+      "unit": "nmol/l",
+      "min": 0,
+      "max": 640,
+      "fmt": "decimal"
+    },
+    "112": {
+      "name": "Prolaktin IFA",
+      "unit": "mME/ml",
+      "min": 0,
+      "max": 10000,
+      "fmt": "int"
+    },
+    "108": {
+      "name": "T3 erkin IFA",
+      "unit": "pmol/l",
+      "min": 0,
+      "max": 30,
+      "fmt": "decimal"
+    },
+    "107": {
+      "name": "T4 erkin IFA",
+      "unit": "pmol/l",
+      "min": 0,
+      "max": 100,
+      "fmt": "decimal"
+    },
+    "116": {
+      "name": "Testesteron Erkin IFA",
+      "unit": "pg/ml",
+      "min": 0,
+      "max": 50,
+      "fmt": "decimal"
+    },
+    "115": {
+      "name": "Testesteron IFA",
+      "unit": "nmol/l",
+      "min": 0,
+      "max": 52,
+      "fmt": "decimal"
+    },
+    "106": {
+      "name": "TTG (TSH) IFA",
+      "unit": "mME/l",
+      "min": 0,
+      "max": 100,
+      "fmt": "decimal"
+    },
+    "117": {
+      "name": "Umumiy PSA IFA",
+      "unit": "ng/ml",
+      "min": 0,
+      "max": 100,
+      "fmt": "decimal"
+    },
+    "104": {
+      "name": "Vitamin B12",
+      "unit": "pg/ml",
+      "min": 0,
+      "max": 2000,
+      "fmt": "int"
+    },
+    "103": {
+      "name": "Vitamin D (25-OH)",
+      "unit": "ng/ml",
+      "min": 0,
+      "max": 150,
+      "fmt": "decimal"
+    },
+    "120": {
+      "name": "XGCh (Homiladorlik gormoni) IFA",
+      "unit": "mME/ml",
+      "min": 0,
+      "max": 225000,
+      "fmt": "int"
+    },
+    "66": {
+      "name": "Troponin T",
+      "unit": "ng/ml",
+      "min": 0,
+      "max": 50,
+      "fmt": "decimal"
+    }
+  },
+  "multi": {
+    "27.WBC": {
+      "name": "Leykotsitlar (WBC)",
+      "unit": "10^9/l",
+      "min": 0.1,
+      "max": 100,
+      "fmt": "decimal"
+    },
+    "27.RBC": {
+      "name": "Eritrotsitlar (RBC)",
+      "unit": "10^12/l",
+      "min": 0.5,
+      "max": 10,
+      "fmt": "decimal"
+    },
+    "27.HGB": {
+      "name": "Gemoglobin (HGB)",
+      "unit": "g/l",
+      "min": 20,
+      "max": 250,
+      "fmt": "int"
+    },
+    "27.PLT": {
+      "name": "Trombotsitlar (PLT)",
+      "unit": "10^9/l",
+      "min": 5,
+      "max": 2000,
+      "fmt": "int"
+    },
+    "55.umumiy": {
+      "name": "Umumiy bilirubin",
+      "unit": "mkmol/l",
+      "min": 0,
+      "max": 400,
+      "fmt": "decimal"
+    },
+    "55.bog_langan": {
+      "name": "Bog'langan bilirubin",
+      "unit": "mkmol/l",
+      "min": 0,
+      "max": 200,
+      "fmt": "decimal"
+    },
+    "55.erkin": {
+      "name": "Erkin bilirubin",
+      "unit": "mkmol/l",
+      "min": 0,
+      "max": 400,
+      "fmt": "decimal"
+    },
+    "58.rf": {
+      "ref": "rf_avtomat",
+      "name": "RF avtomat"
+    },
+    "58.crp": {
+      "ref": "crp_avtomat",
+      "name": "CRP avtomat"
+    },
+    "58.aslo": {
+      "ref": "aslo_avtomat",
+      "name": "ASLO avtomat"
+    },
+    "62.rf": {
+      "name": "RF qo'lda",
+      "unit": "ME/ml",
+      "min": 0,
+      "max": 200,
+      "fmt": "any"
+    },
+    "62.crp": {
+      "name": "CRP qo'lda",
+      "unit": "mg/l",
+      "min": 0,
+      "max": 96,
+      "fmt": "any"
+    },
+    "62.aslo": {
+      "name": "ASLO qo'lda",
+      "unit": "ME/ml",
+      "min": 0,
+      "max": 800,
+      "fmt": "any"
+    },
+    "73.pt_sek": {
+      "ref": "pt_sek"
+    },
+    "73.pt_kviku": {
+      "ref": "pt_kviku"
+    },
+    "73.pt_mno": {
+      "ref": "pt_mno"
+    },
+    "73.tt": {
+      "ref": "tt"
+    },
+    "73.achtv": {
+      "ref": "achtv"
+    },
+    "73.fibrinogen": {
+      "ref": "fibrinogen"
+    },
+    "74.pt_sek": {
+      "ref": "pt_sek"
+    },
+    "74.pt_kviku": {
+      "ref": "pt_kviku"
+    },
+    "74.pt_mno": {
+      "ref": "pt_mno"
+    },
+    "126.tc": {
+      "ref": "xolesterin_tc"
+    },
+    "126.hdl": {
+      "ref": "hdl"
+    },
+    "126.ldl": {
+      "ref": "ldl"
+    },
+    "126.tg": {
+      "ref": "trigliserid"
+    },
+    "126.vldl": {
+      "name": "VLDL (avtomatik)",
+      "unit": "mmol/l",
+      "min": 0,
+      "max": 5,
+      "fmt": "decimal"
+    },
+    "126.ka": {
+      "name": "Aterogenlik koeffitsienti (KA)",
+      "unit": "",
+      "min": 0,
+      "max": 10,
+      "fmt": "decimal"
+    },
+    "127.mochevina": {
+      "ref": "mochevina"
+    },
+    "127.kreatinin": {
+      "ref": "kreatinin"
+    },
+    "127.siydik_kislota": {
+      "ref": "siydik_kislota"
+    },
+    "127.albumin": {
+      "ref": "albumin"
+    },
+    "127.bun": {
+      "name": "Mochevina azoti (BUN)",
+      "unit": "mmol/l",
+      "min": 0.2,
+      "max": 25,
+      "fmt": "decimal"
+    },
+    "127.gfr": {
+      "name": "GFR (avtomatik)",
+      "unit": "ml/min",
+      "min": 0,
+      "max": 200,
+      "fmt": "int"
+    },
+    "33.leykot": {
+      "name": "Leykotsitlar",
+      "unit": "1/ml",
+      "min": 0,
+      "max": 100000000,
+      "fmt": "int"
+    },
+    "33.eritr": {
+      "name": "Eritrotsitlar",
+      "unit": "1/ml",
+      "min": 0,
+      "max": 100000000,
+      "fmt": "int"
+    },
+    "33.silindirlar": {
+      "name": "Silindrlar",
+      "unit": "1/ml",
+      "min": 0,
+      "max": 10000000,
+      "fmt": "int"
+    },
+    "34.miqdori": {
+      "name": "Porsiya miqdori",
+      "unit": "ml",
+      "min": 0,
+      "max": 600,
+      "fmt": "int"
+    },
+    "34.solishtirma": {
+      "name": "Solishtirma zichlik",
+      "unit": "",
+      "min": 1.0,
+      "max": 1.04,
+      "fmt": "decimal"
+    },
+    "34.kunduzgi_diurez": {
+      "name": "Kunduzgi diurez",
+      "unit": "ml",
+      "min": 0,
+      "max": 3000,
+      "fmt": "int"
+    },
+    "34.tungi_diurez": {
+      "name": "Tungi diurez",
+      "unit": "ml",
+      "min": 0,
+      "max": 2000,
+      "fmt": "int"
+    },
+    "34.jami_diurez": {
+      "name": "Jami diurez",
+      "unit": "ml",
+      "min": 0,
+      "max": 4000,
+      "fmt": "int"
+    }
+  },
+  "options": {
+    "81": [
+      "Manfiy",
+      "Musbat"
+    ],
+    "83": [
+      "Manfiy",
+      "Musbat"
+    ],
+    "89": [
+      "Manfiy",
+      "Musbat"
+    ],
+    "91": [
+      "Manfiy",
+      "Musbat"
+    ],
+    "121": [
+      "Manfiy",
+      "Musbat"
+    ],
+    "71": [
+      "Manfiy",
+      "Musbat"
+    ],
+    "80": [
+      "Topilmadi",
+      "Topildi"
+    ],
+    "79": [
+      "Topilmadi",
+      "Topildi"
+    ],
+    "78": [
+      "Topilmadi",
+      "Topildi"
+    ]
+  },
+  "rules": {
+    "bilirubin_direct_ge_total": true,
+    "zimnitskiy_diurez_tolerance": 1,
+    "lipid_sum_tolerance": 1.15
+  }
+}
