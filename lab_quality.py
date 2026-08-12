@@ -121,7 +121,11 @@ DEFAULT_CONFIG = {
             "48":  {"name": "Kaliy K",      "unit": "mmol/l",  "low": 2.8,  "high": 6.2},
             "52":  {"name": "Natriy Na",    "unit": "mmol/l",  "low": 120,  "high": 160},
             "47":  {"name": "Kalsiy Ca",    "unit": "mmol/l",  "low": 1.65, "high": 3.5},
-            "51":  {"name": "Magniy Mg",    "unit": "mmol/l",  "low": 0.4,  "high": 2.0},
+            # DIQQAT: Magniy BK-280 da mg/dl da o'lchanadi (norma 1.7-2.4 mg/dl).
+            # Kritik chegara ham SHU BIRLIKDA bo'lishi shart, aks holda me'yordagi
+            # natija (masalan 2.27 mg/dl) soxta "kritik" signal berardi.
+            # mg/dl = mmol/l * 2.43  →  0.4 mmol/l = 1.0 ;  2.0 mmol/l = 4.9
+            "51":  {"name": "Magniy Mg",    "unit": "mg/dl",   "low": 1.0,  "high": 4.9},
             "41":  {"name": "Kreatinin",    "unit": "mkmol/l", "low": None, "high": 600},
             "42":  {"name": "Mochevina",    "unit": "mmol/l",  "low": None, "high": 30},
             "39":  {"name": "ALT",          "unit": "E/l",     "low": None, "high": 1000},

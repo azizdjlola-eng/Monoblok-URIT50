@@ -209,9 +209,9 @@
     },
     "51": {
       "name": "Magniy Mg",
-      "unit": "mg/dl",
-      "min": 0.2,
-      "max": 12,
+      "unit": "mmol/l",
+      "min": 0.1,
+      "max": 5,
       "fmt": "decimal"
     },
     "42": {
@@ -290,7 +290,7 @@
       "unit": "daq",
       "min": 1,
       "max": 30,
-      "fmt": "count_range"
+      "fmt": "decimal"
     },
     "29": {
       "name": "Eritrotsitlar cho'kish tezligi (ECHT)",

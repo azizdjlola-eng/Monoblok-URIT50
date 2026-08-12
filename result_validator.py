@@ -136,7 +136,9 @@ DEFAULT_CONFIG = {
         "47":  {"name": "Kalsiy Ca",                          "unit": "mmol/l",  "min": 1,    "max": 4,      "fmt": "decimal"},
         "41":  {"ref": "kreatinin"},                     # ← BUYRAK PANELI bilan umumiy
         "45":  {"name": "Laktatdegidrogrenaza (LDG)",         "unit": "E/l",     "min": 0,    "max": 1000,   "fmt": "decimal"},
-        "51":  {"name": "Magniy Mg",                          "unit": "mmol/l",  "min": 0.1,  "max": 5,      "fmt": "decimal"},
+        # DIQQAT: Magniy BK-280 da mg/dl da o'lchanadi (norma 1.7-2.4 mg/dl).
+        # mmol/l ga o'tkazilsa: mg/dl = mmol/l * 2.43
+        "51":  {"name": "Magniy Mg",                          "unit": "mg/dl",   "min": 0.2,  "max": 12,     "fmt": "decimal"},
         "42":  {"ref": "mochevina"},                     # ← BUYRAK PANELI bilan umumiy
         "52":  {"name": "Natriy Na",                          "unit": "mmol/l",  "min": 100,  "max": 190,    "fmt": "decimal"},
         "50":  {"ref": "siydik_kislota",                 # ← BUYRAK PANELI bilan umumiy
@@ -155,7 +157,9 @@ DEFAULT_CONFIG = {
         "75":  {"ref": "fibrinogen"},                    # ← KOAGULOGRAMMA bilan umumiy
         "74":  {"ref": "pt_sek", "name": "Protrombin Time (PTI, PT/MNO)"}, # ← KOAGULOGRAMMA bilan umumiy
         "77":  {"ref": "tt", "name": "Trombinovoe vremya (TT)"},           # ← KOAGULOGRAMMA bilan umumiy
-        "30":  {"name": "Qonning ivish vaqti  QIB",           "unit": "daq",     "min": 1,    "max": 30,     "fmt": "decimal"},
+        # QIB natijasi DIAPAZON bo'lib yoziladi ("2.20-3.00" = boshlandi-tugadi),
+        # shuning uchun count_range — chiziqcha bu yerda xato emas, diapazon belgisi.
+        "30":  {"name": "Qonning ivish vaqti  QIB",           "unit": "daq",     "min": 1,    "max": 30,     "fmt": "count_range"},
         "29":  {"name": "Eritrotsitlar cho'kish tezligi (ECHT)", "unit": "mm/soat", "min": 0, "max": 140,    "fmt": "int"},
 
         # --- Revmoproba komponentlari alohida buyurtma qilinganda ---
@@ -538,12 +542,19 @@ def apply_db_overrides(cfg, rows):
         nm = _norm_name(nomi)
         if not nm:
             continue
+        # Format STATIK config dan olinadi (agar u yerda maxsus fmt bo'lsa).
+        # Masalan QIB natijasi diapazon ("2.20-3.00") — DB dan chegara
+        # qo'yilgani uchun u "decimal" ga aylanib, xato bermasligi kerak.
+        _fmt = "decimal"
+        _static = _name_index(cfg.get("single", {}), cfg).get(nm)
+        if _static and _static[1].get("fmt"):
+            _fmt = _static[1]["fmt"]
         db_map[nm] = {
             "name": nomi,
             "unit": unit or "",
             "min": float(mn) if mn is not None else None,
             "max": float(mx) if mx is not None else None,
-            "fmt": "decimal",
+            "fmt": _fmt,
         }
     cfg["_db_by_name"] = db_map
     return cfg

@@ -163,9 +163,9 @@
       },
       "51": {
         "name": "Magniy Mg",
-        "unit": "mg/dl",
-        "low": 1.0,
-        "high": 4.9
+        "unit": "mmol/l",
+        "low": 0.4,
+        "high": 2.0
       },
       "41": {
         "name": "Kreatinin",
