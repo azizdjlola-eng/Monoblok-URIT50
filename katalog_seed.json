@@ -1015,5 +1015,77 @@
   "turi": "test",
   "soha": "uzi",
   "aktiv": 1
+ },
+ {
+  "id": 151,
+  "nomi": "Jigar va o't pufagi UZI",
+  "narxi": 50000,
+  "sample": "",
+  "turi": "test",
+  "soha": "uzi",
+  "aktiv": 1
+ },
+ {
+  "id": 152,
+  "nomi": "Oshqozon osti bezi UZI",
+  "narxi": 50000,
+  "sample": "",
+  "turi": "test",
+  "soha": "uzi",
+  "aktiv": 1
+ },
+ {
+  "id": 153,
+  "nomi": "Taloq UZI",
+  "narxi": 50000,
+  "sample": "",
+  "turi": "test",
+  "soha": "uzi",
+  "aktiv": 1
+ },
+ {
+  "id": 154,
+  "nomi": "Siydik pufagi va prostata UZI",
+  "narxi": 50000,
+  "sample": "",
+  "turi": "test",
+  "soha": "uzi",
+  "aktiv": 1
+ },
+ {
+  "id": 155,
+  "nomi": "Sut bezlari UZI",
+  "narxi": 50000,
+  "sample": "",
+  "turi": "test",
+  "soha": "uzi",
+  "aktiv": 1
+ },
+ {
+  "id": 156,
+  "nomi": "Bo'yin limfa tugunlari UZI",
+  "narxi": 50000,
+  "sample": "",
+  "turi": "test",
+  "soha": "uzi",
+  "aktiv": 1
+ },
+ {
+  "id": 157,
+  "nomi": "Homiladorlik UZI",
+  "narxi": 50000,
+  "sample": "",
+  "turi": "test",
+  "soha": "uzi",
+  "aktiv": 1
+ },
+ {
+  "id": 158,
+  "nomi": "UZI (umumiy)",
+  "narxi": 70000,
+  "sample": "",
+  "turi": "test",
+  "soha": "uzi",
+  "aktiv": 1
  }
 ]

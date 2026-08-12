@@ -35,5 +35,8 @@
     "port": 8087,
     "lis_port": 8088,
     "encoding": "utf-8"
+  },
+  "printer": {
+    "blanka_printer": "EPSON L8050 Series"
   }
 }

@@ -12,6 +12,7 @@ Dastur startda `seed_normalar()` ni chaqiradi: DB da YO'Q normalarni qo'shadi
 
 import os
 import sys
+import csv
 import json
 
 
@@ -80,7 +81,8 @@ def seed_avto() -> int:
             _ensure_norma_table(conn)     # tahlillar_norma KAFOLATLI mavjud bo'lsin
             n1 = seed_normalar(conn)      # tahlillar_norma (normalar)
             n2 = seed_katalog(conn)       # tahlillar (xizmat katalogi + narxlar)
-            return n1 + n2
+            n3 = seed_mkb10(conn)         # mkb10 (XKT-10 tashxis lug'ati)
+            return n1 + n2 + n3
         finally:
             conn.close()
     except Exception:
@@ -218,5 +220,91 @@ def seed_katalog(conn, faqat_yoq: bool = True) -> int:
             qoshildi += 1
         conn.commit()
         return qoshildi
+    finally:
+        cur.close()
+
+
+# ─────────────── MKB-10 (XKT-10/ICD-10) tashxis kodlari lug'ati ──────────────
+# `mkb10_seed.csv` — milliy XKT-10 lug'ati (15900+ qator: kod, nomi_uz, nomi_ru,
+# daraja). Vrach kabineti (diagnoz) va UZI protokoli (klinik tashxis) SHU
+# jadvaldan qidiradi (vrach_web/app.py: /api/mkb10). Foydalanuvchi TAHRIRLAMAYDI
+# va har kompyuterda bir xil bo'lishi shart — shuning uchun sinxron orqali EMAS,
+# faqat shu LOKAL fayldan (bir marta, jadval bo'sh bo'lsa) to'ldiriladi.
+
+def _mkb10_csv_yol() -> str:
+    if getattr(sys, "frozen", False):
+        base = os.path.dirname(sys.executable)
+        for c in (base, os.path.join(base, "_internal")):
+            p = os.path.join(c, "mkb10_seed.csv")
+            if os.path.exists(p):
+                return p
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "mkb10_seed.csv")
+
+
+def mkb10_yukla() -> list:
+    yol = _mkb10_csv_yol()
+    if not os.path.exists(yol):
+        return []
+    try:
+        with open(yol, "r", encoding="utf-8-sig", newline="") as f:
+            return list(csv.DictReader(f))
+    except Exception:
+        return []
+
+
+def seed_mkb10(conn) -> int:
+    """mkb10 jadvalini `mkb10_seed.csv` (to'liq milliy XKT-10 lug'ati) dan
+    to'ldiradi. Jadval ustunlari: kod, nomi (o'zbekcha — ILGARIDAN mavjud,
+    ba'zilari qo'lda kiritilgan), nomi_ru, daraja.
+
+    Qo'lda kiritilgan/tahrirlangan qatorlar SAQLANADI — `nomi` ustuniga
+    tegilmaydi, faqat YO'Q kodlar qo'shiladi va bo'sh nomi_ru/daraja
+    to'ldiriladi. `COUNT(*) >= CSV qatorlar soni` bo'lsa qimmat solishtiruv
+    butunlay o'tkazib yuboriladi (arzon tez-yo'l — keyingi startlarda)."""
+    cur = conn.cursor()
+    try:
+        rows = mkb10_yukla()
+        if not rows:
+            return 0
+        try:
+            cur.execute("SELECT COUNT(*) FROM mkb10")
+            (mavjud_soni,) = cur.fetchone()
+        except Exception:
+            return 0          # jadval hali yo'q (eski ensure_schema) — keyingi startda
+        if mavjud_soni and int(mavjud_soni) >= len(rows):
+            return 0          # allaqachon to'liq (yoki qo'lda ko'proq qo'shilgan)
+
+        cur.execute("SELECT kod, nomi_ru, daraja FROM mkb10")
+        mavjud = {k: (ru, dj) for k, ru, dj in cur.fetchall()}
+
+        yangi, toldirish = [], []
+        for r in rows:
+            kod = (r.get("kod") or "").strip()
+            nomi_uz = (r.get("nomi_uz") or "").strip()
+            if not kod or not nomi_uz:
+                continue
+            nomi_ru = (r.get("nomi_ru") or "").strip()
+            try:
+                daraja = int(r.get("daraja") or 4)
+            except (TypeError, ValueError):
+                daraja = 4
+            if kod not in mavjud:
+                yangi.append((kod, nomi_uz, nomi_ru, daraja))
+            else:
+                eski_ru, eski_dj = mavjud[kod]
+                if not eski_ru and nomi_ru:
+                    toldirish.append((nomi_ru, daraja, kod))
+
+        BATCH = 1000
+        for i in range(0, len(yangi), BATCH):
+            cur.executemany(
+                "INSERT IGNORE INTO mkb10 (kod, nomi, nomi_ru, daraja) "
+                "VALUES (%s,%s,%s,%s)", yangi[i:i + BATCH])
+        for i in range(0, len(toldirish), BATCH):
+            cur.executemany(
+                "UPDATE mkb10 SET nomi_ru=%s, daraja=%s WHERE kod=%s",
+                toldirish[i:i + BATCH])
+        conn.commit()
+        return len(yangi)
     finally:
         cur.close()

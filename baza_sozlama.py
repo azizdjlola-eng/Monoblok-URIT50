@@ -254,44 +254,325 @@ def test_ulanish(cfg: dict):
         return False, f"Ulanmadi: {e}"
 
 
+# ─────────────────────── Tarmoq / IP yordamchilari ───────────────────────
+def barcha_iplar() -> list:
+    """Shu kompyuterning LAN IP manzillari (127.* dan tashqari).
+    Boshqa kompyuter/TV/telefon shu manzilni teradi."""
+    import socket
+    natija = []
+    try:
+        asosiy = bu_kompyuter_ip()
+        if asosiy and not asosiy.startswith("127."):
+            natija.append(asosiy)
+    except Exception:
+        pass
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = info[4][0]
+            if ip and not ip.startswith("127.") and ip not in natija:
+                natija.append(ip)
+    except Exception:
+        pass
+    return natija or ["127.0.0.1"]
+
+
+# ─────────────────── Xizmatlar (Vrach kabineti / TV server) ───────────────────
+VRACH_PORT = 8090
+TV_PORT = 8765
+
+# Vrach kabineti config.json standart qiymatlari (vrach_web/app.py bilan bir xil)
+VRACH_DEFAULT = {
+    "port": VRACH_PORT,
+    "host_bind": "127.0.0.1",
+    "tv_server_url": f"http://127.0.0.1:{TV_PORT}",
+    "tv_ids": ["ALL"],
+    "xona": "kabinet",
+}
+
+
+def xizmat_papka(nom: str) -> str:
+    """%ProgramData%\\AzizMedLine\\<nom> — EXE rejimida xizmatlar shu yerda ishlaydi."""
+    yol = os.path.join(konfig_papka(), nom)
+    try:
+        os.makedirs(yol, exist_ok=True)
+    except Exception:
+        pass
+    return yol
+
+
+def vrach_config_yol() -> str:
+    """Vrach kabineti config.json yo'li.
+    EXE: %ProgramData%\\AzizMedLine\\VrachKabineti\\config.json  (app.py shu yerdan o'qiydi)
+    Dev: vrach_web\\config.json"""
+    if getattr(sys, "frozen", False):
+        return os.path.join(xizmat_papka("VrachKabineti"), "config.json")
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrach_web", "config.json")
+
+
+def vrach_config_oqi() -> dict:
+    import json
+    cfg = dict(VRACH_DEFAULT)
+    yol = vrach_config_yol()
+    try:
+        if os.path.exists(yol):
+            with open(yol, "r", encoding="utf-8") as f:
+                mavjud = json.load(f)
+            if isinstance(mavjud, dict):
+                cfg.update(mavjud)
+    except Exception as e:
+        print(f"vrach config.json o'qilmadi: {e}")
+    return cfg
+
+
+def vrach_config_saqla(yangilar: dict) -> str:
+    """config.json dagi FAQAT berilgan kalitlarni yangilaydi — qolgan sozlamalar
+    (blanka ranglari, vrach_id, Word papkasi...) saqlanib qoladi."""
+    import json
+    yol = vrach_config_yol()
+    mavjud = {}
+    try:
+        if os.path.exists(yol):
+            with open(yol, "r", encoding="utf-8") as f:
+                o = json.load(f)
+            if isinstance(o, dict):
+                mavjud = o
+    except Exception:
+        mavjud = {}
+    mavjud.update(yangilar)
+    os.makedirs(os.path.dirname(yol), exist_ok=True)
+    with open(yol, "w", encoding="utf-8") as f:
+        json.dump(mavjud, f, ensure_ascii=False, indent=2)
+    return yol
+
+
+_XIZMAT_EXE = {"VrachKabineti": "VrachKabineti.exe", "TVServer": "AzizMedTVServer.exe"}
+
+
+def xizmat_exe(nom: str) -> str:
+    """O'rnatmadagi xizmat EXE yo'li ('VrachKabineti' | 'TVServer').
+    Sozlama EXE  ...\\AzizMedLine\\Sozlama\\  da turadi — qo'shni papkani qaraymiz."""
+    if not getattr(sys, "frozen", False):
+        return ""
+    ildiz = os.path.dirname(os.path.dirname(sys.executable))     # ...\AzizMedLine
+    yol = os.path.join(ildiz, nom, _XIZMAT_EXE.get(nom, ""))
+    return yol if os.path.exists(yol) else ""
+
+
+def xizmat_ishga_tushir(nom: str):
+    """Xizmatni ishga tushiradi. (ok, xabar)."""
+    exe = xizmat_exe(nom)
+    if not exe:
+        return False, ("Bu kompyuterda o'rnatilmagan.\n"
+                       "O'rnatuvchini qayta ishga tushirib, kerakli komponentni belgilang.")
+    import subprocess
+    try:
+        subprocess.Popen([exe], cwd=os.path.dirname(exe))
+        return True, "Ishga tushirildi — bir necha soniyadan keyin tayyor bo'ladi."
+    except Exception as e:
+        return False, f"Ishga tushmadi: {e}"
+
+
+def xizmat_ishlayaptimi(port: int, host: str = "127.0.0.1") -> bool:
+    return _port_ochiqmi(host, port, timeout=0.6)
+
+
+def tv_admin_url_saqla(url: str) -> str:
+    """TV admin yorlig'i ochadigan manzil (TV_ADMIN.vbs shu fayldan o'qiydi)."""
+    os.makedirs(konfig_papka(), exist_ok=True)
+    yol = os.path.join(konfig_papka(), "tv_admin_url.txt")
+    with open(yol, "w", encoding="utf-8") as f:
+        f.write((url or "").strip())
+    return yol
+
+
+# ─────────────────── LAN ruxsati (boshqa kompyuterlar ulanishi) ───────────────────
+def lan_ruxsat(cfg: dict):
+    """
+    Bu kompyuterni SERVER qilib ochadi (boshqa kabinetlardagi Vrach kabineti,
+    Registratsiya va Natija oynalari shu bazaga ulanishi uchun):
+      1) Windows fayrvolida MySQL portini ochadi
+      2) MySQL'da root@'%' foydalanuvchisini yaratadi/yangilaydi
+    Administrator huquqi kerak. (ok, xabar) qaytaradi.
+    """
+    import subprocess
+    qadamlar = []
+    cf = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        port = int(cfg.get("port", 3306) or 3306)
+    except Exception:
+        port = 3306
+
+    # 1) Fayrvol
+    try:
+        subprocess.run(["netsh", "advfirewall", "firewall", "add", "rule",
+                        f"name=AzizMedLine MySQL ({port})", "dir=in", "action=allow",
+                        "protocol=TCP", f"localport={port}"],
+                       capture_output=True, creationflags=cf, timeout=20)
+        qadamlar.append(f"✅ Fayrvol: {port}-port ochildi")
+    except Exception as e:
+        qadamlar.append(f"⚠️ Fayrvol ochilmadi ({e}) — administrator huquqi kerak")
+
+    # 2) root@'%' grant
+    try:
+        import mysql.connector
+        conn = mysql.connector.connect(
+            host="127.0.0.1", port=port, user=cfg.get("user", "root"),
+            password=cfg.get("password", ""), connection_timeout=6, use_pure=True)
+        cur = conn.cursor()
+        parol = cfg.get("password", "")
+        cur.execute("CREATE USER IF NOT EXISTS 'root'@'%' "
+                    "IDENTIFIED WITH mysql_native_password BY %s", (parol,))
+        cur.execute("ALTER USER 'root'@'%' IDENTIFIED WITH mysql_native_password BY %s", (parol,))
+        cur.execute("GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION")
+        cur.execute("FLUSH PRIVILEGES")
+        cur.close()
+        conn.close()
+        qadamlar.append("✅ Baza: boshqa kompyuterlarga ruxsat berildi")
+    except Exception as e:
+        qadamlar.append(f"⛔ Bazaga ruxsat berilmadi: {e}")
+        return False, "\n".join(qadamlar)
+
+    iplar = ", ".join(barcha_iplar())
+    qadamlar.append(f"\nBoshqa kompyuterlar shu IP ni tersin:  {iplar}")
+    return True, "\n".join(qadamlar)
+
+
+# ─────────────────────────── Litsenziya ───────────────────────────
+def litsenziya_holati(online: bool = False) -> dict:
+    """Litsenziya holati — Sozlama oynasining 'Litsenziya' bo'limi uchun."""
+    natija = {"ok": False, "xabar": "Litsenziya moduli topilmadi.", "machine_id": "",
+              "tarif": "", "korxona": "", "tugash": "", "qolgan": None, "fayl": ""}
+    try:
+        from litsenziya import litsenziya_manager as lm
+        n = lm.holatni_tekshir(online=online)
+        p = n.payload or {}
+        natija.update(ok=n.yaroqli, xabar=n.xabar, machine_id=n.machine_id,
+                      tarif=p.get("tarif", ""), korxona=p.get("korxona", ""),
+                      qolgan=n.qolgan_kun, fayl=lm.faylni_top() or "")
+        exp = p.get("expires_at")
+        if exp:
+            import datetime
+            natija["tugash"] = datetime.datetime.fromtimestamp(int(exp)).strftime("%d.%m.%Y")
+    except Exception as e:
+        natija["xabar"] = f"Litsenziya o'qilmadi: {e}"
+        try:
+            from litsenziya import mashina_id as _mid
+            natija["machine_id"] = _mid.mashina_id()
+        except Exception:
+            pass
+    return natija
+
+
+def litsenziya_ornat(azlic_yoli: str):
+    """.azlic faylni umumiy joyga o'rnatadi (barcha dastur ko'radi). (ok, xabar)."""
+    try:
+        from litsenziya import litsenziya_manager as lm
+        n = lm.faollashtir(azlic_yoli)
+        return n.yaroqli, n.xabar
+    except Exception as e:
+        return False, f"O'rnatib bo'lmadi: {e}"
+
+
+def litsenziya_joyi() -> str:
+    try:
+        from litsenziya import yollar as _y
+        return _y.yoziladigan_papka()
+    except Exception:
+        return konfig_papka()
+
+
 # ──────────────────────────── GUI ────────────────────────────
-def sozlama_oynasi(parent=None) -> bool:
+# Ranglar (barcha oynalar bilan bir xil uslub)
+_BG = "#0f1422"
+_KARTA = "#1a2236"
+_MATN = "#e6e9f2"
+_KUL = "#9aa3bd"
+_YASHIL = "#1f8a4c"
+_QIZIL = "#ff9a9a"
+_OK = "#7ee0a0"
+
+
+def sozlama_oynasi(parent=None, bolim: str = "baza") -> bool:
+    """
+    AzizMedLine sozlama oynasi — 3 bo'lim:
+      • Baza      — ulanish (BARCHA dasturga amal qiladi)
+      • Litsenziya— .azlic ni bir marta o'rnatish (barcha dastur ko'radi)
+      • Xizmatlar — Vrach kabineti / TV server manzillari (IP) va sozlamasi
+
+    `bolim` — ochilishda qaysi bo'lim ko'rinsin ("baza" | "litsenziya" | "xizmatlar").
+    True qaytadi — baza sozlamasi saqlangan bo'lsa.
+    """
     import tkinter as tk
-    from tkinter import messagebox
+    from tkinter import messagebox, filedialog
+    import webbrowser
 
     cfg = oqi()
     holat = {"saqlandi": False}
 
     oyna = tk.Toplevel(parent) if parent else tk.Tk()
-    oyna.title("AzizMedLine — Baza Sozlamasi")
-    oyna.configure(bg="#0f1422")
-    oyna.geometry("440x420")
+    oyna.title("AzizMedLine — Sozlama")
+    oyna.configure(bg=_BG)
+    oyna.geometry("620x660")
     oyna.resizable(False, False)
 
-    tk.Label(oyna, text="🗄️ Baza ulanish sozlamasi", bg="#0f1422", fg="#e6e9f2",
-             font=("Segoe UI Semibold", 14)).pack(pady=(18, 2))
-    tk.Label(oyna, text=f"Saqlanadi: {yozish_yoli()}", bg="#0f1422", fg="#9aa3bd",
+    # ── Sarlavha ──
+    bosh = tk.Frame(oyna, bg=_BG)
+    bosh.pack(fill="x", padx=20, pady=(14, 6))
+    tk.Label(bosh, text="🛠️  AzizMedLine sozlamasi", bg=_BG, fg=_MATN,
+             font=("Segoe UI Semibold", 15)).pack(side="left")
+    tk.Label(bosh, text=f"Bu kompyuter: {'  '.join(barcha_iplar())}", bg=_BG, fg=_OK,
+             font=("Consolas", 10)).pack(side="right")
+
+    # ── Bo'lim tugmalari (tab) ──
+    tab_ramka = tk.Frame(oyna, bg=_BG)
+    tab_ramka.pack(fill="x", padx=20)
+    sahifalar = {}
+    tab_tugma = {}
+
+    def _koorsat(nom):
+        for k, s in sahifalar.items():
+            s.pack_forget()
+            tab_tugma[k].config(bg=_KARTA, fg=_KUL)
+        sahifalar[nom].pack(fill="both", expand=True, padx=20, pady=(10, 0))
+        tab_tugma[nom].config(bg="#2b5cff", fg="white")
+        if nom == "litsenziya":
+            _lic_yangila()
+        elif nom == "xizmatlar":
+            _xizmat_yangila()
+
+    for nom, matn in (("baza", "🗄️  Baza"), ("litsenziya", "🔑  Litsenziya"),
+                      ("xizmatlar", "🖥️  Xizmatlar (Vrach / TV)")):
+        b = tk.Button(tab_ramka, text=matn, relief="flat", bg=_KARTA, fg=_KUL,
+                      font=("Segoe UI Semibold", 10), cursor="hand2",
+                      command=lambda n=nom: _koorsat(n))
+        b.pack(side="left", padx=(0, 4), ipady=6, ipadx=10)
+        tab_tugma[nom] = b
+        sahifalar[nom] = tk.Frame(oyna, bg=_BG)
+
+    # ════════════════════ 1) BAZA ════════════════════
+    s1 = sahifalar["baza"]
+    tk.Label(s1, text="Bu ulanish sozlamasi TO'RTTA dasturga ham amal qiladi:\n"
+                      "Registratsiya  •  Natija  •  Vrach kabineti  •  TV server",
+             bg=_KARTA, fg=_KUL, font=("Segoe UI", 9), justify="center"
+             ).pack(fill="x", pady=(0, 8), ipady=7)
+    tk.Label(s1, text=f"Saqlanadi: {yozish_yoli()}", bg=_BG, fg=_KUL,
              font=("Segoe UI", 8)).pack()
 
     maydon = {}
     qatorlar = [("host", "Server IP / Host"), ("port", "Port"),
                 ("user", "Foydalanuvchi"), ("password", "Parol"),
                 ("database", "Baza nomi")]
-    ramka = tk.Frame(oyna, bg="#0f1422")
-    ramka.pack(fill="x", padx=24, pady=10)
+    ramka = tk.Frame(s1, bg=_BG)
+    ramka.pack(fill="x", pady=(8, 4))
     for i, (kalit, label) in enumerate(qatorlar):
-        tk.Label(ramka, text=label, bg="#0f1422", fg="#9aa3bd",
-                 font=("Segoe UI", 10)).grid(row=i, column=0, sticky="w", pady=6)
-        e = tk.Entry(ramka, font=("Consolas", 11), bg="#1a2236", fg="#e6e9f2",
-                     relief="flat", width=26, show="*" if kalit == "password" else "")
+        tk.Label(ramka, text=label, bg=_BG, fg=_KUL,
+                 font=("Segoe UI", 10)).grid(row=i, column=0, sticky="w", pady=5)
+        e = tk.Entry(ramka, font=("Consolas", 11), bg=_KARTA, fg=_MATN,
+                     relief="flat", width=30, show="*" if kalit == "password" else "")
         e.insert(0, str(cfg.get(kalit, "")))
-        e.grid(row=i, column=1, sticky="e", pady=6, ipady=4, padx=(10, 0))
+        e.grid(row=i, column=1, sticky="e", pady=5, ipady=4, padx=(10, 0))
         maydon[kalit] = e
     ramka.columnconfigure(1, weight=1)
-
-    natija_lbl = tk.Label(oyna, text="", bg="#0f1422", fg="#9aa3bd",
-                          font=("Segoe UI", 9), wraplength=400, justify="center")
-    natija_lbl.pack(pady=(4, 6))
 
     def _yig():
         c = {k: maydon[k].get().strip() for k in maydon}
@@ -301,29 +582,296 @@ def sozlama_oynasi(parent=None) -> bool:
             c["port"] = 3306
         return c
 
+    def _hostni_qoy(v):
+        maydon["host"].delete(0, "end")
+        maydon["host"].insert(0, v)
+
+    rejim = tk.Frame(s1, bg=_BG)
+    rejim.pack(fill="x", pady=(6, 2))
+    tk.Button(rejim, text="🖥️  Baza SHU kompyuterda", relief="flat", bg=_KARTA, fg=_MATN,
+              font=("Segoe UI", 9), cursor="hand2",
+              command=lambda: _hostni_qoy("127.0.0.1")
+              ).pack(side="left", expand=True, fill="x", padx=(0, 4), ipady=5)
+    tk.Button(rejim, text="🌐  Baza BOSHQA kompyuterda (IP)", relief="flat", bg=_KARTA,
+              fg=_MATN, font=("Segoe UI", 9), cursor="hand2",
+              command=lambda: (_hostni_qoy(""), maydon["host"].focus_set())
+              ).pack(side="left", expand=True, fill="x", padx=(4, 0), ipady=5)
+
+    natija_lbl = tk.Label(s1, text="", bg=_BG, fg=_KUL, font=("Segoe UI", 9),
+                          wraplength=560, justify="left")
+    natija_lbl.pack(pady=(8, 4), fill="x")
+
     def _test():
-        ok, msg = test_ulanish(_yig())
-        natija_lbl.config(text=msg, fg="#7ee0a0" if ok else "#ff9a9a")
+        natija_lbl.config(text="Tekshirilmoqda...", fg=_KUL)
+        oyna.update_idletasks()
+        natija_lbl.config(text=ulanish_diagnostika(_yig()), fg=_MATN)
 
     def _saqla():
         c = _yig()
         ok, msg = test_ulanish(c)
-        if not ok and not messagebox.askyesno(
-                "Ulanmadi", f"{msg}\n\nBaribir saqlansinmi?"):
+        if not ok and not messagebox.askyesno("Ulanmadi", f"{msg}\n\nBaribir saqlansinmi?"):
             return
         yol = saqla(c)
         holat["saqlandi"] = True
-        messagebox.showinfo("Saqlandi", f"Sozlama saqlandi:\n{yol}")
-        oyna.destroy()
+        messagebox.showinfo("Saqlandi",
+                            f"Sozlama saqlandi:\n{yol}\n\n"
+                            "Registratsiya, Natija, Vrach kabineti va TV server\n"
+                            "endi shu bazaga ulanadi (ular qayta ishga tushirilsin).")
 
-    tugma = tk.Frame(oyna, bg="#0f1422")
-    tugma.pack(fill="x", padx=24, pady=10)
-    tk.Button(tugma, text="🔌 Tekshirish", command=_test, bg="#2a3350", fg="#e6e9f2",
+    def _lokal_mysql():
+        ok, msg = lokal_mysql_ishga_tushir()
+        natija_lbl.config(text=msg, fg=_OK if ok else _QIZIL)
+
+    def _lan():
+        if not messagebox.askyesno(
+                "Boshqa kompyuterlarga ruxsat",
+                "Bu kompyuter SERVER bo'ladi:\n"
+                "• fayrvolda MySQL porti ochiladi\n"
+                "• bazaga tarmoqdan ulanish yoqiladi\n\n"
+                "Davom etilsinmi?"):
+            return
+        ok, msg = lan_ruxsat(_yig())
+        natija_lbl.config(text=msg, fg=_OK if ok else _QIZIL)
+
+    tugma = tk.Frame(s1, bg=_BG)
+    tugma.pack(fill="x", pady=(4, 6))
+    tk.Button(tugma, text="🔌 Tekshirish", command=_test, bg="#2a3350", fg=_MATN,
               relief="flat", font=("Segoe UI", 10), cursor="hand2"
               ).pack(side="left", expand=True, fill="x", padx=(0, 4), ipady=6)
-    tk.Button(tugma, text="💾 Saqlash", command=_saqla, bg="#1f8a4c", fg="white",
+    tk.Button(tugma, text="💾 Saqlash", command=_saqla, bg=_YASHIL, fg="white",
               relief="flat", font=("Segoe UI Semibold", 10), cursor="hand2"
               ).pack(side="left", expand=True, fill="x", padx=(4, 0), ipady=6)
+
+    qosh = tk.Frame(s1, bg=_BG)
+    qosh.pack(fill="x")
+    tk.Button(qosh, text="🔧 Lokal MySQL'ni ishga tushirish", command=_lokal_mysql,
+              bg=_KARTA, fg=_KUL, relief="flat", font=("Segoe UI", 9), cursor="hand2"
+              ).pack(side="left", expand=True, fill="x", padx=(0, 4), ipady=5)
+    tk.Button(qosh, text="🔓 Boshqa kompyuterlarga ruxsat (server)", command=_lan,
+              bg=_KARTA, fg=_KUL, relief="flat", font=("Segoe UI", 9), cursor="hand2"
+              ).pack(side="left", expand=True, fill="x", padx=(4, 0), ipady=5)
+
+    # ════════════════════ 2) LITSENZIYA ════════════════════
+    s2 = sahifalar["litsenziya"]
+    tk.Label(s2, text="Litsenziya BIR MARTA o'rnatiladi — o'rnatmadagi barcha dastur\n"
+                      "(Registratsiya, Natija, Vrach kabineti, TV server) shu fayldan foydalanadi.",
+             bg=_KARTA, fg=_KUL, font=("Segoe UI", 9), justify="center"
+             ).pack(fill="x", pady=(0, 10), ipady=7)
+
+    lic_holat = tk.Label(s2, text="Tekshirilmoqda...", bg=_BG, fg=_KUL,
+                         font=("Segoe UI Semibold", 11), wraplength=560, justify="center")
+    lic_holat.pack(pady=(4, 2))
+    lic_izoh = tk.Label(s2, text="", bg=_BG, fg=_KUL, font=("Segoe UI", 9),
+                        wraplength=560, justify="center")
+    lic_izoh.pack(pady=(0, 10))
+
+    id_ramka = tk.Frame(s2, bg=_KARTA)
+    id_ramka.pack(fill="x", pady=4)
+    tk.Label(id_ramka, text="Ushbu kompyuter ID raqami (litsenziya shu ID ga beriladi):",
+             bg=_KARTA, fg=_KUL, font=("Segoe UI", 9)).pack(anchor="w", padx=12, pady=(10, 0))
+    id_var = tk.StringVar(value="")
+    id_box = tk.Entry(id_ramka, textvariable=id_var, font=("Consolas", 13), justify="center",
+                      bg=_BG, fg=_OK, relief="flat", readonlybackground=_BG)
+    id_box.configure(state="readonly")
+    id_box.pack(fill="x", padx=12, pady=(2, 10), ipady=6)
+
+    def _id_nusxa():
+        oyna.clipboard_clear()
+        oyna.clipboard_append(id_var.get())
+        messagebox.showinfo("Nusxalandi",
+                            "Machine ID nusxalandi.\nShu ID ni administratorga yuboring:\n"
+                            "+998 99 673 13 42  |  @Aziz996731342")
+
+    def _lic_yangila(online=False):
+        h = litsenziya_holati(online=online)
+        id_var.set(h["machine_id"])
+        if h["ok"]:
+            qolgan = f" • {h['qolgan']} kun qoldi" if h.get("qolgan") is not None else ""
+            lic_holat.config(text=f"✅ Litsenziya faol{qolgan}", fg=_OK)
+            lic_izoh.config(
+                text=f"{h['korxona'] or ''}   tarif: {h['tarif'] or '—'}   "
+                     f"tugash sanasi: {h['tugash'] or '—'}\nFayl: {h['fayl'] or '—'}")
+        else:
+            lic_holat.config(text=f"⛔ {h['xabar']}", fg=_QIZIL)
+            lic_izoh.config(text=f"Litsenziya o'rnatiladigan joy: {litsenziya_joyi()}")
+
+    def _lic_tanla():
+        yol = filedialog.askopenfilename(
+            title="Litsenziya faylini tanlang",
+            filetypes=[("Litsenziya", "*.azlic"), ("Barcha fayllar", "*.*")])
+        if not yol:
+            return
+        ok, msg = litsenziya_ornat(yol)
+        _lic_yangila()
+        if ok:
+            messagebox.showinfo("Tayyor",
+                                f"Litsenziya o'rnatildi!\n{msg}\n\n"
+                                "Endi Registratsiya, Natija, Vrach kabineti va TV server\n"
+                                "ochiladi (ishlab turganlari qayta ishga tushirilsin).")
+        else:
+            messagebox.showerror("Xato", msg)
+
+    tk.Button(s2, text="📋 ID ni nusxalash", command=_id_nusxa, bg="#2b5cff", fg="white",
+              relief="flat", font=("Segoe UI Semibold", 10), cursor="hand2"
+              ).pack(fill="x", pady=(8, 4), ipady=7)
+    tk.Button(s2, text="📂 Litsenziya faylini o'rnatish (.azlic)", command=_lic_tanla,
+              bg=_YASHIL, fg="white", relief="flat", font=("Segoe UI Semibold", 10),
+              cursor="hand2").pack(fill="x", pady=4, ipady=7)
+    tk.Button(s2, text="↻ Holatni yangilash (onlayn tekshirish)",
+              command=lambda: _lic_yangila(online=True), bg=_KARTA, fg=_KUL,
+              relief="flat", font=("Segoe UI", 9), cursor="hand2"
+              ).pack(fill="x", pady=4, ipady=5)
+    tk.Label(s2, text="Litsenziya olish uchun:  +998 99 673 13 42   |   @Aziz996731342",
+             bg=_BG, fg=_KUL, font=("Segoe UI", 9)).pack(pady=(10, 0))
+
+    # ════════════════════ 3) XIZMATLAR ════════════════════
+    s3 = sahifalar["xizmatlar"]
+    vcfg = vrach_config_oqi()
+    ip_asosiy = barcha_iplar()[0]
+
+    tk.Label(s3, text="Vrach kabineti va TV server — brauzerda ochiladigan dasturlar.\n"
+                      "Boshqa kabinetdagi kompyuter/telefon/TV quyidagi manzillarni teradi.",
+             bg=_KARTA, fg=_KUL, font=("Segoe UI", 9), justify="center"
+             ).pack(fill="x", pady=(0, 8), ipady=7)
+
+    # ─ Vrach kabineti ─
+    # DIQQAT: LabelFrame sarlavhasida emoji ISHLATMANG — Windows Tk uni
+    # kvadratcha qilib chizadi (ayniqsa 👨‍⚕️ kabi ZWJ birikmalarni).
+    vk = tk.LabelFrame(s3, text="  Vrach kabineti  ", bg=_BG, fg=_MATN,
+                       font=("Segoe UI Semibold", 10), bd=1, relief="groove")
+    vk.pack(fill="x", pady=(2, 8), ipady=4)
+
+    v_holat = tk.Label(vk, text="", bg=_BG, fg=_KUL, font=("Segoe UI", 9))
+    v_holat.grid(row=0, column=0, columnspan=3, sticky="w", padx=10, pady=(6, 2))
+
+    tk.Label(vk, text="Port", bg=_BG, fg=_KUL, font=("Segoe UI", 9)
+             ).grid(row=1, column=0, sticky="w", padx=10, pady=3)
+    v_port = tk.Entry(vk, font=("Consolas", 10), bg=_KARTA, fg=_MATN, relief="flat", width=10)
+    v_port.insert(0, str(vcfg.get("port", VRACH_PORT)))
+    v_port.grid(row=1, column=1, sticky="w", pady=3, ipady=3)
+
+    v_lan = tk.BooleanVar(value=str(vcfg.get("host_bind", "127.0.0.1")) not in
+                          ("127.0.0.1", "localhost"))
+    tk.Checkbutton(vk, text="Tarmoqdan ham ochilsin (boshqa kompyuter/telefon)",
+                   variable=v_lan, bg=_BG, fg=_KUL, selectcolor=_KARTA,
+                   activebackground=_BG, activeforeground=_MATN, font=("Segoe UI", 9)
+                   ).grid(row=1, column=2, sticky="w", padx=(10, 0))
+
+    tk.Label(vk, text="TV server manzili", bg=_BG, fg=_KUL, font=("Segoe UI", 9)
+             ).grid(row=2, column=0, sticky="w", padx=10, pady=3)
+    v_tv = tk.Entry(vk, font=("Consolas", 10), bg=_KARTA, fg=_MATN, relief="flat", width=34)
+    v_tv.insert(0, str(vcfg.get("tv_server_url", f"http://127.0.0.1:{TV_PORT}")))
+    v_tv.grid(row=2, column=1, columnspan=2, sticky="we", padx=(0, 10), pady=3, ipady=3)
+
+    tk.Label(vk, text="Xona nomi", bg=_BG, fg=_KUL, font=("Segoe UI", 9)
+             ).grid(row=3, column=0, sticky="w", padx=10, pady=3)
+    v_xona = tk.Entry(vk, font=("Segoe UI", 10), bg=_KARTA, fg=_MATN, relief="flat", width=34)
+    v_xona.insert(0, str(vcfg.get("xona", "kabinet")))
+    v_xona.grid(row=3, column=1, columnspan=2, sticky="we", padx=(0, 10), pady=3, ipady=3)
+
+    v_manzil = tk.Label(vk, text="", bg=_BG, fg=_OK, font=("Consolas", 10))
+    v_manzil.grid(row=4, column=0, columnspan=3, sticky="w", padx=10, pady=(6, 2))
+    vk.columnconfigure(2, weight=1)
+
+    def _vrach_port():
+        try:
+            return int(v_port.get().strip() or VRACH_PORT)
+        except ValueError:
+            return VRACH_PORT
+
+    def _vrach_saqla():
+        yol = vrach_config_saqla({
+            "port": _vrach_port(),
+            "host_bind": "0.0.0.0" if v_lan.get() else "127.0.0.1",
+            "tv_server_url": v_tv.get().strip() or f"http://127.0.0.1:{TV_PORT}",
+            "xona": v_xona.get().strip() or "kabinet",
+        })
+        messagebox.showinfo("Saqlandi",
+                            f"Vrach kabineti sozlamasi saqlandi:\n{yol}\n\n"
+                            "Vrach kabineti qayta ishga tushirilsin.")
+        _xizmat_yangila()
+
+    v_tugma = tk.Frame(vk, bg=_BG)
+    v_tugma.grid(row=5, column=0, columnspan=3, sticky="we", padx=10, pady=(2, 8))
+    tk.Button(v_tugma, text="💾 Saqlash", command=_vrach_saqla, bg=_YASHIL, fg="white",
+              relief="flat", font=("Segoe UI", 9), cursor="hand2"
+              ).pack(side="left", expand=True, fill="x", padx=(0, 3), ipady=5)
+    tk.Button(v_tugma, text="▶ Ishga tushirish",
+              command=lambda: _xizmat_boshla("VrachKabineti"), bg=_KARTA, fg=_MATN,
+              relief="flat", font=("Segoe UI", 9), cursor="hand2"
+              ).pack(side="left", expand=True, fill="x", padx=3, ipady=5)
+    tk.Button(v_tugma, text="🌐 Brauzerda ochish",
+              command=lambda: webbrowser.open(f"http://127.0.0.1:{_vrach_port()}"),
+              bg=_KARTA, fg=_MATN, relief="flat", font=("Segoe UI", 9), cursor="hand2"
+              ).pack(side="left", expand=True, fill="x", padx=(3, 0), ipady=5)
+
+    # ─ TV server ─
+    tvf = tk.LabelFrame(s3, text="  AzizMed TV server  ", bg=_BG, fg=_MATN,
+                        font=("Segoe UI Semibold", 10), bd=1, relief="groove")
+    tvf.pack(fill="x", pady=(2, 6), ipady=4)
+
+    t_holat = tk.Label(tvf, text="", bg=_BG, fg=_KUL, font=("Segoe UI", 9))
+    t_holat.pack(anchor="w", padx=10, pady=(6, 2))
+    t_manzil = tk.Label(tvf, text="", bg=_BG, fg=_OK, font=("Consolas", 10), justify="left")
+    t_manzil.pack(anchor="w", padx=10, pady=(0, 4))
+
+    def _tv_admin_och():
+        url = f"http://127.0.0.1:{TV_PORT}/admin"
+        if not xizmat_ishlayaptimi(TV_PORT):
+            ok, msg = xizmat_ishga_tushir("TVServer")
+            if not ok:
+                messagebox.showerror("TV server", msg)
+                return
+            import time
+            for _ in range(20):
+                time.sleep(0.7)
+                oyna.update()
+                if xizmat_ishlayaptimi(TV_PORT):
+                    break
+        webbrowser.open(url)
+        _xizmat_yangila()
+
+    t_tugma = tk.Frame(tvf, bg=_BG)
+    t_tugma.pack(fill="x", padx=10, pady=(2, 8))
+    tk.Button(t_tugma, text="▶ Ishga tushirish",
+              command=lambda: _xizmat_boshla("TVServer"), bg=_KARTA, fg=_MATN,
+              relief="flat", font=("Segoe UI", 9), cursor="hand2"
+              ).pack(side="left", expand=True, fill="x", padx=(0, 3), ipady=5)
+    tk.Button(t_tugma, text="🖥️ TV admin panelini ochish", command=_tv_admin_och,
+              bg=_YASHIL, fg="white", relief="flat", font=("Segoe UI Semibold", 9),
+              cursor="hand2").pack(side="left", expand=True, fill="x", padx=(3, 0), ipady=5)
+
+    def _xizmat_boshla(nom):
+        ok, msg = xizmat_ishga_tushir(nom)
+        (messagebox.showinfo if ok else messagebox.showerror)("Xizmat", msg)
+        oyna.after(2500, _xizmat_yangila)
+
+    def _xizmat_yangila():
+        ip = barcha_iplar()[0]
+        vp = _vrach_port()
+        v_ish = xizmat_ishlayaptimi(vp)
+        v_holat.config(text=("● Ishlab turibdi" if v_ish else "○ Ishlamayapti"),
+                       fg=_OK if v_ish else _KUL)
+        v_manzil.config(text=f"Shu kompyuterda:  http://127.0.0.1:{vp}\n"
+                             f"Boshqa kabinetdan: http://{ip}:{vp}"
+                             + ("" if v_lan.get() else "   ← 'Tarmoqdan ham ochilsin' yoqilsin"))
+        t_ish = xizmat_ishlayaptimi(TV_PORT)
+        t_holat.config(text=("● Ishlab turibdi" if t_ish else "○ Ishlamayapti"),
+                       fg=_OK if t_ish else _KUL)
+        t_manzil.config(text=f"TV admin paneli:   http://{ip}:{TV_PORT}/admin\n"
+                             f"TV pristavka (APK): http://{ip}:{TV_PORT}\n"
+                             f"Telefon boshqaruvi: http://{ip}:{TV_PORT}")
+        try:
+            tv_admin_url_saqla(f"http://127.0.0.1:{TV_PORT}/admin")
+        except Exception:
+            pass
+
+    # ── Yopish ──
+    tk.Button(oyna, text="✖ Yopish", command=lambda: oyna.destroy(), bg=_KARTA, fg=_KUL,
+              relief="flat", font=("Segoe UI", 10), cursor="hand2"
+              ).pack(side="bottom", fill="x", padx=20, pady=12, ipady=6)
+
+    _koorsat(bolim if bolim in sahifalar else "baza")
 
     if parent:
         oyna.transient(parent)
@@ -335,4 +883,10 @@ def sozlama_oynasi(parent=None) -> bool:
 
 
 if __name__ == "__main__":
-    sozlama_oynasi()
+    import sys as _s
+    _b = "baza"
+    if "--litsenziya" in _s.argv:
+        _b = "litsenziya"
+    elif "--xizmatlar" in _s.argv:
+        _b = "xizmatlar"
+    sozlama_oynasi(bolim=_b)

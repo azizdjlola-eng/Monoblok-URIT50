@@ -77,11 +77,41 @@ def darvoza_server(app_nomi: str = "AzizMed Server") -> bool:
     return False
 
 
+def darvoza_xizmat(app_nomi: str = "AzizMed xizmati", jim: bool = False) -> bool:
+    """
+    Fon xizmatlari (Vrach kabineti, TV server) uchun darvoza.
+
+      • Manba (dev) rejimi — HECH QACHON to'smaydi.
+      • Litsenziya yaroqli — jimgina o'tkazadi.
+      • Yaroqsiz + `jim=True` (Windows avtostarti) — oyna CHIQARMAYDI, faqat
+        logga yozadi. Kompyuter yoqilganda mijoz oldiga oyna otilib chiqmasin.
+      • Yaroqsiz + qo'lda ishga tushirilgan — FAOLLASHTIRISH OYNASI chiqadi
+        (Machine ID + .azlic tanlash), xuddi Registratsiya oynasidagidek.
+        Shu tariqa litsenziyani "qayerga qo'yish" savoli yo'qoladi.
+    """
+    if not getattr(sys, "frozen", False):
+        return True
+    n = lm.holatni_tekshir()
+    if n.yaroqli:
+        return True
+    if jim:
+        return darvoza_server(app_nomi)
+    darvoza_server(app_nomi)        # logga sabab + Machine ID yozib qo'yamiz
+    return _faollashtirish_oyna(n, app_nomi)
+
+
 def darvoza(app_nomi: str = "AzizMedLine", parent=None) -> bool:
     """
     GUI tekshiruv. Yaroqli bo'lsa True. Aks holda faollashtirish oynasi ochiladi;
     foydalanuvchi to'g'ri .azlic tanlasa True (faollashtirildi), aks holda False.
+
+    Dev (manba koddan `python launcher.py` bilan ishga tushirish) — litsenziya
+    MAJBURLANMAYDI (ishlab chiquvchi/egasining kompyuteri to'silmaydi). Litsenziya
+    faqat tarqatilgan EXE (frozen) da talab qilinadi — bu `baza_ruxsati_yoki_xato()`
+    dagi mantiq bilan bir xil.
     """
+    if not getattr(sys, "frozen", False):
+        return True
     n = lm.holatni_tekshir()
     if n.yaroqli:
         return True

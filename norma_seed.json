@@ -457,7 +457,7 @@
  {
   "guruh": "IFA",
   "tahlil_nomi": "Gepatit B (HBsAg, IFA ИФА)",
-  "norma": "0-1.00 Manfiy (-), 1.1-30 Musbat (+)",
+  "norma": "0-1.00 Manfiy (-), 1.1-40 Musbat (+)",
   "birlik": "",
   "type": "numeric",
   "min_val": 0.0,
@@ -470,7 +470,7 @@
  {
   "guruh": "IFA",
   "tahlil_nomi": "Gepatit C (Anti-HCV, IFA ИФА)",
-  "norma": "0-1.00 Manfiy (-), 1.1-30 Musbat (+)",
+  "norma": "0-1.00 Manfiy (-), 1.1-40 Musbat (+)",
   "birlik": "",
   "type": "numeric",
   "min_val": 0.0,

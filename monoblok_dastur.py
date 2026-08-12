@@ -277,6 +277,11 @@ def load_blanka_config() -> dict:
         "table_header_bg": "9DC3E6",
         "group_title_color": "27AE60",
         "qr_link_template": "",
+        # Saqlash yo'llari — bo'sh bo'lsa standart yo'l ishlatiladi (pastdagi
+        # get_save_dir / _get_onedrive_natijalar ga qarang). Boshqa kompyuterda
+        # boshqacha bo'lishi mumkin, shuning uchun Blanka Sozlamalaridan sozlanadi.
+        "word_save_dir": "",   # bo'sh = G:\Қилинган анализлар
+        "pdf_save_dir": "",    # bo'sh = OneDrive\Natijalar
     }
     if os.path.exists(CONFIG_FILE):
         try:
@@ -307,6 +312,45 @@ def save_blanka_config(config: dict = None):
         print(f"[OGOHLANTIRISH] Sozlamalarni saqlashda xato: {e}")
     # Saqlashdan keyin global blanka ranglarini yangilash
     refresh_blanka_colors()
+
+
+def get_blanka_printer():
+    """Natija blankasi AVTO-pechati uchun ishlatiladigan printer nomini qaytaradi.
+
+    Sozlamalarda (Tizim Sozlamalari → 🖨 Printer) aniq printer tanlangan bo'lsa —
+    o'shani qaytaradi. Tanlanmagan bo'lsa yoki tanlangan printer topilmasa —
+    Windows'ning standart (asosiy) printeriga o'tadi. Bu tufayli hamshira
+    printerni faqat sozlamalardan almashtiradi, kompyuterga tegmasdan."""
+    default_printer = None
+    try:
+        import win32print
+        default_printer = win32print.GetDefaultPrinter()
+    except Exception:
+        pass
+
+    try:
+        cfg = load_config()
+        name = ((cfg.get("printer", {}) or {}).get("blanka_printer", "") or "").strip()
+    except Exception:
+        name = ""
+
+    if not name:
+        return default_printer
+
+    # Tanlangan printer haqiqatan mavjudmi? Yo'q bo'lsa (masalan tarmoq printeri
+    # o'chgan) — standart printerga qaytamiz, chop etish umuman to'xtab qolmasin.
+    try:
+        import win32print
+        flags = win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS
+        names = {p[2] for p in win32print.EnumPrinters(flags)}
+        if name in names:
+            return name
+        print(f"[OGOHLANTIRISH] Tanlangan printer topilmadi: '{name}' — "
+              f"standart printerga ({default_printer}) o'tildi.")
+        return default_printer
+    except Exception:
+        # Tekshirib bo'lmasa — baribir tanlangan nomni ishonib qaytaramiz
+        return name
 
 # ----------------------------------------------------------------------------
 # BLANKA RANGLARI — config dan yuklanadigan markaziy ranglar (printer siyoh
@@ -5492,21 +5536,29 @@ def create_unified_blank(order_id: int, order_info: dict, organized: dict, test_
 # [15] get_save_dir() va create_filename()
 def get_save_dir():
     """
-    Blankalar saqlanadigan papkani qaytaradi.
-    Format: G:\Қилинган анализлар\DD.MM.YYYY\
+    Blankalar (Word/.docx) saqlanadigan papkani qaytaradi.
+    Format: <asos>\DD.MM.YYYY\
+    Asos papka: Blanka Sozlamalaridagi `word_save_dir` (bo'sh bo'lsa BASE_DIR).
     Papka mavjud bo'lmasa avtomatik yaratiladi.
     """
     try:
+        # Sozlamada qo'lda ko'rsatilgan Word papkasi (bo'sh = standart BASE_DIR)
+        try:
+            _custom = (load_blanka_config().get('word_save_dir', '') or '').strip()
+        except Exception:
+            _custom = ''
+        base = _custom if _custom else BASE_DIR
+
         today = datetime.now().strftime("%d.%m.%Y")
-        save_dir = os.path.join(BASE_DIR, today)
-        
-        # BASE_DIR mavjud emasligini tekshir
-        if not os.path.exists(BASE_DIR):
-            os.makedirs(BASE_DIR, exist_ok=True)
-        
+        save_dir = os.path.join(base, today)
+
+        # Asos papka mavjud emasligini tekshir
+        if not os.path.exists(base):
+            os.makedirs(base, exist_ok=True)
+
         # Sana papkasini yaratish (mavjud bo'lsa o'tkazib yuboradi)
         os.makedirs(save_dir, exist_ok=True)
-        
+
         return save_dir
     except Exception as e:
         print(f"[XATO] Saqlash papkasini yaratishda xato: {e}")
@@ -5540,6 +5592,53 @@ def create_filename(order_info: dict, group: str, order_id: int, tests_count: in
         fname = f"{group_display} - {sample_id}.docx"
     return fname
 
+
+def build_natija_filename(order_info: dict, order_id: int, ext: str = "docx") -> str:
+    """Laboratoriya natija blankasi uchun yagona fayl nomi.
+
+    Format: ``{sample_id} {FISH} {yil} - LAB natija #{order_id}.{ext}``
+    Masalan: ``260725106782 Nazarova Sevara 1995 - LAB natija #4471.docx``
+
+    • Boshida ``sample_id`` — bot/SMS parser hozirgidek topadi (o'zgarmaydi).
+    • Telefon RAQAM kiritilmaydi (maxfiylik + vrach/UZI bilan izchillik).
+    • ``- LAB natija #id`` qismi — vrach/UZI xulosalaridan aniq farqlaydi
+      (OneDrive'da aralashmaydi) va qayta saqlashda o'ziga yozadi (dublikat yo'q).
+    """
+    sample_id = order_info.get('sample_id', '') or str(order_id)
+    fish = (order_info.get('fish') or '')
+    try:
+        fish = str(fish).strip()
+    except Exception:
+        fish = ''
+    tugilgan_sana = order_info.get('tugilgan_sana', '')
+    yil = ''
+    if tugilgan_sana:
+        try:
+            if isinstance(tugilgan_sana, str) and '-' in tugilgan_sana:
+                yil = tugilgan_sana.split('-')[0]
+            else:
+                yil = str(tugilgan_sana)[:4]
+        except Exception:
+            pass
+
+    forbidden = r'[\/\\:*?"<>|]'
+
+    def _clean(text):
+        if not text:
+            return ''
+        try:
+            return re.sub(forbidden, '_', str(text)).strip()
+        except Exception:
+            return ''
+
+    parts = [str(sample_id)]
+    if fish:
+        parts.append(_clean(fish))
+    if yil:
+        parts.append(yil)
+    base = ' '.join(parts)
+    return f"{base} - LAB natija #{order_id}.{ext}"
+
 # OneDrive PDF nusxa saqlash
 # Universal path: OneDrive muhit o'zgaruvchisidan yoki home papkadan topiladi
 # Har qanday foydalanuvchi nomida ishlaydi (alfatech.uz, User, yoki boshqa)
@@ -5550,6 +5649,14 @@ def _get_onedrive_natijalar(date_str=None):
     import datetime
     if date_str is None:
         date_str = datetime.date.today().strftime("%d.%m.%Y")
+    # 0-usul: Blanka Sozlamalarida qo'lda ko'rsatilgan PDF papkasi (eng ustun).
+    # Ko'rsatilgan bo'lsa — o'sha papka ostida DD.MM.YYYY yaratiladi.
+    try:
+        _custom_pdf = (load_blanka_config().get('pdf_save_dir', '') or '').strip()
+    except Exception:
+        _custom_pdf = ''
+    if _custom_pdf:
+        return os.path.join(_custom_pdf, date_str)
     # 1-usul: OneDrive muhit o'zgaruvchisi (eng ishonchli)
     onedrive_root = os.environ.get('OneDrive') or os.environ.get('OneDriveConsumer')
     # 2-usul: home papkadan topish
@@ -5928,33 +6035,9 @@ def create_blanks_for_order(order_id: int, test_results: dict = None, file_exist
 
     organized = organize_tests_by_template(all_tests, order_id=order_id)
     try:
-        sample_id = order_info.get('sample_id', '') or str(order_id)
-        fish = (order_info.get('fish') or '').strip() if order_info.get('fish') else ''
-        tugilgan_sana = order_info.get('tugilgan_sana', '')
-        telefon = (order_info.get('telefon') or '').strip()
-        yil = ''
-        if tugilgan_sana:
-            try:
-                if isinstance(tugilgan_sana, str) and '-' in tugilgan_sana:
-                    yil = tugilgan_sana.split('-')[0]
-                else:
-                    yil = str(tugilgan_sana)[:4]
-            except:
-                pass
-        def clean_filename(text):
-            if not text:
-                return ''
-            forbidden = r'[\/\\:*?"<>|]'
-            return re.sub(forbidden, '_', str(text)).strip()
-        # Fayl nomi: sample_id + FISH + tug'ilgan yil + telefon
-        name_parts = [sample_id]
-        if fish:
-            name_parts.append(clean_filename(fish))
-        if yil:
-            name_parts.append(yil)
-        if telefon:
-            name_parts.append(clean_filename(telefon))
-        file_name = f"{' '.join(name_parts)}.docx"
+        # Fayl nomi: {sample_id} {FISH} {yil} - LAB natija #{order_id}.docx
+        # (telefonsiz; vrach/UZI xulosalaridan farqlash uchun " - LAB natija #id")
+        file_name = build_natija_filename(order_info, order_id)
 
         unified_doc = create_unified_blank(order_id, order_info, organized, test_results)
         save_dir = get_save_dir()
@@ -7013,44 +7096,9 @@ def generate_unified_blank(order_id):
         except:
             pass
         save_dir = get_save_dir()
-        sample_id = order_info.get('sample_id', '') or str(order_id)
-        # None xatosini oldini olish
-        fish_raw = order_info.get('fish')
-        fish = ''
-        if fish_raw:
-            try:
-                fish = str(fish_raw).strip()
-            except:
-                fish = ''
-        tugilgan_sana2 = order_info.get('tugilgan_sana', '')
-        telefon2 = (order_info.get('telefon') or '').strip()
-        yil2 = ''
-        if tugilgan_sana2:
-            try:
-                if isinstance(tugilgan_sana2, str) and '-' in tugilgan_sana2:
-                    yil2 = tugilgan_sana2.split('-')[0]
-                else:
-                    yil2 = str(tugilgan_sana2)[:4]
-            except:
-                pass
-        def clean_filename(text):
-            if not text:
-                return ''
-            try:
-                text_str = str(text) if text is not None else ''
-                forbidden = r'[\/\\:*?"<>|]'
-                return re.sub(forbidden, '_', text_str).strip()
-            except:
-                return ''
-        # Fayl nomi: sample_id + FISH + tug'ilgan yil + telefon
-        name_parts2 = [sample_id]
-        if fish:
-            name_parts2.append(clean_filename(fish))
-        if yil2:
-            name_parts2.append(yil2)
-        if telefon2:
-            name_parts2.append(clean_filename(telefon2))
-        output_filename = f"{' '.join(name_parts2)}.docx"
+        # Fayl nomi: {sample_id} {FISH} {yil} - LAB natija #{order_id}.docx
+        # (telefonsiz; vrach/UZI xulosalaridan farqlash uchun " - LAB natija #id")
+        output_filename = build_natija_filename(order_info, order_id)
         output_path = os.path.join(save_dir, output_filename)
         doc.save(output_path)
         return output_path
@@ -17816,6 +17864,101 @@ Sana: {_sana_fmt}"""
         ttk.Button(tab_b, text="Port holatini tekshirish", command=test_tcp_server).grid(
             row=7, column=0, columnspan=2, pady=12)
 
+        # ───────────────────────── PRINTER (avto-pechat) ─────────────────
+        tab_p = ttk.Frame(nb)
+        nb.add(tab_p, text="🖨 Printer")
+
+        # Kompyuterga ulangan barcha printerlar (lokal + tarmoq)
+        _printer_list = []
+        _sys_default = ""
+        try:
+            import win32print as _wp
+            _flags = _wp.PRINTER_ENUM_LOCAL | _wp.PRINTER_ENUM_CONNECTIONS
+            _printer_list = sorted({p[2] for p in _wp.EnumPrinters(_flags)})
+            _sys_default = _wp.GetDefaultPrinter()
+        except Exception as _pe:
+            print(f"[OGOHLANTIRISH] Printerlar ro'yxatini olishda xato: {_pe}")
+
+        PRINTER_DEFAULT_LABEL = "— Windows standart printeri —"
+        _printer_options = [PRINTER_DEFAULT_LABEL] + _printer_list
+
+        ttk.Label(tab_p, text="Natija blankasi avtomatik chop etiladigan printer:",
+                  font=("Arial", 10, "bold")).grid(
+            row=0, column=0, columnspan=2, sticky=tk.W, padx=8, pady=(14, 2))
+
+        _cur_printer = ((cfg.get("printer", {}) or {}).get("blanka_printer", "") or "").strip()
+        _blanka_pv = tk.StringVar(
+            value=(_cur_printer if _cur_printer in _printer_list else
+                   (_cur_printer if _cur_printer else PRINTER_DEFAULT_LABEL)))
+        _blanka_combo = ttk.Combobox(tab_p, textvariable=_blanka_pv,
+                                     values=_printer_options, width=48, state="readonly")
+        _blanka_combo.grid(row=1, column=0, columnspan=2, sticky=tk.W, padx=8, pady=4)
+        vars_map[("printer", "blanka_printer")] = _blanka_pv
+
+        ttk.Label(tab_p, text=f"🖨 Hozirgi Windows standart printeri: {_sys_default or '—'}",
+                  foreground="#1f8a4c").grid(
+            row=2, column=0, columnspan=2, sticky=tk.W, padx=8, pady=(2, 4))
+
+        def _printer_refresh():
+            try:
+                import win32print as _wp2
+                _fl = _wp2.PRINTER_ENUM_LOCAL | _wp2.PRINTER_ENUM_CONNECTIONS
+                names = sorted({p[2] for p in _wp2.EnumPrinters(_fl)})
+                _blanka_combo["values"] = [PRINTER_DEFAULT_LABEL] + names
+                messagebox.showinfo("Printer", "Printerlar ro'yxati yangilandi.", parent=dialog)
+            except Exception as e:
+                messagebox.showerror("Printer", f"Ro'yxatni yangilab bo'lmadi:\n{e}", parent=dialog)
+
+        def _printer_test():
+            target = _blanka_pv.get()
+            if target == PRINTER_DEFAULT_LABEL:
+                target = _sys_default
+            if not target:
+                messagebox.showwarning("Printer", "Printer tanlanmagan.", parent=dialog)
+                return
+            # win32ui GDI orqali AYNAN tanlangan printerga yuboramiz.
+            # (ShellExecute "print" verbi /d parametrini e'tiborsiz qoldirib,
+            #  har doim standart printerga chiqarardi — shuning uchun ishlatmaymiz.)
+            try:
+                import win32ui
+                hDC = win32ui.CreateDC()
+                hDC.CreatePrinterDC(target)
+                hDC.StartDoc("AzizMedLine — Printer sinovi")
+                hDC.StartPage()
+                hDC.TextOut(300, 300, "AzizMedLine — Printer sinovi")
+                hDC.TextOut(300, 500, f"Printer: {target}")
+                hDC.TextOut(300, 700, "Agar bu sahifa SHU printerdan chiqsa — sozlama to'g'ri.")
+                hDC.EndPage()
+                hDC.EndDoc()
+                hDC.DeleteDC()
+                messagebox.showinfo(
+                    "Printer",
+                    f"Sinov sahifasi yuborildi:\n{target}\n\n"
+                    "ℹ Doimiy o'rnatish uchun pastdagi «Saqlash» tugmasini bosing.",
+                    parent=dialog)
+            except Exception as e:
+                messagebox.showerror(
+                    "Printer",
+                    f"«{target}» printeriga sinov chop etilmadi:\n{e}\n\n"
+                    "Printer o'chiq yoki ulanmagan bo'lishi mumkin.", parent=dialog)
+
+        _p_btns = ttk.Frame(tab_p)
+        _p_btns.grid(row=3, column=0, columnspan=2, sticky=tk.W, padx=8, pady=(4, 8))
+        ttk.Button(_p_btns, text="↻ Ro'yxatni yangilash",
+                   command=_printer_refresh).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(_p_btns, text="🖨 Sinov sahifasini chiqarish",
+                   command=_printer_test).pack(side=tk.LEFT)
+
+        ttk.Label(
+            tab_p,
+            text="• «Windows standart printeri» — dastur kompyuterning asosiy printeriga chiqaradi.\n"
+                 "• Aniq printer tanlansa (masalan tarmoqdagi Epson L8050 yoki oq-qora printer) —\n"
+                 "  natija blankalari doim shu printerdan chiqadi.\n"
+                 "• Tarmoq printeri ro'yxatda ko'rinmasa: avval Windows «Устройства и принтеры»\n"
+                 "  orqali ulang, so'ng «Ro'yxatni yangilash» tugmasini bosing.",
+            foreground="#555", justify=tk.LEFT, wraplength=580).grid(
+            row=4, column=0, columnspan=2, sticky=tk.W, padx=8, pady=(4, 8))
+
         # ───────────────────────── LITSENZIYA ───────────────────────────
         tab_lic = ttk.Frame(nb)
         nb.add(tab_lic, text="🔑 Litsenziya")
@@ -17939,6 +18082,13 @@ Sana: {_sana_fmt}"""
             except ValueError as e:
                 messagebox.showerror("Xato", f"Raqamli maydon noto'g'ri: {e}", parent=dialog)
                 return
+
+            # Printer: sentinel yorlig'i -> "" (Windows standart printeri)
+            try:
+                if new_cfg.get("printer", {}).get("blanka_printer", "") == PRINTER_DEFAULT_LABEL:
+                    new_cfg["printer"]["blanka_printer"] = ""
+            except Exception:
+                pass
 
             if save_config(new_cfg):
                 # Bazani jonli yangilash uchun pool ulanishini tiklaymiz
@@ -18245,6 +18395,46 @@ Sana: {_sana_fmt}"""
         _update_visibility()
 
         # ══════════════════════════════════════════════════════════════
+        # 7. SAQLASH YO'LLARI (Word / PDF) — DOIM ko'rinadi
+        #    (har kompyuterda yo'l boshqacha bo'lishi mumkin)
+        # ══════════════════════════════════════════════════════════════
+        from tkinter import filedialog as _fd
+
+        save_lf = ttk.LabelFrame(main_frame, text="📁 Saqlash yo'llari (Word / PDF)", padding="8")
+        save_lf.pack(fill=tk.X, pady=(0, 8))
+        save_lf.columnconfigure(1, weight=1)
+
+        wp_fields = {}
+        wp_rows = [
+            ("word_save_dir", "Word (.docx) papkasi:"),
+            ("pdf_save_dir",  "PDF nusxa papkasi:"),
+        ]
+        for i, (key, label) in enumerate(wp_rows):
+            ttk.Label(save_lf, text=label).grid(row=i, column=0, sticky=tk.W, pady=3, padx=(0, 5))
+            var = tk.StringVar(value=config.get(key, ''))
+            wp_fields[key] = var
+            ttk.Entry(save_lf, textvariable=var, width=48).grid(
+                row=i, column=1, sticky=tk.EW, pady=3, padx=(0, 5))
+
+            def _pick_dir(v=var, lbl=label):
+                d = _fd.askdirectory(title=f"{lbl} — papkani tanlang", parent=dialog)
+                if d:
+                    v.set(os.path.normpath(d))
+            ttk.Button(save_lf, text="Tanlash...", command=_pick_dir).grid(
+                row=i, column=2, pady=3, padx=(0, 4))
+            ttk.Button(save_lf, text="Tozalash",
+                       command=lambda v=var: v.set("")).grid(row=i, column=3, pady=3)
+
+        ttk.Label(
+            save_lf,
+            text="• Bo'sh qoldirilsa — standart yo'l ishlatiladi "
+                 "(Word: G:\\Қилинган анализлар, PDF: OneDrive\\Natijalar).\n"
+                 "• Har papka ostida avtomatik «DD.MM.YYYY» (sana) papkasi yaratiladi.\n"
+                 "• Boshqa kompyuterda yo'l boshqacha bo'lsa — shu yerda ko'rsating.",
+            foreground="#555", justify=tk.LEFT, wraplength=560).grid(
+            row=len(wp_rows), column=0, columnspan=4, sticky=tk.W, pady=(4, 0))
+
+        # ══════════════════════════════════════════════════════════════
         # TUGMALAR
         # ══════════════════════════════════════════════════════════════
         btn_frame = ttk.Frame(main_frame)
@@ -18280,6 +18470,9 @@ Sana: {_sana_fmt}"""
             for key, var in color_vars.items():
                 hex_c = var.get().strip().lstrip('#').upper()
                 new_config[key] = hex_c if len(hex_c) == 6 else config.get(key, '2E75B6')
+            # Saqlash yo'llari (Word / PDF) — bo'sh = standart yo'l
+            for key, var in wp_fields.items():
+                new_config[key] = var.get().strip()
 
             try:
                 save_blanka_config(new_config)
@@ -18498,14 +18691,21 @@ Sana: {_sana_fmt}"""
             printer_name = None
             printed_ok = False
 
+            # Sozlamalarda tanlangan printer (yo'q bo'lsa — Windows standart printeri)
+            printer_name = get_blanka_printer()
+
             # 1-usul: win32com orqali Word ni ko'rinmas rejimda ishlatish (eng ishonchli)
             try:
                 import win32com.client
-                import win32print
-                printer_name = win32print.GetDefaultPrinter()
                 word_app = win32com.client.DispatchEx("Word.Application")
                 word_app.Visible = False
                 word_app.DisplayAlerts = False
+                # Tanlangan printerga yo'naltiramiz (tanlanmagan bo'lsa standart qoladi)
+                if printer_name:
+                    try:
+                        word_app.ActivePrinter = printer_name
+                    except Exception as _ap_err:
+                        print(f"[OGOHLANTIRISH] ActivePrinter o'rnatilmadi ({printer_name}): {_ap_err}")
                 doc = word_app.Documents.Open(abs_path)
                 doc.PrintOut(Background=False)
                 doc.Close(SaveChanges=False)
@@ -18526,8 +18726,9 @@ Sana: {_sana_fmt}"""
             if not printed_ok:
                 try:
                     import win32api
-                    import win32print
-                    printer_name = win32print.GetDefaultPrinter()
+                    if not printer_name:
+                        import win32print
+                        printer_name = win32print.GetDefaultPrinter()
                     win32api.ShellExecute(0, "print", abs_path, f'/d:"{printer_name}"', ".", 0)
                     printed_ok = True
                     print(f"[OK] Blanka chop etishga yuborildi (ShellExecute): {printer_name}")
@@ -19945,8 +20146,10 @@ class NatijaKiritish:
             if output_path:
                 try:
                     import win32api
-                    import win32print
-                    printer = win32print.GetDefaultPrinter()
+                    printer = get_blanka_printer()
+                    if not printer:
+                        import win32print
+                        printer = win32print.GetDefaultPrinter()
                     win32api.ShellExecute(0, "print", output_path, f'/d:"{printer}"', ".", 0)
                     messagebox.showinfo("Muvaffaqiyat", f"Chop etilmoqda...\n{printer}")
                 except ImportError:
