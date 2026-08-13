@@ -19264,38 +19264,49 @@ Sana: {_sana_fmt}"""
 
     def _fetch_norma_db_overrides(self):
         """
-        `tahlillar_norma` jadvalidan "Ogohlantirish" va "O'lchash chegarasi"
-        ustunlarini o'qiydi ("Tahlil Qo'shish" oynasida to'ldiriladi).
-        Qaytaradi: (olchash_rows, ogohlantirish_rows) — ikkalasi ham
-        [(tahlil_nomi, low, high, birlik), ...] formatida, mos ravishda
-        result_validator.apply_db_overrides() va lab_quality.apply_db_overrides()
-        ga uzatiladi. Xato/ulanish yo'q bo'lsa — ikkalasi ham bo'sh ro'yxat
-        (tekshiruv jim o'tkaziladi, saqlash bloklanmaydi).
+        `tahlillar_norma` jadvalidan "Ogohlantirish", "O'lchash chegarasi" va
+        "Javob variantlari" ustunlarini o'qiydi ("Tahlil Qo'shish" oynasida
+        to'ldiriladi).
+        Qaytaradi: (olchash_rows, ogohlantirish_rows, options_rows)
+          • olchash_rows / ogohlantirish_rows — [(tahlil_nomi, low, high, birlik), ...],
+            mos ravishda result_validator.apply_db_overrides() va
+            lab_quality.apply_db_overrides() ga uzatiladi.
+          • options_rows — [(tahlil_nomi, "Variant1, Variant2"), ...],
+            result_validator.apply_db_response_options() ga uzatiladi. Shu
+            tufayli sifat tahlillarida (Zamburug', Demodikoz, ekspress testlar)
+            javob so'zlari FAQAT bazada turadi — tekshirgichda takrorlanmaydi.
+        Xato/ulanish yo'q bo'lsa — hammasi bo'sh ro'yxat (tekshiruv jim
+        o'tkaziladi, saqlash bloklanmaydi).
         """
         conn = None
         try:
             conn = db_conn()
             if not conn:
-                return [], []
+                return [], [], []
             cursor = conn.cursor()
             cursor.execute(
                 """SELECT tahlil_nomi, olchash_min, olchash_max,
-                          ogohlantirish_past, ogohlantirish_baland, birlik
+                          ogohlantirish_past, ogohlantirish_baland, birlik,
+                          response_options
                    FROM tahlillar_norma
                    WHERE olchash_min IS NOT NULL OR olchash_max IS NOT NULL
-                      OR ogohlantirish_past IS NOT NULL OR ogohlantirish_baland IS NOT NULL"""
+                      OR ogohlantirish_past IS NOT NULL OR ogohlantirish_baland IS NOT NULL
+                      OR (response_options IS NOT NULL AND response_options <> '')"""
             )
-            olchash_rows, ogohlantirish_rows = [], []
-            for nomi, o_min, o_max, og_past, og_baland, birlik in cursor.fetchall():
+            olchash_rows, ogohlantirish_rows, options_rows = [], [], []
+            for (nomi, o_min, o_max, og_past, og_baland, birlik,
+                 resp_opts) in cursor.fetchall():
                 if o_min is not None or o_max is not None:
                     olchash_rows.append((nomi, o_min, o_max, birlik))
                 if og_past is not None or og_baland is not None:
                     ogohlantirish_rows.append((nomi, og_past, og_baland, birlik))
+                if resp_opts and str(resp_opts).strip():
+                    options_rows.append((nomi, resp_opts))
             cursor.close()
-            return olchash_rows, ogohlantirish_rows
+            return olchash_rows, ogohlantirish_rows, options_rows
         except Exception as e:
             print(f"[OGOHLANTIRISH] tahlillar_norma dan chegara o'qishda xato: {e}")
-            return [], []
+            return [], [], []
         finally:
             try:
                 if conn:
@@ -19435,9 +19446,14 @@ Sana: {_sana_fmt}"""
 
             # 1) Format + lineynost (+ DB'dan "O'lchash chegarasi" override)
             cfg = result_validator.load_config()
-            olchash_rows, _ = self._fetch_norma_db_overrides()
+            olchash_rows, _, options_rows = self._fetch_norma_db_overrides()
             if olchash_rows:
                 result_validator.apply_db_overrides(cfg, olchash_rows)
+            # Sifat tahlillarining javob variantlari — bazadagi "Javob
+            # variantlari" maydonidan (natija oynasidagi dropdown ham
+            # shundan quriladi, demak so'z farqi bo'lishi mumkin emas)
+            if options_rows:
+                result_validator.apply_db_response_options(cfg, options_rows)
             issues = result_validator.validate_many(rows, cfg=cfg)
 
             # 2) Delta-check — oldingi natija bilan solishtirish
@@ -19502,7 +19518,7 @@ Sana: {_sana_fmt}"""
                 return
 
             # DB'dan "Ogohlantirish" override ("Tahlil Qo'shish" oynasida to'ldiriladi)
-            _, ogohlantirish_rows = self._fetch_norma_db_overrides()
+            _, ogohlantirish_rows, _ = self._fetch_norma_db_overrides()
             if ogohlantirish_rows:
                 lab_quality.apply_db_overrides(cfg, ogohlantirish_rows)
 
