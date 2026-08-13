@@ -1,6 +1,6 @@
 {
   "database": {
-    "host": "192.168.0.40",
+    "host": "192.168.13.42",
     "user": "lims",
     "password": "azizmed2026",
     "database": "lab_tizim",

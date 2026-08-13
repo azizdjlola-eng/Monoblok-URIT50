@@ -114,6 +114,30 @@ def _deep_merge(default: dict, loaded: dict) -> dict:
     return result
 
 
+def _umumiy_db():
+    """
+    LIMS ning UMUMIY baza sozlamasi (%ProgramData%\\AzizMedLine\\db_config.txt).
+    Uni "Baza Sozlamasi" oynasi yozadi va Registratsiya, Vrach kabineti, TV
+    server ham SHU fayldan o'qiydi.
+
+    Faqat BIRINCHI ishga tushishda (analizator_config.json hali yo'q paytda)
+    ishlatiladi — yangi kompyuterda texnik xodim bazani bir joyda sozlasa,
+    Natija oynasi ham o'sha bazaga ulanadi. Mavjud o'rnatmalarda esa
+    analizator_config.json o'zgarishsiz qoladi (bu yerdagi sozlama ustun).
+    """
+    try:
+        import baza_sozlama as _bs
+        c = _bs.oqi()
+        if isinstance(c, dict) and c.get("host"):
+            return {"host": c["host"], "user": c.get("user", "root"),
+                    "password": c.get("password", ""),
+                    "database": c.get("database", "lab_tizim"),
+                    "port": int(c.get("port", 3306) or 3306)}
+    except Exception as e:
+        print(f"[ma'lumot] umumiy db_config o'qilmadi: {e}")
+    return None
+
+
 def load_config() -> dict:
     """analizator_config.json ni o'qiydi. Yo'q bo'lsa — yaratadi."""
     cfg = json.loads(json.dumps(DEFAULT_CONFIG))  # chuqur nusxa
@@ -126,7 +150,12 @@ def load_config() -> dict:
         except Exception as e:
             print(f"[OGOHLANTIRISH] analizator_config.json yuklashda xato: {e}")
     else:
-        # Birinchi marta — standart faylni yaratamiz
+        # Birinchi marta — umumiy LIMS sozlamasidan baza ulanishini olamiz
+        # (bo'lmasa standart qiymatlar), so'ng faylni yaratamiz.
+        umumiy = _umumiy_db()
+        if umumiy:
+            cfg["database"] = umumiy
+            print(f"[baza] Umumiy sozlamadan olindi: {umumiy['host']}:{umumiy['port']}")
         save_config(cfg)
     return cfg
 
