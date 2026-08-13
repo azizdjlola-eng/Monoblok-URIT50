@@ -261,7 +261,10 @@ DEFAULT_CONFIG = {
         "127.siydik_kislota": {"ref": "siydik_kislota"},
         "127.albumin":        {"ref": "albumin"},
         "127.bun":            {"name": "Mochevina azoti (BUN)",    "unit": "mmol/l",  "min": 0.2, "max": 25,   "fmt": "decimal"},
-        "127.gfr":            {"name": "GFR (avtomatik)",          "unit": "ml/min",  "min": 0,   "max": 200,  "fmt": "int"},
+        # GFR CKD-EPI formulasi bo'yicha AVTOMATIK hisoblanadi va bir kasr
+        # xonasigacha yaxlitlanadi (round(gfr, 1) — masalan 98.9), shuning
+        # uchun "int" EMAS, "decimal" bo'lishi shart.
+        "127.gfr":            {"name": "GFR (avtomatik)",          "unit": "ml/min",  "min": 0,   "max": 200,  "fmt": "decimal"},
 
         # --- 33: Siydikning Nicheporenko tahlili ---
         "33.leykot":      {"name": "Leykotsitlar", "unit": "1/ml", "min": 0, "max": 100000000, "fmt": "int"},
@@ -328,8 +331,19 @@ DEFAULT_CONFIG = {
 
     # ── SIFAT (musbat/manfiy) TAHLILLARI ──────────────────────────────────
     # Kalit = tahlillar.id, qiymat = ruxsat etilgan javoblar ro'yxati.
+    #
+    # ⚠ DIQQAT: bu ro'yxat faqat ZAXIRA (baza ochilmaganda ishlatiladi).
+    # ASOSIY manba — `tahlillar_norma.response_options` ustuni, ya'ni
+    # "Tahlil Qo'shish" oynasidagi "Javob variantlari" maydoni. Natija
+    # kiritish oynasi dropdown'ni o'sha ustundan quradi, shuning uchun
+    # tekshiruv ham o'shandan o'qiydi (qarang: apply_db_response_options).
+    # Shu sababli variantni o'zgartirish uchun SHU FAYLGA TEGISH SHART EMAS —
+    # "Tahlil Qo'shish" oynasidan yozing, tekshiruv avtomatik moslashadi.
+    #
     # Tekshiruv YUMSHOQ: javob ro'yxatdagi so'zlardan birini o'z ichiga olsa —
-    # to'g'ri deb hisoblanadi (masalan "Musbat (+)" ham o'tadi).
+    # to'g'ri deb hisoblanadi (masalan "Musbat (+)" ham o'tadi). Umuman
+    # tanilgan sifat javobi bo'lsa ham (aniqlandi/aniqlanmadi/manfiy...) xato
+    # berilmaydi — faqat mutlaqo begona matn/raqam ushlanadi.
     "options": {
         "81":  ["Manfiy", "Musbat"],
         "83":  ["Manfiy", "Musbat"],
@@ -337,9 +351,9 @@ DEFAULT_CONFIG = {
         "91":  ["Manfiy", "Musbat"],
         "121": ["Manfiy", "Musbat"],
         "71":  ["Manfiy", "Musbat"],
-        "80":  ["Topilmadi", "Topildi"],
-        "79":  ["Topilmadi", "Topildi"],
-        "78":  ["Topilmadi", "Topildi"],
+        "80":  ["Demodikoz aniqlanmadi", "Demodikoz aniqlandi"],
+        "79":  ["Aniqlanmadi", "Qo'tir kanasi aniqlandi", "Qo'tir kanasi axlati topildi"],
+        "78":  ["Zamburug' aniqlanmadi", "Zamburug' aniqlandi"],
     },
 
     # ── MANTIQIY NISBAT QOIDALARI (ko'p komponentli) ──────────────────────
@@ -360,7 +374,8 @@ _ZIMNITSKIY_PREFIX = ("miqdori", "solishtirma")
 # format xatosi berilmaydi.
 _QUALITATIVE_OK = (
     "manfiy", "musbat", "salbiy", "topilmadi", "topildi", "aniqlanmadi",
-    "kuzatilmadi", "yo'q", "yoq", "bor", "norma", "neg", "poz", "otr",
+    "aniqlandi", "aniqlanlandi", "shubhali", "kuzatilmadi", "kuzatildi",
+    "yo'q", "yoq", "bor", "norma", "neg", "poz", "otr",
     "отриц", "полож", "не обнаруж", "обнаруж",
 )
 
@@ -560,6 +575,31 @@ def apply_db_overrides(cfg, rows):
     return cfg
 
 
+def apply_db_response_options(cfg, rows):
+    """
+    `tahlillar_norma.response_options` ("Javob variantlari" maydoni) ni
+    tekshiruvga ulaydi. Natija kiritish oynasidagi dropdown ham SHU ustundan
+    quriladi — demak laborant tanlagan har qanday javob avtomatik "to'g'ri"
+    bo'ladi va DEFAULT_CONFIG["options"] bilan so'z farqi (masalan
+    "Zamburug' aniqlandi" ↔ "Topildi") yolg'on ogohlantirish bermaydi.
+
+    rows: [(tahlil_nomi, "Variant1, Variant2, ..."), ...]
+    cfg ni JOYIDA o'zgartiradi va qulaylik uchun qaytaradi ham.
+    """
+    opt_map = {}
+    for row in rows or []:
+        nomi = row[0] if len(row) > 0 else None
+        raw = row[1] if len(row) > 1 else None
+        nm = _norm_name(nomi)
+        if not nm or not raw:
+            continue
+        opts = [o.strip() for o in str(raw).split(",") if o.strip()]
+        if opts:
+            opt_map[nm] = opts
+    cfg["_db_options_by_name"] = opt_map
+    return cfg
+
+
 def _name_index(section, cfg):
     """{normalizatsiyalangan nom: (kalit, resolved_spec)} indeksini quradi."""
     idx = {}
@@ -626,6 +666,11 @@ def _lookup_multi(cfg, tahlil_id, test_name, comp_key):
 
 
 def _lookup_options(cfg, tahlil_id, test_name):
+    """Ruxsat etilgan javoblar: avval BAZA ("Javob variantlari" maydoni),
+    keyin zaxira statik ro'yxat."""
+    db_opts = (cfg.get("_db_options_by_name") or {}).get(_norm_name(test_name))
+    if db_opts:
+        return db_opts
     opts = cfg.get("options", {})
     if tahlil_id is not None and str(tahlil_id) in opts:
         return opts[str(tahlil_id)]
@@ -696,9 +741,21 @@ def check_titer(raw, spec, label):
     s = str(raw if raw is not None else "").strip()
     if not s:
         return issues, None
-    m = re.match(r"^<?\s*1\s*:\s*(\d+)$", s)
+
+    # Titr UMUMAN chiqmagan holat. Laboratoriyada bu "0" yoki "0:0" deb ham
+    # yoziladi (shuningdek chiziqcha yoki "Manfiy"), — bu XATO EMAS, balki
+    # reaksiya hech bir suyultirishda kuzatilmaganini bildiradi.
+    s_norm = re.sub(r"\s+", "", s)
+    if s_norm in ("0", "0:0", "0:00", "00", "-", "--", "—", "–", "0.0"):
+        return issues, None
+    if _is_qualitative_text(s):
+        return issues, None
+
+    m = re.match(r"^[<>]?\s*1\s*:\s*(\d+)$", s)
     if not m:
-        issues.append((label, raw, "kutilgan format: '1:NN' yoki '<1:NN' (masalan '1:80')"))
+        issues.append((label, raw,
+                       "kutilgan format: '1:NN', '<1:NN' (masalan '1:80') "
+                       "yoki titr chiqmaganda '0' / '0:0'"))
     return issues, None
 
 
@@ -888,10 +945,23 @@ def _validate_single_value(cfg, tahlil_id, test_name, raw):
     opts = _lookup_options(cfg, tahlil_id, test_name)
     if opts:
         low = _norm_name(raw)
-        if not any(_norm_name(o) in low for o in opts):
+        if any(_norm_name(o) in low for o in opts):
+            return issues
+        # Ro'yxatdagi so'z bilan aynan mos kelmasa ham, javob TANILGAN sifat
+        # javobi bo'lsa (aniqlandi / aniqlanmadi / manfiy / topildi ...) —
+        # bu shunchaki boshqacha ifoda, xato emas. Masalan bazada
+        # "Zamburug' aniqlanmadi" turib, eski natijada "Aniqlanmadi" yozilgan.
+        if _is_qualitative_text(raw):
+            return issues
+        # Raqam kiritilgan va bu tahlil uchun raqamli chegara ham belgilangan
+        # bo'lsa (masalan Troponin T — ham ekspress, ham miqdoriy) — raqamli
+        # tekshiruvga o'tamiz, "ro'yxatda yo'q" deb xato bermaymiz.
+        if re.match(r"^[<>]?\s*\d", str(raw).strip()) and _lookup_single(cfg, tahlil_id, test_name):
+            pass
+        else:
             issues.append((test_name, raw,
                            "javob ro'yxatda yo'q — kutilgan: " + " / ".join(opts)))
-        return issues
+            return issues
 
     spec = _lookup_single(cfg, tahlil_id, test_name)
     if not spec:
