@@ -8953,6 +8953,34 @@ current_bemor_data = None
 current_tests = []
 barcode_queue = queue.Queue()
 
+
+# ═════════════════════════════════════════════════════════════════════════════
+# FILIAL MIJOZI — qog'oz blanka QAYERDA chiqishini hal qiladi
+# ═════════════════════════════════════════════════════════════════════════════
+def filial_mijozi_tekshir(order_id):
+    """Buyurtma BOSHQA filialda ro'yxatga olinganmi. Qaytadi: (boshqami, nomi).
+
+    QOIDA (2026-08-14, egasi bilan kelishilgan): qog'oz blanka bemor RO'YXATGA
+    OLINGAN joyda chiqadi. Boshqa filial mijozi bo'lsa bu kompyuterda chop
+    ETILMAYDI — bemor u yerda emas, qog'oz behuda ketardi. Natija baribir:
+      • bazaga saqlanadi va sinxron bilan o'sha filialga boradi,
+      • bemorga SMS ketadi (u Telegram botdan yuklab oladi).
+
+    FAIL-SAFE: modul topilmasa yoki xato bo'lsa (False, "") qaytadi — ya'ni
+    hamma narsa AVVALGIDEK ishlaydi. Yangi xususiyat eski oqimni hech qachon
+    buzmasligi kerak; chop etilmay qolgan blanka ortiqcha qog'ozdan yomonroq.
+    """
+    try:
+        import filial_belgi
+    except Exception:
+        return False, ""
+    try:
+        return filial_belgi.boshqa_filial(db_conn(), order_id)
+    except Exception as e:
+        print(f"[OGOHLANTIRISH] Filial tekshiruvi o'tkazildi: {e}")
+        return False, ""
+
+
 class MonoblokApp:
     def __init__(self, root):
         self.root = root
@@ -10708,8 +10736,26 @@ Sana: {_sana_fmt}"""
         self.patient_info.tag_config('warning_tag', foreground='#D35400', font=('Arial', 10, 'bold'))
         self.patient_info.tag_config('pregnancy_tag', foreground='#8E44AD', font=('Arial', 10, 'bold'))
         self.patient_info.tag_config('med_tag', foreground='#2980B9', font=('Arial', 10, 'bold'))
+        self.patient_info.tag_config('filial_tag', foreground='white', background='#C0392B',
+                                     font=('Arial', 11, 'bold'))
 
         self.patient_info.insert(tk.END, info.strip(), 'normal_tag')
+
+        # ── FILIAL MIJOZI belgisi ────────────────────────────────────────
+        # Laborant birinchi qarashda ko'rsin: bu bemor boshqa filialda
+        # ro'yxatga olingan, demak qog'oz blanka SHU YERDA chiqmaydi
+        # (filial_mijozi_tekshir() izohiga qarang).
+        try:
+            _boshqa, _fnomi = filial_mijozi_tekshir(data.get('order_id'))
+            if _boshqa:
+                self.patient_info.insert(
+                    tk.END, f"\n\n  🏥 FILIAL MIJOZI: {_fnomi}  ", 'filial_tag')
+                self.patient_info.insert(
+                    tk.END, "\n  Blanka shu yerda CHOP ETILMAYDI — bemor o'sha "
+                            "filialda oladi.\n  Natija sinxron bilan boradi + "
+                            "bemorga SMS ketadi.", 'warning_tag')
+        except Exception as _fe:
+            print(f"[OGOHLANTIRISH] Filial belgisi ko'rsatilmadi: {_fe}")
 
         # Menstrual sikl va klinik ma'lumotlarini qo'shimcha ko'rsatish
         has_special = (emizikli or is_emizikli_from_note or cycle_day or cycle_note
@@ -19090,13 +19136,44 @@ Sana: {_sana_fmt}"""
 
         # Flag'larni o'rnatish
         self.is_saved = True
-        self.is_printed = True
-        self.status_var.set(f"[OK] Saqlandi va chop etildi - {datetime.now().strftime('%H:%M:%S')}")
+        # DIQQAT: filial mijozida print_results() qog'ozga CHIQARMAY qaytadi.
+        # Holat matni "chop etildi" desa — yolg'on bo'lardi va laborant
+        # qog'ozni qidirib yurardi. Shuning uchun alohida ajratamiz.
+        _boshqa, _fnomi = filial_mijozi_tekshir(self.current_order_id)
+        self.is_printed = not _boshqa
+        if _boshqa:
+            self.status_var.set(
+                f"[OK] Saqlandi — blanka «{_fnomi}» da chop etiladi "
+                f"- {datetime.now().strftime('%H:%M:%S')}")
+        else:
+            self.status_var.set(f"[OK] Saqlandi va chop etildi - {datetime.now().strftime('%H:%M:%S')}")
     
     def print_results(self):
         """Natijalarni chop etish - yagona blanka yaratish va chop etish"""
         if not self.current_order_id:
             messagebox.showwarning("Diqqat", "Avval bemor ma'lumotlarini yuklang")
+            return
+
+        # ── FILIAL MIJOZI DARVOZASI ──────────────────────────────────────
+        # Boshqa filialda ro'yxatga olingan bemorning blankasi SHU YERDA
+        # chop etilmaydi — u bemor bu yerda emas, qog'oz behuda ketardi.
+        # Natija allaqachon bazaga saqlangan (save_and_print → save_to_db)
+        # va sinxron bilan o'sha filialga boradi.
+        #
+        # JIM TO'XTAMAYDI: laborantga aniq xabar beriladi. "Jim ishlamay
+        # qolish" — bu loyihadagi eng qimmat xatolar turi bo'lgan.
+        _boshqa, _fnomi = filial_mijozi_tekshir(self.current_order_id)
+        if _boshqa:
+            self.status_var.set(f"[FILIAL] Saqlandi — blanka {_fnomi} da chop etiladi")
+            messagebox.showinfo(
+                "Filial mijozi",
+                f"Bu bemor «{_fnomi}» da ro'yxatga olingan.\n\n"
+                f"✅ Natija bazaga SAQLANDI va sinxron bilan o'sha filialga boradi.\n"
+                f"✅ Bemorga natija tayyor degan SMS ketadi (Telegram botdan oladi).\n\n"
+                f"🖨 Qog'oz blanka bu yerda CHOP ETILMADI — bemor kelganda "
+                f"«{_fnomi}» ning o'zida chop etiladi.\n\n"
+                f"Agar shu yerda qog'oz kerak bo'lsa: «Blanka yaratish» tugmasidan "
+                f"qo'lda chop eting.")
             return
 
         # ── Tahlillar to'liqligi (save_and_print() da tekshirilgan bo'lsa —
@@ -20911,6 +20988,18 @@ class NatijaKiritish:
     def save_and_print(self):
         """Saqlash va chop etish"""
         try:
+            # FILIAL MIJOZI: blanka yaratiladi, lekin printerga YUBORILMAYDI —
+            # bemor boshqa filialda. (Asosiy yo'l: MonoblokApp.print_results)
+            _boshqa, _fnomi = filial_mijozi_tekshir(self.order_id)
+            if _boshqa:
+                output_path = generate_unified_blank(self.order_id)
+                messagebox.showinfo(
+                    "Filial mijozi",
+                    f"Bu bemor «{_fnomi}» da ro'yxatga olingan.\n\n"
+                    f"✅ Natija saqlandi, sinxron bilan o'sha filialga boradi.\n"
+                    f"🖨 Qog'oz bu yerda chop etilmadi — bemor «{_fnomi}» da oladi.")
+                return
+
             output_path = generate_unified_blank(self.order_id)
             if output_path:
                 try:
