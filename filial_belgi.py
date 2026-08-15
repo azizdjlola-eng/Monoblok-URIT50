@@ -194,6 +194,25 @@ def filial_nomi(conn, filial_id) -> str:
     return f"Filial {filial_id}"
 
 
+ASOSIY_FILIAL_ID = 1        # kipiy_filiallar da "Asosiy laboratoriya"
+
+
+def asosiy_laboratoriyami() -> bool:
+    """Bu kompyuter ASOSIY laboratoriyadami?
+
+    Huquqlar shunga tayanadi: asosiy laboratoriya xodimi filial mijozini ham
+    o'zgartira oladi (bemor filialda ro'yxatdan o'tib, keyin asosiyga kelib
+    tahlil qo'shishi yoki bekor qilishi mumkin — egasi talabi, 2026-08-15).
+    Filial xodimi esa FAQAT o'zinikini o'zgartiradi.
+
+    Sozlama topilmasa True — ya'ni hech kim to'silmaydi (fail-safe).
+    """
+    mahalliy = mahalliy_filial_id()
+    if mahalliy is NOMA_LUM:
+        return True
+    return int(mahalliy) == ASOSIY_FILIAL_ID
+
+
 def boshqa_filial(conn, order_id):
     """Bu buyurtma BOSHQA filialning mijozimi?
 
