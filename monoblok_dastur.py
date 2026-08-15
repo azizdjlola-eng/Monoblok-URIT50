@@ -9040,6 +9040,10 @@ class MonoblokApp:
         
         # Database ulanishini tekshirish (dastur ishga tushganda)
         self.root.after(1000, self.check_db_on_startup)
+
+        # Registratsiyadan "shu bemorni och" so'rovini kutish
+        self._natija_soro_korilgan = 0.0
+        self.root.after(1500, self._chaqiruv_tekshir)
         
         # Database test tugmasi (Ctrl+Shift+D) - dastur oynasida
         self.root.bind("<Control-Shift-D>", lambda e: self.test_database_read())
@@ -10595,6 +10599,42 @@ class MonoblokApp:
             messagebox.showerror("Xatolik", error_msg)
             self.status_var.set("[OGOHLANTIRISH] Xatolik yuz berdi")
     
+    # ── REGISTRATSIYADAN CHAQIRUV ────────────────────────────────────────
+    # Hamshira registratsiya ro'yxatidan «Natija chiqarish» bosganda shu yerga
+    # keladi: bemor ochiladi va oyna oldinga chiqadi. Ya'ni Natija dasturini
+    # doim ochib o'tirish yoki bemorni QAYTA qidirish kerak emas.
+    # Aloqa oddiy fayl orqali — sabab: natija_chaqiruv.py izohiga qarang.
+    def _chaqiruv_tekshir(self):
+        try:
+            import natija_chaqiruv as _nc
+            _nc.yurishni_belgila()          # "ochiqman" — registratsiya bilsin
+            sid, vaqt = _nc.soro_oqi(getattr(self, "_natija_soro_korilgan", 0.0))
+            self._natija_soro_korilgan = vaqt
+            if sid:
+                print(f"[CHAQIRUV] Registratsiyadan so'rov: {sid}")
+                self._oynani_oldinga()
+                self.process_barcode(sid)
+        except Exception as e:
+            print(f"[OGOHLANTIRISH] Chaqiruv tekshiruvi: {e}")
+        finally:
+            # Xato bo'lsa ham halqa TO'XTAMASIN — aks holda tugma jimgina
+            # ishlamay qolardi va sababi ko'rinmasdi.
+            try:
+                self.root.after(1000, self._chaqiruv_tekshir)
+            except Exception:
+                pass
+
+    def _oynani_oldinga(self):
+        """Oynani boshqa dasturlar ustiga chiqarish (yig'ilgan bo'lsa — yozadi)."""
+        try:
+            self.root.deiconify()
+            self.root.lift()
+            self.root.attributes("-topmost", True)
+            self.root.after(400, lambda: self.root.attributes("-topmost", False))
+            self.root.focus_force()
+        except Exception:
+            pass
+
     def find_order_by_barcode(self, barcode):
         """Barcode bo'yicha buyurtma topish"""
         conn = db_conn()

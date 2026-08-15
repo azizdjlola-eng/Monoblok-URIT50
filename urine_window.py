@@ -436,7 +436,12 @@ def open_window(parent=None, on_import_callback=None):
             msg   = f"\u2705 Natijalar asosiy oynaga o'tkazildi!\n\nBemor: {name}"
             if count:
                 msg += f"\nO'tkazilgan natijalar: {count} ta"
-            messagebox.showinfo("Muvaffaqiyat", msg)
+            # Bloklamaydigan xabar (oyna_xabar.py izohiga qarang)
+            try:
+                from oyna_xabar import toast
+                toast(window.master if window.master else window, msg)
+            except Exception:
+                messagebox.showinfo("Muvaffaqiyat", msg)
             # Muvaffaqiyatli import'dan keyin oynani yopish
             try:
                 window.destroy()
