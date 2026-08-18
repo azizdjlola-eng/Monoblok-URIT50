@@ -73,16 +73,20 @@ def seed_avto() -> int:
     try:
         import mysql.connector
         cfg = _db_config()
+        # TLS lokal bazada o'chiq — har ulanishga ~1 soniya qo'shardi (startni sekinlatardi)
+        _h = str(cfg.get("host", "") or "").strip().lower()
+        _ssl = {"ssl_disabled": True} if _h in ("127.0.0.1", "localhost", "::1", "") else {}
         conn = mysql.connector.connect(
             host=cfg["host"], user=cfg["user"], password=cfg["password"],
             database=cfg["database"], port=int(cfg.get("port", 3306)),
-            connection_timeout=5, use_pure=True)
+            connection_timeout=5, use_pure=True, **_ssl)
         try:
             _ensure_norma_table(conn)     # tahlillar_norma KAFOLATLI mavjud bo'lsin
             n1 = seed_normalar(conn)      # tahlillar_norma (normalar)
             n2 = seed_katalog(conn)       # tahlillar (xizmat katalogi + narxlar)
             n3 = seed_mkb10(conn)         # mkb10 (XKT-10 tashxis lug'ati)
-            return n1 + n2 + n3
+            n4 = seed_dorilar(conn)       # dorilar (retsept lug'ati, 18-BOSQICH)
+            return n1 + n2 + n3 + n4
         finally:
             conn.close()
     except Exception:
@@ -304,6 +308,87 @@ def seed_mkb10(conn) -> int:
             cur.executemany(
                 "UPDATE mkb10 SET nomi_ru=%s, daraja=%s WHERE kod=%s",
                 toldirish[i:i + BATCH])
+        conn.commit()
+        return len(yangi)
+    finally:
+        cur.close()
+
+
+# ─────────────────── Dorilar lug'ati (retsept uchun) ────────────────────
+# `dorilar_seed.csv` — ko'p ishlatiladigan dorilar (nomi, doza, shakl, guruh,
+# usul). NIMA UCHUN KERAK: dori nomini qo'lda yozishda imlo xatosi ketadi
+# (ayniqsa chet el nomlarida), xato yozilgan nom esa retseptda ham, keyingi
+# qidiruvda ham qolib ketadi. MKB-10 bilan bir xil yechim — tayyor lug'atdan
+# tanlash.
+#
+# mkb10 dan FARQI: bu jadvalni vrach TO'LDIRADI (o'zi ishlatadigan dorini
+# qo'shadi) va qo'shgani sinxron orqali filialga ham boradi. Shu sabab seed
+# faqat YO'Q qatorlarni qo'shadi — vrach tahrirlagan qator TEGILMAYDI.
+
+def _dorilar_csv_yol() -> str:
+    if getattr(sys, "frozen", False):
+        base = os.path.dirname(sys.executable)
+        for c in (base, os.path.join(base, "_internal")):
+            p = os.path.join(c, "dorilar_seed.csv")
+            if os.path.exists(p):
+                return p
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "dorilar_seed.csv")
+
+
+def dorilar_yukla() -> list:
+    yol = _dorilar_csv_yol()
+    if not os.path.exists(yol):
+        return []
+    try:
+        with open(yol, "r", encoding="utf-8-sig", newline="") as f:
+            return list(csv.DictReader(f))
+    except Exception:
+        return []
+
+
+def seed_dorilar(conn) -> int:
+    """`dorilar` jadvalini `dorilar_seed.csv` dan to'ldiradi.
+
+    IDEMPOTENT va NOZIK: faqat (nomi, doza) juftligi YO'Q qatorlar qo'shiladi.
+    Vrach qo'shgan yoki tahrirlagan yozuvlar hech qachon bosilmaydi.
+    `COUNT(*) >= CSV qatorlar soni` bo'lsa butunlay o'tkazib yuboriladi
+    (arzon tez-yo'l — keyingi startlarda bazaga tegilmaydi).
+    """
+    cur = conn.cursor()
+    try:
+        rows = dorilar_yukla()
+        if not rows:
+            return 0
+        try:
+            cur.execute("SELECT COUNT(*) FROM dorilar")
+            (mavjud_soni,) = cur.fetchone()
+        except Exception:
+            return 0          # jadval hali yo'q (eski ensure_schema) — keyingi startda
+        if mavjud_soni and int(mavjud_soni) >= len(rows):
+            return 0
+
+        cur.execute("SELECT nomi, doza FROM dorilar")
+        mavjud = {(n or "", d or "") for n, d in cur.fetchall()}
+
+        yangi = []
+        for r in rows:
+            nomi = (r.get("nomi") or "").strip()
+            doza = (r.get("doza") or "").strip()
+            if not nomi:
+                continue
+            if (nomi, doza) in mavjud:
+                continue
+            mavjud.add((nomi, doza))
+            yangi.append((nomi[:190], doza[:60],
+                          (r.get("shakl") or "").strip()[:60] or None,
+                          (r.get("guruh") or "").strip()[:80] or None,
+                          (r.get("usul") or "").strip()[:255] or None))
+
+        BATCH = 500
+        for i in range(0, len(yangi), BATCH):
+            cur.executemany(
+                "INSERT IGNORE INTO dorilar (nomi, doza, shakl, guruh, usul) "
+                "VALUES (%s,%s,%s,%s,%s)", yangi[i:i + BATCH])
         conn.commit()
         return len(yangi)
     finally:

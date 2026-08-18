@@ -42,7 +42,13 @@ def ruxsat_bormi(cache_sec: float = 300.0) -> bool:
     if _ruxsat_cache["ok"] and (now - _ruxsat_cache["t"]) < cache_sec:
         return True
     try:
-        ok = lm.holatni_tekshir().yaroqli
+        # online=False — ATAYIN. Bu tekshiruv BAZAGA ULANISH yo'lida turadi
+        # (db_conn), ya'ni foydalanuvchi tugma bosgan paytda. Online qatlam esa
+        # VPS ga TCP urinadi va server javob bermasa 1.2 soniya kutadi —
+        # natijada dastur har 5 daqiqada bir marta qotib qolardi.
+        # Masofadan blok/uzaytirish baribir HAR OCHILISHDA darvoza() da
+        # (online=True bilan) tekshiriladi — himoya susaymaydi.
+        ok = lm.holatni_tekshir(online=False).yaroqli
     except Exception:
         ok = False
     _ruxsat_cache["ok"] = ok

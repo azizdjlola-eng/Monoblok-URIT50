@@ -559,6 +559,19 @@
   "max_val_f": null
  },
  {
+  "guruh": "BIO",
+  "tahlil_nomi": "Glyukozaga tolerantlik testi",
+  "norma": "Natoshchak: 3.2-6.1, 1 soat: ≤9.4, 2 soat: ≤7.8",
+  "birlik": "mmol/l",
+  "type": "numeric",
+  "min_val": null,
+  "max_val": null,
+  "min_val_m": null,
+  "max_val_m": null,
+  "min_val_f": null,
+  "max_val_f": null
+ },
+ {
   "guruh": "TEST",
   "tahlil_nomi": "H.Pylori Test (axlatdan)",
   "norma": "Manfiy (-)",
@@ -1515,6 +1528,19 @@
   "type": "numeric",
   "min_val": null,
   "max_val": null,
+  "min_val_m": null,
+  "max_val_m": null,
+  "min_val_f": null,
+  "max_val_f": null
+ },
+ {
+  "guruh": "IFA",
+  "tahlil_nomi": "Troponin I miqdoriy  ИФА",
+  "norma": "0.000-0.100 Manfiy (-), 0.101-0.400 Shubhali — 3 soatdan keyin takrorlash, >0.400 Musbat (+)",
+  "birlik": "ng/ml",
+  "type": "hormone",
+  "min_val": null,
+  "max_val": 0.1,
   "min_val_m": null,
   "max_val_m": null,
   "min_val_f": null,

@@ -1087,5 +1087,32 @@
   "turi": "test",
   "soha": "uzi",
   "aktiv": 1
+ },
+ {
+  "id": 159,
+  "nomi": "Troponin I test",
+  "narxi": 70000,
+  "sample": "TEST",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 0
+ },
+ {
+  "id": 160,
+  "nomi": "Troponin I miqdoriy  ИФА",
+  "narxi": 70000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 164,
+  "nomi": "Troponin I",
+  "narxi": 70000,
+  "sample": "TEST",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
  }
 ]
