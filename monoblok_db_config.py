@@ -36,6 +36,22 @@ CONFIG_PATH = os.path.join(_base_dir(), "analizator_config.json")
 
 
 # ---------------------------------------------------------------------------
+# BAZAGA ULANISH: tez va qotmaydigan (2026-08-15)
+# ---------------------------------------------------------------------------
+# `connection_timeout` — baza manzili noto'g'ri yoki kompyuter o'chiq bo'lsa,
+# ulanish TCP ning o'z muddatini (30-60 sek) kutardi. Tk bitta oqimda
+# ishlagani uchun bu paytda BUTUN OYNA QOTIB qolardi ("dastur qotib ishlayapti"
+# shikoyatining ildizi — eski manzil 192.168.13.42 ga urinardi). Endi 5 sekundda
+# aniq xato beradi.
+#
+# `ssl_disabled` — mysql-connector pure-Python rejimida HAR ulanishga TLS qo'l
+# berishini qo'shadi. Shu bazada o'lchandi: 0.234 sek → 0.004 sek (58 barobar).
+# Monoblok har so'rovga yangi ulanish ochadi, shuning uchun farq sezilarli.
+# Baza LOKAL tarmoqda (klinika ichida), tashqariga chiqmaydi.
+DB_ULANISH_KUTISH = 5      # sekund
+
+
+# ---------------------------------------------------------------------------
 # STANDART SOZLAMALAR (JSON yo'q bo'lsa shu ishlatiladi)
 # ---------------------------------------------------------------------------
 DEFAULT_CONFIG = {
@@ -180,6 +196,8 @@ def save_config(cfg: dict) -> bool:
                 # C-extension (_mysql_connector.pyd) "Failed raising error" beradi —
                 # barcha mysql.connector consumer'lari pure-Python ishlatsin.
                 "use_pure": True,
+                "ssl_disabled": True,
+                "connection_timeout": DB_ULANISH_KUTISH,
             })
         return True
     except Exception as e:
@@ -211,4 +229,7 @@ DB_CONFIG = {
     # pymysql modullari (bk280, asus_lis_server) o'z config'ini aniq kalitlar bilan
     # quradi, shuning uchun bu kalitni olmaydi — ular buzilmaydi.
     "use_pure": True,
+    # Yuqoridagi DB_ULANISH_KUTISH izohiga qarang: qotib qolmaslik + tezlik.
+    "ssl_disabled": True,
+    "connection_timeout": DB_ULANISH_KUTISH,
 }
