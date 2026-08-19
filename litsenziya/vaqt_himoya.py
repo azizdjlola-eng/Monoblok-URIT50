@@ -34,6 +34,23 @@ _REG_YOL = r"Software\AzizMedLine\Sys"
 _REG_NOM = "tk"
 _TOLERANS = 24 * 3600  # 1 kun — vaqt mintaqasi / NTP tuzatishlari uchun zahira
 
+# HWM bir qadamda shuncha vaqtdan ko'p OLDINGA sakrasa — yodlab qolinmaydi.
+#
+# NEGA KERAK (2026-08-19 da jonli nosozlik): kompyuter soati kelajakka ketsa
+# (BIOS batareyasi o'ligi, qo'lda noto'g'ri sana), eski kod o'sha kelajak
+# vaqtni HWM ga YOZIB QO'YARDI. Soat to'g'irlangandan keyin ham HWM kelajakda
+# qolar edi va litsenziya:
+#   • avval "muddati tugagan"  (soat kelajakda turganda),
+#   • keyin "vaqt orqaga"      (soat to'g'irlangach, now < hwm)
+# deb ABADIY bloklanardi. Yagona chora — registr va yashirin faylni qo'lda
+# o'chirish edi (mijoz buni qila olmaydi).
+#
+# Endi shubhali kelajak qiymat YOZILMAYDI: soat noto'g'ri turganda litsenziya
+# vaqtincha "tugagan" ko'rinadi (bu TO'G'RI — soat shuni aytyapti), lekin
+# soat to'g'irlanishi bilan O'ZI tiklanadi. Himoya kuchi kamaymaydi: orqaga
+# surishni aniqlash (`ok`) avvalgidek eski HWM bo'yicha hisoblanadi.
+_MAX_OLDINGA = 45 * 24 * 3600  # 45 kun
+
 
 def _kalit(machine_id: str) -> bytes:
     h = hashlib.sha256(("VAQT-HIMOYA::" + machine_id).encode("utf-8")).digest()
@@ -110,9 +127,22 @@ def tekshir_va_yangila(machine_id: str):
     """
     now = int(time.time())
     hwm = max(_fayldan_oqi(machine_id), _regdan_oqi(machine_id))
+
+    # Orqaga surishni aniqlash — ESKI (yozilmagan) HWM bo'yicha, avvalgidek.
     ok = not (now < hwm - _TOLERANS)
+
+    # Muddat tekshiruvi uchun "ishonchli hozir" — avvalgidek oldinga qaragan.
     ishonchli_hozir = max(now, hwm)
-    # HWM faqat oldinga
-    _faylga_yoz(machine_id, ishonchli_hozir)
-    _regga_yoz(machine_id, ishonchli_hozir)
+
+    # HWM ni saqlash: faqat oldinga, LEKIN ishonarli qadam bilan.
+    # Soat haddan tashqari oldinga ketgan bo'lsa (_MAX_OLDINGA dan ko'p),
+    # bu qiymat YODLAB QOLINMAYDI — aks holda soat to'g'irlangach ham
+    # litsenziya abadiy bloklanib qolardi (yuqoridagi izohga qarang).
+    if hwm and now > hwm + _MAX_OLDINGA:
+        saqlanadigan = hwm  # shubhali sakrash — eski qiymat qoladi
+    else:
+        saqlanadigan = max(now, hwm)
+
+    _faylga_yoz(machine_id, saqlanadigan)
+    _regga_yoz(machine_id, saqlanadigan)
     return ok, ishonchli_hozir

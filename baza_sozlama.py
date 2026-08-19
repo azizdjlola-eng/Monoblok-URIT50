@@ -130,6 +130,51 @@ def sozlama_parol_saqla(yangi: str) -> str:
     return p
 
 
+def ichki_tarmoqmi(host: str) -> bool:
+    """Manzil klinikaning O'Z tarmog'idami (RFC 1918 / lokal nom)."""
+    host = (host or "").strip().lower()
+    if not host:
+        return False
+    try:
+        import ipaddress
+        manzil = ipaddress.ip_address(host)
+        return bool(manzil.is_private or manzil.is_loopback or manzil.is_link_local)
+    except ValueError:
+        pass
+    # IP emas — kompyuter nomi. Nuqtasiz nom internetda bo'lmaydi.
+    if "." not in host:
+        return True
+    return host.endswith((".local", ".lan", ".home", ".mshome.net", ".internal"))
+
+
+def tls_kwargs(cfg: dict) -> dict:
+    """MySQL ulanishida TLS kerakmi — BARCHA modullar uchun YAGONA qoida.
+
+    NEGA YAGONA JOYDA: bu qoida 6 ta faylda (registrator, login, tv_server,
+    vrach_web, sms_watcher, lims_sync_server, baza_sinxron) nusxa-ko'chirilgan
+    edi va hammasida bir xil kamchilik bor edi — TLS faqat `127.0.0.1` uchun
+    o'chirilardi. Bazasi boshqa kompyuterda turgan har bir ish o'rni esa har
+    ulanishga ~790 ms to'lardi (shu kompyuterda o'lchandi: 2.8 ms → 788 ms).
+    Bitta joyda tuzatilsa hammasi tuzalsin.
+
+    Qoida:
+      SSL=on   → TLS majburiy (hamma joyda)
+      SSL=off  → TLS o'chiq (hamma joyda)
+      auto     → ichki tarmoq (127.0.0.1, 192.168.x, 10.x, LABSERVER...) = o'chiq,
+                 tashqi/internet manzil = TLS QOLADI
+    """
+    cfg = cfg or {}
+    rejim = str(cfg.get("ssl", "auto") or "auto").lower()
+    if rejim in ("on", "yes", "1", "true", "yoqilgan"):
+        return {}
+    if rejim in ("off", "no", "0", "false", "o'chiq", "ochirilgan"):
+        return {"ssl_disabled": True}
+    host = str(cfg.get("host", "") or cfg.get("HOST", "") or "").strip().lower()
+    if host in ("127.0.0.1", "localhost", "::1", ""):
+        return {"ssl_disabled": True}
+    return {"ssl_disabled": True} if ichki_tarmoqmi(host) else {}
+
+
 def bu_kompyuter_ip() -> str:
     """
     Shu kompyuterning LAN IP manzili (boshqa kompyuter shuni terib ulanadi).
