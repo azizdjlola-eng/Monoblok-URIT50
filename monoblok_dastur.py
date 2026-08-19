@@ -9032,7 +9032,16 @@ class MonoblokApp:
         # Blanka generation uses blanka_generator.py directly (no pre-initialization needed)
         
         # BARCHA dasturlarni avtomatik ishga tushirish (XAMPP, URIT-50, BK-280, va boshqalar)
-        self.root.after(3000, self._auto_start_services)
+        # Analizatorlarni ishga tushirish ALOHIDA OQIMDA.
+        # Ilgari bu UI oqimida (`after`) ishlardi: MySQL ulanishi, URIT-50
+        # jarayonlarini o'ldirish/ochish, BK-280 va BC-20S listenerlari —
+        # hammasi ketma-ket, va shu vaqt davomida oyna MUZLAB turardi
+        # (hamshira aynan o'sha paytda bemorni ko'rmoqchi bo'ladi).
+        # Funksiya buning uchun allaqachon tayyor: UI ni faqat
+        # `self.root.after(0, ...)` orqali yangilaydi va ichida bitta ham
+        # messagebox yo'q (tekshirildi) — ya'ni oqimdan chaqirish xavfsiz.
+        self.root.after(600, lambda: threading.Thread(
+            target=self._auto_start_services, daemon=True).start())
         
         # Status bar ko'rsatish
         status_bar = ttk.Label(self.root, textvariable=self.status_var, relief=tk.SUNKEN)
@@ -9041,9 +9050,13 @@ class MonoblokApp:
         # Database ulanishini tekshirish (dastur ishga tushganda)
         self.root.after(1000, self.check_db_on_startup)
 
-        # Registratsiyadan "shu bemorni och" so'rovini kutish
+        # Registratsiyadan "shu bemorni och" so'rovini kutish.
+        # 200 ms (ilgari 1500): registratsiya so'rov faylini dastur ishga
+        # tushishidan OLDIN yozadi, ya'ni u bizni allaqachon kutib turibdi.
+        # 1.5 sekund kutish sovuq ishga tushishga bekorga qo'shilardi
+        # (o'lchandi: oyna tayyor bo'lguncha 4.7 sek, shundan 1.3 sek shu yerda).
         self._natija_soro_korilgan = 0.0
-        self.root.after(1500, self._chaqiruv_tekshir)
+        self.root.after(200, self._chaqiruv_tekshir)
         
         # Database test tugmasi (Ctrl+Shift+D) - dastur oynasida
         self.root.bind("<Control-Shift-D>", lambda e: self.test_database_read())
@@ -10620,7 +10633,11 @@ class MonoblokApp:
             # Xato bo'lsa ham halqa TO'XTAMASIN — aks holda tugma jimgina
             # ishlamay qolardi va sababi ko'rinmasdi.
             try:
-                self.root.after(1000, self._chaqiruv_tekshir)
+                # 300 ms (ilgari 1000): oyna ALLAQACHON ochiq bo'lganda
+                # hamshira tugmani bosgach shuncha kutadi. Tekshiruv juda
+                # arzon (bitta kichik faylni o'qish), shuning uchun tez-tez
+                # qarash sezilarli yuk bermaydi.
+                self.root.after(300, self._chaqiruv_tekshir)
             except Exception:
                 pass
 
@@ -10679,6 +10696,26 @@ class MonoblokApp:
                 ORDER BY o.sana_vaqt DESC
                 LIMIT 1
             """
+
+            # TEZ YO'L: registratsiyadan kelgan qiymat deyarli doim
+            # `orders.sample_id` bo'ladi va u INDEKSLANGAN. Pastdagi 5 ta OR
+            # li so'rov esa indeksdan foydalana olmaydi — MySQL butun
+            # `orders` jadvalini skanerlaydi (EXPLAIN: key=None, 7201 satr).
+            # Shuning uchun avval indeksli aniq qidiruvni sinaymiz; topilmasa
+            # eski so'rov AVVALGIDEK ishlaydi (kod_yollanma, natija_kodi,
+            # order_id bo'yicha qidirish YO'QOLMAYDI).
+            tez_query = query.replace(
+                """WHERE o.sample_id = %s
+                   OR b.sample_id = %s
+                   OR b.kod_yollanma = %s
+                   OR b.natija_kodi = %s
+                   OR o.id = %s""",
+                "WHERE o.sample_id = %s")
+            if tez_query != query:
+                cursor.execute(tez_query, (barcode,))
+                result = cursor.fetchone()
+                if result:
+                    return result
 
             cursor.execute(query, (barcode, barcode, barcode, barcode, barcode))
             result = cursor.fetchone()
