@@ -19793,6 +19793,10 @@ Sana: {_sana_fmt}"""
             test_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             # 1. Results jadvaliga saqlash
+            # DIQQAT (2026-08-19): status shu yerda 'ready' qilinmaydi.
+            # Laborant faqat BIR NECHTA tahlilni to'ldirib saqlashi mumkin —
+            # unda buyurtma hali tayyor emas. Yakuniy holatni natija_tugallik
+            # moduli hamma tahlil bajarilganini tekshirib yozadi (pastda).
             cursor.execute("""
                 SELECT id FROM results WHERE order_id = %s
             """, (self.current_order_id,))
@@ -19802,13 +19806,13 @@ Sana: {_sana_fmt}"""
                 result_id = result_row[0]
                 cursor.execute("""
                     UPDATE results
-                    SET status = 'ready', updated_at = %s
+                    SET updated_at = %s
                     WHERE id = %s
                 """, (test_time, result_id))
             else:
                 cursor.execute("""
                     INSERT INTO results (order_id, status, created_at, updated_at)
-                    VALUES (%s, 'ready', %s, %s)
+                    VALUES (%s, 'draft', %s, %s)
                 """, (self.current_order_id, test_time, test_time))
                 result_id = cursor.lastrowid
 
@@ -19948,6 +19952,23 @@ Sana: {_sana_fmt}"""
                 """, (test_time, self.current_order_id))
             except:
                 pass
+
+            # 4. Natija holatini QAYTA HISOBLASH — 'ready' faqat buyurtmadagi
+            #    HAMMA laboratoriya tahlili saqlangan bo'lsa. Aks holda 'draft'
+            #    (qisman). Shu tufayli LIMS/TV chiqmagan natijani "Tayyor"
+            #    demaydi va bemorga SMS erta ketmaydi.
+            _natija_holati = None
+            try:
+                from natija_tugallik import natija_holatini_yangila, buyurtma_tugallik
+                _natija_holati = natija_holatini_yangila(
+                    cursor, self.current_order_id, vaqt=test_time)
+                if _natija_holati != 'ready':
+                    _tug, _yetishmaydi, _jami = buyurtma_tugallik(
+                        cursor, self.current_order_id)
+                    print(f"[HOLAT] Buyurtma hali TO'LIQ emas ({_jami - len(_yetishmaydi)}/{_jami}): "
+                          f"{', '.join(_yetishmaydi[:6])}")
+            except Exception as _he:
+                print(f"[OGOHLANTIRISH] natija holati hisoblanmadi: {_he}")
 
             conn.commit()
             print(f"[OK] Natijalar bazaga saqlandi: {saved_count} ta, vaqt: {test_time}")

@@ -339,15 +339,22 @@ def _save_to_db(patient: dict) -> bool:
         now_str  = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         # results jadvali
+        # DIQQAT (2026-08-19): bu yerda status='ready' QO'YILMAYDI!
+        # Analizatordan kelgan xom ko'rsatkichlar (WBC, HGB, ...) "natija
+        # tayyor" degani EMAS — laborant hali blankani tugatmagan, buyurtmada
+        # boshqa tahlillar (bioximiya, IFA, siydik) ham bo'lishi mumkin.
+        # Ilgari shu satr LIMS "Natijalar va SMS" oynasida chiqmagan natijani
+        # "Tayyor" qilib ko'rsatardi (19.08 da 13 tadan 11 tasi yolg'on edi).
+        # Yakuniy holatni natija_tugallik moduli HISOBLAB yozadi (pastda).
         cur.execute("SELECT id FROM results WHERE order_id=%s", (order_id,))
         res_row = cur.fetchone()
         if res_row:
             result_id = res_row["id"]
-            cur.execute("UPDATE results SET status='ready', updated_at=%s WHERE id=%s",
+            cur.execute("UPDATE results SET updated_at=%s WHERE id=%s",
                         (now_str, result_id))
         else:
             cur.execute("""INSERT INTO results (order_id, status, created_at, updated_at)
-                           VALUES (%s,'ready',%s,%s)""",
+                           VALUES (%s,'draft',%s,%s)""",
                         (order_id, now_str, now_str))
             result_id = cur.lastrowid
 
@@ -385,9 +392,18 @@ def _save_to_db(patient: dict) -> bool:
                            status='Saqlandi', updated_at=CURRENT_TIMESTAMP""",
                         (str(order_id), db_name, rj))
 
+        # Natija holatini QAYTA HISOBLASH: 'ready' faqat buyurtmadagi HAMMA
+        # laboratoriya tahlili saqlangan bo'lsa qo'yiladi, aks holda 'draft'.
+        _holat = "?"
+        try:
+            from natija_tugallik import natija_holatini_yangila
+            _holat = natija_holatini_yangila(cur, order_id, vaqt=now_str)
+        except Exception as _he:
+            _log(f"[OGOHLANTIRISH] natija holati hisoblanmadi: {_he}")
+
         conn.commit()
         cur.close(); conn.close()
-        _log(f"DB: order_id={order_id} ga {len(tests)} natija saqlandi")
+        _log(f"DB: order_id={order_id} ga {len(tests)} natija saqlandi (holat={_holat})")
         return True
     except Exception as e:
         _log(f"[XATO] DB saqlashda xato: {e}")

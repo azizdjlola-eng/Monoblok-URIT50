@@ -1262,15 +1262,18 @@ def _do_save(patient_info, status_var, silent=False):
 
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+        # DIQQAT (2026-08-19): bu yerda status='ready' QO'YILMAYDI.
+        # BK-280 bioximiya natijasi kelishi — buyurtmadagi qon/siydik/IFA
+        # tahlillari ham tayyor degani emas. Holatni natija_tugallik hisoblaydi.
         cur.execute("SELECT id FROM results WHERE order_id=%s", (order_id,))
         res_row = cur.fetchone()
         if res_row:
             result_id = res_row['id']
-            cur.execute("UPDATE results SET status='ready',updated_at=%s WHERE id=%s",
+            cur.execute("UPDATE results SET updated_at=%s WHERE id=%s",
                         (now, result_id))
         else:
             cur.execute("INSERT INTO results(order_id,status,created_at,updated_at)"
-                        " VALUES(%s,'ready',%s,%s)", (order_id, now, now))
+                        " VALUES(%s,'draft',%s,%s)", (order_id, now, now))
             result_id = cur.lastrowid
 
         saved_count = 0
@@ -1305,6 +1308,13 @@ def _do_save(patient_info, status_var, silent=False):
             cur.execute("UPDATE orders SET updated_at=%s WHERE id=%s", (now, order_id))
         except Exception:
             pass
+
+        # Natija holatini QAYTA HISOBLASH (buyurtmadagi hamma tahlil bajarilsa 'ready')
+        try:
+            from natija_tugallik import natija_holatini_yangila
+            natija_holatini_yangila(cur, order_id, vaqt=now)
+        except Exception as _he:
+            print(f"[OGOHLANTIRISH] natija holati hisoblanmadi: {_he}")
 
         conn.commit()
 

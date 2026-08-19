@@ -1632,18 +1632,22 @@ def _do_save_patient(patient_info, status_var, silent=False):
         test_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
         # results jadvalida yozuv topish yoki yaratish
+        # DIQQAT (2026-08-19): bu yerda status='ready' QO'YILMAYDI.
+        # Gematologiya natijasi saqlanishi — buyurtmadagi bioximiya/IFA/siydik
+        # tahlillari ham bajarildi degani emas. Yakuniy holatni pastdagi
+        # natija_tugallik moduli HISOBLAB yozadi.
         cursor.execute("SELECT id FROM results WHERE order_id = %s", (order_id,))
         result_row = cursor.fetchone()
-        
+
         if result_row:
             result_id = result_row['id']
             cursor.execute("""
-                UPDATE results SET status = 'ready', updated_at = %s WHERE id = %s
+                UPDATE results SET updated_at = %s WHERE id = %s
             """, (test_time, result_id))
         else:
             cursor.execute("""
                 INSERT INTO results (order_id, status, created_at, updated_at)
-                VALUES (%s, 'ready', %s, %s)
+                VALUES (%s, 'draft', %s, %s)
             """, (order_id, test_time, test_time))
             result_id = cursor.lastrowid
         
@@ -1692,7 +1696,15 @@ def _do_save_patient(patient_info, status_var, silent=False):
             cursor.execute("UPDATE orders SET updated_at = %s WHERE id = %s", (test_time, order_id))
         except:
             pass
-        
+
+        # Natija holatini QAYTA HISOBLASH: 'ready' faqat buyurtmadagi HAMMA
+        # laboratoriya tahlili saqlangan bo'lsa qo'yiladi, aks holda 'draft'.
+        try:
+            from natija_tugallik import natija_holatini_yangila
+            natija_holatini_yangila(cursor, order_id, vaqt=test_time)
+        except Exception as _he:
+            print(f"[OGOHLANTIRISH] natija holati hisoblanmadi: {_he}")
+
         conn.commit()
         
         if not silent:
