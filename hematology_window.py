@@ -1521,7 +1521,9 @@ def save_all_patients_to_db(patients_data, status_var):
         "Tasdiqlash",
         f"{count} ta bemorning natijalarini bazaga saqlashni tasdiqlaysizmi?\n\n"
         f"DIQQAT: Faqat Sample ID bo'yicha orders jadvalida topilgan\n"
-        f"bemorlar uchun natijalar saqlanadi."
+        f"bemorlar uchun natijalar saqlanadi.\n\n"
+        f"Bazada natijasi BOR bemorlarda eski natija YANGILANADI\n"
+        f"(ustiga yoziladi). Har biri uchun alohida so'ralmaydi."
     )
     if not confirm:
         return
@@ -1616,12 +1618,31 @@ def _do_save_patient(patient_info, status_var, silent=False):
         db_name = order_row.get('fish', name)
         
         if not silent:
+            # Bu buyurtmada natija ALLAQACHON bormi? Bo'lsa — ustiga yoziladi,
+            # laborant buni bilib turishi kerak (xato bemorga yozib yubormaslik uchun).
+            _mavjud = 0
+            try:
+                cursor.execute(
+                    "SELECT COUNT(*) AS n FROM test_results WHERE order_id = %s",
+                    (str(order_id),))
+                _row_cnt = cursor.fetchone()
+                _mavjud = int((_row_cnt or {}).get('n', 0) or 0)
+            except Exception:
+                _mavjud = 0
+
+            _ogoh = ""
+            if _mavjud:
+                _ogoh = (f"\nDIQQAT: bu buyurtmada allaqachon {_mavjud} ta natija bor.\n"
+                         f"Ular YANGILANADI — eski qiymat o'chadi.\n"
+                         f"Haqiqatan ham natijani yangilamoqchimisiz?\n")
+
             confirm = messagebox.askyesno(
                 "Tasdiqlash",
                 f"Quyidagi bemor natijalarini saqlash:\n\n"
                 f"Analyzer: {name} (Sample: {sample_id})\n"
                 f"Bazadagi bemor: {db_name} (Order ID: {order_id})\n\n"
-                f"Natijalar soni: {len(tests)} ta\n\n"
+                f"Natijalar soni: {len(tests)} ta\n"
+                f"{_ogoh}\n"
                 f"Davom etasizmi?"
             )
             if not confirm:
@@ -1690,7 +1711,58 @@ def _do_save_patient(patient_info, status_var, silent=False):
             """, (str(order_id), db_test_name, result_json))
             
             saved_count += 1
-        
+
+        # ── "Qonning umumiy tahlili" (yagona qator) ni HAM yangilash ─────────
+        # Buyurtmada alohida WBC/HGB emas, bitta umumiy qon tahlili bo'lsa —
+        # blankaga AYNAN shu kompozit qator tushadi. Faqat alohida qatorlarni
+        # yangilash yetarli emas edi: natija tuzatilgach ham blankada ESKI
+        # qiymat qolib ketardi.
+        try:
+            cursor.execute("SELECT nomi FROM order_items WHERE order_id = %s", (order_id,))
+            _CBC_EXACT   = ('qonning umumiy tahlili', 'umumiy qon tahlili', 'umumiy qon')
+            _CBC_EXCLUDE = ('qon guruhi', 'qon guruh', 'rezus', 'ivish', 'qib', 'echt')
+            cbc_names = []
+            for _r in cursor.fetchall():
+                _nm  = (_r.get('nomi') or '')
+                _low = _nm.lower()
+                if any(e in _low for e in _CBC_EXACT) and not any(x in _low for x in _CBC_EXCLUDE):
+                    cbc_names.append(_nm)
+
+            if cbc_names:
+                all_vals = {}
+                for _pk, _td in tests.items():
+                    _v = (_td.get('value') or '').strip()
+                    if _v:
+                        all_vals[HL7_TO_DB_NAME.get(_pk, _pk)] = _v
+                if all_vals:
+                    cbc_json = json.dumps({
+                        'result': sample_id, 'type': 'hematology_cbc',
+                        'source': 'BC-20S', 'sid': sample_id,
+                        'patient_age':    patient_info.get('age', ''),
+                        'patient_gender': patient_info.get('gender', ''),
+                        **all_vals
+                    }, ensure_ascii=False)
+                    for _nm in cbc_names:
+                        cursor.execute("""
+                            DELETE FROM result_items WHERE result_id = %s AND tahlil_nomi = %s
+                        """, (result_id, _nm))
+                        cursor.execute("""
+                            INSERT INTO result_items (result_id, tahlil_nomi, qiymat, birlik, norma, note)
+                            VALUES (%s, %s, %s, '', '', %s)
+                        """, (result_id, _nm, cbc_json, f"BC-20S | {test_time}"))
+                        cursor.execute("""
+                            INSERT INTO test_results (order_id, test_name, test_type, result_data, status)
+                            VALUES (%s, %s, 'hematology_cbc', %s, 'Saqlandi')
+                            ON DUPLICATE KEY UPDATE
+                            result_data = VALUES(result_data),
+                            status = 'Saqlandi',
+                            updated_at = CURRENT_TIMESTAMP
+                        """, (str(order_id), _nm, cbc_json))
+                        saved_count += 1
+                        print(f"[BC-20S] Umumiy qon tahlili yangilandi: {_nm} (order {order_id})")
+        except Exception as _cbc_err:
+            print(f"[OGOHLANTIRISH] Umumiy qon tahlilini yangilashda xato: {_cbc_err}")
+
         # orders jadvalini yangilash
         try:
             cursor.execute("UPDATE orders SET updated_at = %s WHERE id = %s", (test_time, order_id))

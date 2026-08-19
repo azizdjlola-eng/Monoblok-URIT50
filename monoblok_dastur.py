@@ -8998,6 +8998,12 @@ class MonoblokApp:
         self.current_bemor_data = None
         self.current_tests = []
         self.test_results = {}  # {test_id: result_value}
+        # DB ga hali TUSHMAGAN (F2 / "Faqat Bazaga Saqlash" bosilmagan) natijalar.
+        # load_tests() bazadan o'qiganda ESKI qiymat yangi (tuzatilgan) natija
+        # ustiga yozilib ketmasin — aks holda tuzatish yo'qoladi va laborantga
+        # "baza o'zgarmayapti" bo'lib ko'rinadi.
+        self._pending_results = {}     # {test_id: result_value}
+        self._pending_order_id = None  # qaysi buyurtmaga tegishli
         self.urit_process = None  # URIT-50 dastur jarayoni
         self.is_saved = False  # Ma'lumotlar saqlanganmi
         self.is_printed = False  # Chop etilganmi
@@ -11621,6 +11627,7 @@ Sana: {_sana_fmt}"""
         self.current_bemor_data = None
         self.current_tests = []
         self.test_results = {}
+        self._clear_pending_results()
         self._history_frozen = False
         self._history_all_tests = []
         if hasattr(self, 'tahrirlash_btn'):
@@ -11894,6 +11901,33 @@ Sana: {_sana_fmt}"""
                     if (_d.get('result_data') or '').strip() or \
                        (_d.get('status') or '') in ('Saqlandi', 'saqlandi', 'Chop etildi', 'printed'):
                         _persisted_result_ids.add(_tid)
+
+            # ── SAQLANMAGAN (tuzatilgan) NATIJALARNI HIMOYA QILISH ────────────
+            # Yuqorida baza natijalari xotira ustiga yozildi. Agar laborant
+            # natijani endigina tuzatgan bo'lsa (analizatordan qayta import yoki
+            # qo'lda kiritish) va F2 hali bosilmagan bo'lsa — bazadagi ESKI
+            # qiymat yangisini bosib ketmasligi kerak. Aks holda tuzatish
+            # jimgina yo'qoladi va "baza o'zgarmayapti" bo'lib ko'rinadi.
+            if not history_mode:
+                _pending = self._get_pending_results()
+                if _pending:
+                    for _t in self.current_tests:
+                        _pid = _t['id']
+                        if _pid not in _pending:
+                            continue
+                        _pval = _pending[_pid]
+                        self.test_results[_pid] = _pval
+                        # Bu natija DB dagidan FARQ qiladi — "Saqlandi" deb
+                        # ko'rsatmaymiz, aks holda saqlangandek chalg'itadi.
+                        _persisted_result_ids.discard(_pid)
+                        _pnm = _t.get('nomi', '')
+                        if _pnm:
+                            test_results_data[_pnm] = {
+                                'result_data': _pval if isinstance(_pval, str) else str(_pval),
+                                'status': 'Tayyor'
+                            }
+                    print(f"[YANGILANDI] {len(_pending)} ta saqlanmagan natija "
+                          f"baza qiymati bilan almashtirilmadi (F2 kutilmoqda)")
 
             # ── Barcha norma ma'lumotlarini BIR so'rovda yuklash (performance) ──
             _all_test_names = [t.get('nomi', '') for t in self.current_tests if t.get('nomi')]
@@ -12973,6 +13007,14 @@ Sana: {_sana_fmt}"""
             """, (order_id, test_name, test_type, result_json))
 
             conn.commit()
+            # Bu tahlil DB ga tushdi — "saqlanmagan" belgisi endi kerak emas
+            # (aks holda eskirgan xotira qiymati yangi bazani bosib qolardi).
+            try:
+                for _t in self.current_tests:
+                    if _t.get('nomi', '') == test_name:
+                        self._forget_pending_result(_t['id'])
+            except Exception:
+                pass
             return True
 
         except Exception as e:
@@ -13287,6 +13329,233 @@ Sana: {_sana_fmt}"""
             # Standart blanka yo'q - oddiy norma ko'rsatish
             messagebox.showinfo("Ma'lumot", f"Bu tahlil uchun standart blanka mavjud emas.\n\nTahlil: {test_name}")
     
+    # ─────────────────────────────────────────────────────────────────────────
+    #  NATIJANI YANGILASH (tuzatish) — saqlanmagan natijalarni himoya qilish
+    #  va mavjud natija ustiga yozishdan oldin tasdiq so'rash
+    # ─────────────────────────────────────────────────────────────────────────
+    def _mark_result_pending(self, test_id, value):
+        """Natija xotirada o'zgardi, lekin DB ga hali tushmadi.
+
+        load_tests() bazadan qayta o'qiganda ESKI qiymat shu yangi natija ustiga
+        yozilib ketmasligi uchun belgilab qo'yamiz. Aks holda tuzatilgan natija
+        jimgina yo'qoladi ("baza o'zgarmayapti" muammosi).
+        """
+        try:
+            if getattr(self, '_pending_order_id', None) != self.current_order_id:
+                self._pending_results = {}
+                self._pending_order_id = self.current_order_id
+            self._pending_results[test_id] = value
+            self.is_saved = False
+        except Exception as e:
+            print(f"[OGOHLANTIRISH] _mark_result_pending: {e}")
+
+    def _forget_pending_result(self, test_id):
+        """Natija DB ga tushdi — endi uni 'saqlanmagan' deb ushlab turish shart emas."""
+        try:
+            if getattr(self, '_pending_results', None):
+                self._pending_results.pop(test_id, None)
+        except Exception:
+            pass
+
+    def _clear_pending_results(self):
+        """Barcha saqlanmagan natija belgilarini tozalash (saqlangandan keyin)."""
+        self._pending_results = {}
+        self._pending_order_id = None
+
+    def _get_pending_results(self):
+        """Joriy buyurtmaning DB ga tushmagan natijalari: {test_id: qiymat}."""
+        if getattr(self, '_pending_order_id', None) != self.current_order_id:
+            return {}
+        return getattr(self, '_pending_results', None) or {}
+
+    def _result_short_text(self, raw, max_len=120):
+        """Natijani qisqa, o'qiladigan matnga aylantiradi (eski/yangi taqqoslash uchun)."""
+        import json as _j
+        if raw is None:
+            return ''
+        if isinstance(raw, dict):
+            rd = raw
+        else:
+            s = str(raw).strip()
+            if not s:
+                return ''
+            if not s.startswith('{'):
+                return s[:max_len]
+            try:
+                rd = _j.loads(s)
+            except Exception:
+                return s[:max_len]
+        if not isinstance(rd, dict):
+            return str(rd)[:max_len]
+
+        jt = rd.get('type', '')
+        if jt == 'hematology':
+            nm = rd.get('db_name') or rd.get('param_key') or ''
+            return f"{nm}: {rd.get('actual_value', '')} {rd.get('unit', '')}".strip()[:max_len]
+
+        skip = {'result', 'type', 'source', 'sid', 'sno', 'actual_value', 'unit',
+                'flag', 'param_key', 'db_name', 'code', 'name', 'all_analytes',
+                'analyzer_ref', 'lis_code', 'patient_age', 'patient_gender'}
+        if jt == 'hematology_cbc' or ('WBC' in rd and 'HGB' in rd):
+            txt = ', '.join(f"{k}:{rd[k]}" for k in ('WBC', 'RBC', 'HGB', 'HCT', 'PLT')
+                            if rd.get(k))
+        elif jt == 'urine':
+            aa = rd.get('all_analytes') or {}
+            txt = ', '.join(f"{k}:{v}" for k, v in list(aa.items())[:6]) if aa else ''
+        else:
+            parts = [f"{k}:{v}" for k, v in rd.items()
+                     if k not in skip and v not in (None, '', {}, [])]
+            txt = ', '.join(parts[:6])
+        if not txt:
+            txt = str(rd.get('result', ''))
+        sid = rd.get('sid') or rd.get('sno') or ''
+        if sid:
+            txt = f"{txt}  [ID:{sid}]" if txt else f"[ID:{sid}]"
+        return txt[:max_len]
+
+    def _tree_status_of_test(self, test_id):
+        """Jadvaldagi tahlil statusini qaytaradi ("Saqlandi" / "Tayyor" / ...)."""
+        try:
+            for item in self.tests_tree.get_children():
+                idata = self.tests_tree.item(item)
+                tags = idata.get('tags') or []
+                if not tags:
+                    continue
+                if str(tags[0]).split('_')[0] == str(test_id):
+                    vals = idata.get('values') or []
+                    return str(vals[2]) if len(vals) > 2 else ''
+        except Exception:
+            pass
+        return ''
+
+    def _confirm_result_overwrite(self, plan, manba=""):
+        """Mavjud natija ustiga yozishdan OLDIN tasdiq so'rash.
+
+        `plan` — [(test_id, test_nomi, yangi_natija), ...]
+
+        Faqat natijasi ALLAQACHON bor va qiymati BOSHQACHA bo'lgan tahlillar
+        uchun oyna chiqadi. Hech narsa ustiga yozilmasa — darhol True.
+
+        Qaytaradi:
+          True  — yangilash mumkin
+          False — laborant bekor qildi, eski natija qoladi
+        """
+        conflicts = []
+        for test_id, test_name, new_val in plan:
+            old_val = self.test_results.get(test_id, '')
+            if not old_val:
+                continue
+            if str(old_val).strip() == str(new_val).strip():
+                continue
+            conflicts.append((
+                test_name,
+                self._result_short_text(old_val),
+                self._result_short_text(new_val),
+                self._tree_status_of_test(test_id),
+            ))
+
+        if not conflicts:
+            return True
+
+        n = len(conflicts)
+        answer = {"ok": False}
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("⚠ NATIJANI YANGILASH — tasdiqlang")
+        dlg.configure(bg="#FFF8E7")
+        try:
+            dlg.transient(self.root)
+        except Exception:
+            pass
+        dlg.grab_set()
+        dlg.resizable(True, True)
+
+        tk.Label(
+            dlg,
+            text=f"Bu bemorda {n} ta tahlilning natijasi ALLAQACHON bor",
+            font=("Arial", 13, "bold"), bg="#E65100", fg="white",
+            anchor="w", padx=14, pady=10
+        ).pack(fill=tk.X)
+
+        tk.Label(
+            dlg,
+            text=("Eski natija yangisi bilan ALMASHTIRILADI." +
+                  (f"  Manba: {manba}" if manba else "") + "\n"
+                  "Haqiqatan ham natijani yangilamoqchimisiz?"),
+            font=("Arial", 10), bg="#FFF8E7", fg="#5D4037",
+            anchor="w", justify=tk.LEFT, padx=14, pady=6
+        ).pack(fill=tk.X, pady=(4, 0))
+
+        body = tk.Frame(dlg, bg="#FFF8E7")
+        body.pack(fill=tk.BOTH, expand=True, padx=12, pady=6)
+
+        txt = tk.Text(body, wrap=tk.WORD, font=("Arial", 10),
+                      height=min(20, max(6, n * 4)),
+                      bg="white", fg="#111111", relief=tk.SOLID, borderwidth=1)
+        vsb = ttk.Scrollbar(body, orient="vertical", command=txt.yview)
+        txt.configure(yscrollcommand=vsb.set)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        txt.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        txt.tag_configure("nm",  font=("Arial", 10, "bold"), foreground="#E65100")
+        txt.tag_configure("lbl", font=("Arial", 10), foreground="#333333")
+        txt.tag_configure("old", font=("Consolas", 10), foreground="#9E9E9E")
+        txt.tag_configure("new", font=("Consolas", 11, "bold"), foreground="#1B5E20")
+
+        for i, (nm, old_txt, new_txt, st) in enumerate(conflicts, start=1):
+            suffix = f"   (bazada: {st})" if 'aqlandi' in st or 'hop etildi' in st else ''
+            txt.insert(tk.END, f"{i}. {nm}{suffix}\n", "nm")
+            txt.insert(tk.END, "     Eski:  ", "lbl")
+            txt.insert(tk.END, f"{old_txt or '(boʼsh)'}\n", "old")
+            txt.insert(tk.END, "     Yangi: ", "lbl")
+            txt.insert(tk.END, f"{new_txt or '(boʼsh)'}\n\n", "new")
+        txt.configure(state=tk.DISABLED)
+
+        tk.Label(
+            dlg,
+            text=("Eslatma: yangilangan natija bazaga faqat «Chop Etish va Saqlash (F2)» yoki\n"
+                  "«Faqat Bazaga Saqlash» bosilgandan keyin tushadi."),
+            font=("Arial", 9), bg="#FFF8E7", fg="#795548",
+            anchor="w", justify=tk.LEFT, padx=14
+        ).pack(fill=tk.X)
+
+        btns = tk.Frame(dlg, bg="#FFF8E7")
+        btns.pack(fill=tk.X, padx=12, pady=(6, 12))
+
+        def do_yes():
+            answer["ok"] = True
+            dlg.destroy()
+
+        def do_no():
+            answer["ok"] = False
+            dlg.destroy()
+
+        yes_btn = tk.Button(btns, text="✔  Ha — yangi natija bilan almashtirilsin",
+                            command=do_yes, font=("Arial", 11, "bold"),
+                            bg="#2E7D32", fg="white", padx=16, pady=8,
+                            cursor="hand2", relief=tk.FLAT)
+        yes_btn.pack(side=tk.LEFT)
+
+        tk.Button(btns, text="Yo'q — eski natija qolsin", command=do_no,
+                  font=("Arial", 10), bg="#E0E0E0", fg="#333333",
+                  padx=14, pady=8, cursor="hand2", relief=tk.FLAT).pack(side=tk.RIGHT)
+
+        dlg.bind("<Escape>", lambda e: do_no())
+
+        dlg.update_idletasks()
+        w = max(600, min(820, dlg.winfo_reqwidth()))
+        h = max(340, min(660, dlg.winfo_reqheight()))
+        try:
+            px = self.root.winfo_rootx() + (self.root.winfo_width() - w) // 2
+            py = self.root.winfo_rooty() + (self.root.winfo_height() - h) // 3
+            dlg.geometry(f"{w}x{h}+{max(0, px)}+{max(0, py)}")
+        except Exception:
+            dlg.geometry(f"{w}x{h}")
+
+        yes_btn.focus_set()
+        dlg.wait_window()
+        return answer["ok"]
+
     def _get_analyzer_managed_type(self, test_id):
         """Test analizator tomonidan to'ldiriladimi (siydik / gemotologiya) — turini qaytaradi yoki None.
 
@@ -13849,7 +14118,9 @@ Sana: {_sana_fmt}"""
                 'rangi': rangi_var.get().strip(),
                 'tiniqligi': tiniqligi_var.get().strip()
             }
-            self.test_results[test_id] = _json.dumps(result_dict, ensure_ascii=False)
+            _urine_json = _json.dumps(result_dict, ensure_ascii=False)
+            self.test_results[test_id] = _urine_json
+            self._mark_result_pending(test_id, _urine_json)
             popup.destroy()
             # Jadval qatorini yangilash
             for tr_item in self.tests_tree.get_children():
@@ -14049,7 +14320,9 @@ Sana: {_sana_fmt}"""
                 result_data = {'qon_guruhi': qon_part, 'rezus_omil': rezus}
             else:
                 result_data = {'result': result}
-            self.test_results[test_id] = json.dumps(result_data, ensure_ascii=False)
+            _opt_json = json.dumps(result_data, ensure_ascii=False)
+            self.test_results[test_id] = _opt_json
+            self._mark_result_pending(test_id, _opt_json)
             self.refresh_single_test_display(item, test_id)
 
         # ── Popup yopish yordamchisi ───────────────────────────────
@@ -14381,8 +14654,10 @@ Sana: {_sana_fmt}"""
         # Bazaga saqlash "Saqlash" tugmasi bosilganda qilinadi
         if result:
             self.test_results[test_id] = result
+            self._mark_result_pending(test_id, result)
         else:
             self.test_results.pop(test_id, None)
+            self._forget_pending_result(test_id)
         
         # Jadvalni yangilash - faqat o'zgartirilgan qatorni
         self.refresh_single_test_display(self.editing_item, test_id)
@@ -14970,6 +15245,7 @@ Sana: {_sana_fmt}"""
                         print(f"[OGOHLANTIRISH] Natija tekshiruvida xato: {_ve}")
 
                 self.test_results[test_id] = result
+                self._mark_result_pending(test_id, result)
 
                 # DB ga ham darhol saqlash (qayta tahrirlash imkonini berish uchun)
                 if self.current_order_id:
@@ -15107,6 +15383,9 @@ Sana: {_sana_fmt}"""
             # Natijani formatlash: "1(0) Rh+" yoki "2(A) Rh-" (arab raqamlari bilan - oson tushuniladigan format)
             result = f"{qon_guruh} {rezus}"
             self.test_results[test_id] = result
+            # load_tests() bazadan o'qiydi — yangi natija eski qiymat bilan
+            # almashib ketmasin
+            self._mark_result_pending(test_id, result)
             self.load_tests()  # Yangilash
             dialog.destroy()
             self.status_var.set(f"[OK] Natija saqlandi: {test_name} = {result}")
@@ -15989,6 +16268,7 @@ Sana: {_sana_fmt}"""
             data['xulosa'] = xul
             result_json_out = json.dumps(data, ensure_ascii=False)
             self.test_results[test_id] = result_json_out
+            self._mark_result_pending(test_id, result_json_out)
             rcanv.unbind_all("<MouseWheel>")
             dialog.destroy()
             self.load_tests()
@@ -16129,6 +16409,7 @@ Sana: {_sana_fmt}"""
 
             result_json = json.dumps(result_data, ensure_ascii=False)
             self.test_results[test_id] = result_json
+            self._mark_result_pending(test_id, result_json)
 
             # UI da natijani ko'rsatish (birinchi ustun qiymatlari)
             natija_str = f"v:{result_data.get('leykot_v','')}, c:{result_data.get('leykot_c','')}, u:{result_data.get('leykot_u','')}"
@@ -16168,6 +16449,9 @@ Sana: {_sana_fmt}"""
     def _save_test_result_to_tree(self, test_id, result_json, natija_str):
         """JSON natijani test_results ga va treeview ga saqlash."""
         self.test_results[test_id] = result_json
+        # DB ga hali tushmadi — keyingi load_tests() bazadagi eski qiymat bilan
+        # bu natijani bosib ketmasin (tuzatish yo'qolmasin).
+        self._mark_result_pending(test_id, result_json)
         for tree_item in self.tests_tree.get_children():
             t_data = self.tests_tree.item(tree_item)
             if t_data['tags'] and str(t_data['tags'][0]) == str(test_id):
@@ -17998,6 +18282,7 @@ Sana: {_sana_fmt}"""
 
             result_json = json.dumps(result_data, ensure_ascii=False)
             self.test_results[test_id] = result_json
+            self._mark_result_pending(test_id, result_json)
 
             # DB ga ham darhol saqlash (qayta tahrirlash imkonini berish uchun)
             if self.current_order_id:
@@ -18146,6 +18431,7 @@ Sana: {_sana_fmt}"""
                 result_value = f"Shablon: {self.current_template_name} ({temp_file_path})"
             
             self.test_results[test_id] = result_value
+            self._mark_result_pending(test_id, result_value)
             self.load_tests()
             dialog.destroy()
             self.status_var.set(f"Shablon natijasi saqlandi: {test_name}")
@@ -19978,6 +20264,8 @@ Sana: {_sana_fmt}"""
                     print(s)
             self.status_var.set(f"[OK] Bazaga saqlandi ({saved_count} ta natija)")
             self.is_saved = True
+            # Hamma natija bazaga tushdi — endi "saqlanmagan" belgilari kerak emas
+            self._clear_pending_results()
 
             # ── VPS GA SINXRONLASH (alohida threadda — UI bloklanmaydi) ──
             try:
@@ -20118,7 +20406,10 @@ Sana: {_sana_fmt}"""
         # Natijani ko'rsatish uchun Sample ID (barkod yo'q bo'lsa ham ishlaydi)
         display_id = sample_id if sample_id and not sample_id.startswith('NOBC_') else ''
 
-        count = 0
+        # ── 1-BOSQICH: nima yozilishini REJALASHTIRAMIZ (hali yozmaymiz) ─────
+        # Avval reja tuzamiz, chunki mavjud natija ustiga yozishdan oldin
+        # laborantdan "haqiqatan yangilaymizmi?" deb so'rash kerak.
+        plan = []   # [(test_id, test_nomi, natija_json)]
         for param_key, tdata in tests.items():
             value = (tdata.get('value') or '').strip()
             if not value:
@@ -20146,12 +20437,7 @@ Sana: {_sana_fmt}"""
                 'source':       'BC-20S',
                 'sid':          sample_id,
             }, ensure_ascii=False)
-            self.test_results[test_id] = result_json
-
-            # TreeView qatorini yangilash
-            if test_id in item_map:
-                self.refresh_single_test_display(item_map[test_id], test_id)
-            count += 1
+            plan.append((test_id, matched.get('nomi', db_name), result_json))
 
         # Umumiy qon tahlili — FAQAT to'liq nom yoki aniq kalit (boshqa qon testlariga tushmaslik)
         CBC_EXACT_NAMES = ('qonning umumiy tahlili', 'umumiy qon tahlili', 'umumiy qon')
@@ -20167,29 +20453,49 @@ Sana: {_sana_fmt}"""
             tname_low = test.get('nomi', '').lower()
             is_cbc = (any(exact in tname_low for exact in CBC_EXACT_NAMES)
                       and not any(ex in tname_low for ex in CBC_EXCLUDE))
-            if is_cbc and test['id'] not in self.test_results:
-                if all_vals:
-                    cbc_data = {'result': display_id, 'type': 'hematology_cbc',
-                                'source': 'BC-20S', 'sid': sample_id,
-                                'patient_age': patient_info.get('age', ''),
-                                'patient_gender': patient_info.get('gender', ''),
-                                **all_vals}
-                    self.test_results[test['id']] = json.dumps(
-                        cbc_data, ensure_ascii=False
-                    )
-                    if test['id'] in item_map:
-                        self.refresh_single_test_display(item_map[test['id']], test['id'])
+            # DIQQAT: ilgari bu yerda "natijasi yo'q bo'lsa" sharti bor edi va
+            # shu sababli XATO natijani analizatordan QAYTA import qilib
+            # tuzatib bo'lmasdi (eski natija joyida qolardi). Endi rejaga
+            # har doim qo'shamiz — ustiga yozishni pastdagi tasdiq oynasi
+            # hal qiladi.
+            if is_cbc and all_vals:
+                cbc_data = {'result': display_id, 'type': 'hematology_cbc',
+                            'source': 'BC-20S', 'sid': sample_id,
+                            'patient_age': patient_info.get('age', ''),
+                            'patient_gender': patient_info.get('gender', ''),
+                            **all_vals}
+                plan.append((test['id'], test.get('nomi', ''),
+                             json.dumps(cbc_data, ensure_ascii=False)))
 
-        if count > 0:
-            self.status_var.set(
-                f"✅ Gematologiya: {count} ta natija o'tkazildi "
-                f"({patient_info.get('name', sample_id)})"
-            )
-        else:
+        if not plan:
             self.status_var.set(
                 f"⚠ Gematologiya: mos test topilmadi. "
                 f"Buyurtmada WBC/HGB/PLT kabi testlar mavjudligini tekshiring."
             )
+            return 0
+
+        # ── 2-BOSQICH: mavjud natija ustiga yozilsa — TASDIQ so'raymiz ───────
+        if not self._confirm_result_overwrite(
+                plan, manba=f"BC-20S gematologiya (Sample ID: {sample_id})"):
+            self.status_var.set(
+                "[BEKOR] Gematologiya natijasi yangilanmadi — eski natija qoldi")
+            return 0
+
+        # ── 3-BOSQICH: yozamiz ──────────────────────────────────────────────
+        count = 0
+        for test_id, _tname, result_json in plan:
+            self.test_results[test_id] = result_json
+            # DB ga F2 bosilganda tushadi — shu paytgacha eski baza qiymati
+            # bu natijani bosib ketmasin
+            self._mark_result_pending(test_id, result_json)
+            if test_id in item_map:
+                self.refresh_single_test_display(item_map[test_id], test_id)
+            count += 1
+
+        self.status_var.set(
+            f"✅ Gematologiya: {count} ta natija o'tkazildi "
+            f"({patient_info.get('name', sample_id)}) — bazaga saqlash uchun F2 bosing"
+        )
         return count
 
     def open_biochemistry_raw(self):
@@ -20227,6 +20533,13 @@ Sana: {_sana_fmt}"""
         need_full_reload = False
         count = 0
 
+        # Avval REJA tuzamiz (hech narsa yozilmaydi). Mavjud natija ustiga
+        # yozishdan oldin laborantdan "haqiqatan yangilaymizmi?" deb so'raymiz.
+        plan = []   # [(test_id, test_nomi, natija)]
+
+        def _plan_add(_tid, _tname, _val):
+            plan.append((_tid, _tname, _val))
+
         def _f(s):
             """Xavfsiz float konversiya"""
             try:
@@ -20257,8 +20570,8 @@ Sana: {_sana_fmt}"""
                 if u_f is not None and b_f is not None:
                     rd['erkin'] = round(u_f - b_f, 3)
                 if rd:
-                    self.test_results[bili_parent['id']] = json.dumps(rd, ensure_ascii=False)
-                    count += 1
+                    _plan_add(bili_parent['id'], bili_parent.get('nomi', 'Bilirubin'),
+                              json.dumps(rd, ensure_ascii=False))
                     need_full_reload = True
                     print(f"[BIO-IMPORT] Bilirubin multi-komponent: {rd}")
             if bili_val_u:
@@ -20292,8 +20605,8 @@ Sana: {_sana_fmt}"""
                     aslo_f = _f(revmo_val_aslo)
                     rd['aslo'] = aslo_f if aslo_f is not None else revmo_val_aslo
                 if rd:
-                    self.test_results[revmo_parent['id']] = json.dumps(rd, ensure_ascii=False)
-                    count += 1
+                    _plan_add(revmo_parent['id'], revmo_parent.get('nomi', 'Revmoproba'),
+                              json.dumps(rd, ensure_ascii=False))
                     need_full_reload = True
                     print(f"[BIO-IMPORT] Revmoproba avtomat multi-komponent: {rd}")
             else:
@@ -20302,20 +20615,20 @@ Sana: {_sana_fmt}"""
                     tn = (t.get('nomi') or '').lower()
                     if revmo_val_rf and ('rf ' in tn or 'revmatoid' in tn) and 'avtomat' in tn:
                         rf_f = _f(revmo_val_rf)
-                        self.test_results[t['id']] = str(rf_f if rf_f is not None else revmo_val_rf)
-                        count += 1
+                        _plan_add(t['id'], t.get('nomi', 'RF'),
+                                  str(rf_f if rf_f is not None else revmo_val_rf))
                         need_full_reload = True
                         print(f"[BIO-IMPORT] RF avtomat yakka: {revmo_val_rf} → test_id={t['id']}")
                     elif revmo_val_crp and ('crp' in tn or 's-reaktiv' in tn) and 'avtomat' in tn:
                         crp_f = _f(revmo_val_crp)
-                        self.test_results[t['id']] = str(crp_f if crp_f is not None else revmo_val_crp)
-                        count += 1
+                        _plan_add(t['id'], t.get('nomi', 'CRP'),
+                                  str(crp_f if crp_f is not None else revmo_val_crp))
                         need_full_reload = True
                         print(f"[BIO-IMPORT] CRP avtomat yakka: {revmo_val_crp} → test_id={t['id']}")
                     elif revmo_val_aslo and ('aslo' in tn or 'antistreptolizin' in tn) and 'avtomat' in tn:
                         aslo_f = _f(revmo_val_aslo)
-                        self.test_results[t['id']] = str(aslo_f if aslo_f is not None else revmo_val_aslo)
-                        count += 1
+                        _plan_add(t['id'], t.get('nomi', 'ASLO'),
+                                  str(aslo_f if aslo_f is not None else revmo_val_aslo))
                         need_full_reload = True
                         print(f"[BIO-IMPORT] ASLO avtomat yakka: {revmo_val_aslo} → test_id={t['id']}")
             if revmo_val_rf:
@@ -20410,8 +20723,8 @@ Sana: {_sana_fmt}"""
                         print(f"[BIO-IMPORT] GFR hisoblashda xato: {gfr_err}")
 
                 if rd:
-                    self.test_results[buyrak_parent['id']] = json.dumps(rd, ensure_ascii=False)
-                    count += 1
+                    _plan_add(buyrak_parent['id'], buyrak_parent.get('nomi', 'Buyrak paneli'),
+                              json.dumps(rd, ensure_ascii=False))
                     need_full_reload = True
                     print(f"[BIO-IMPORT] BUYRAK PANELI multi-komponent: {rd}")
                 if bk_val_kreat: handled_keys.add('323')
@@ -20464,8 +20777,8 @@ Sana: {_sana_fmt}"""
                 # None qiymatlarni tozalash
                 rd = {k: v for k, v in rd.items() if v is not None}
                 if rd:
-                    self.test_results[lipid_parent['id']] = json.dumps(rd, ensure_ascii=False)
-                    count += 1
+                    _plan_add(lipid_parent['id'], lipid_parent.get('nomi', 'Lipid spektri'),
+                              json.dumps(rd, ensure_ascii=False))
                     need_full_reload = True
                     print(f"[BIO-IMPORT] LIPID SPEKTRI multi-komponent: {rd}")
                 if lipid_val_tc:  handled_keys.add('254')
@@ -20562,26 +20875,40 @@ Sana: {_sana_fmt}"""
                 'lis_code':     tdata.get('lis_code', code),
                 'sid':          sample_id
             }, ensure_ascii=False)
-            self.test_results[test_id] = result_json
+            _plan_add(test_id, matched.get('nomi', db_name), result_json)
 
-            if test_id in item_map:
-                self.refresh_single_test_display(item_map[test_id], test_id)
-            count += 1
+        if not plan:
+            self.status_var.set(
+                "⚠ Bioximiya: mos test topilmadi. "
+                "Buyurtmada BIO testlar mavjudligini tekshiring."
+            )
+            return 0
+
+        # ── Mavjud natija ustiga yozilsa — TASDIQ so'raymiz ──────────────────
+        if not self._confirm_result_overwrite(
+                plan, manba=f"BK-280 bioximiya (Sample ID: {sample_id})"):
+            self.status_var.set(
+                "[BEKOR] Bioximiya natijasi yangilanmadi — eski natija qoldi")
+            return 0
+
+        # ── Rejani qo'llash ─────────────────────────────────────────────────
+        for _tid, _tname, _val in plan:
+            self.test_results[_tid] = _val
+            # DB ga F2 bosilganda tushadi. Belgilab qo'yamiz — quyidagi
+            # load_tests() bazadagi ESKI qiymatni ustiga yozib yubormasin.
+            self._mark_result_pending(_tid, _val)
+            if _tid in item_map:
+                self.refresh_single_test_display(item_map[_tid], _tid)
+        count = len(plan)
 
         # Multi-komponent testlar bo'lsa — to'liq treeview yangilash
         if need_full_reload:
             self.load_tests()
 
-        if count > 0:
-            self.status_var.set(
-                f"✅ Bioximiya: {count} ta natija o'tkazildi "
-                f"({patient_info.get('name', sample_id)})"
-            )
-        else:
-            self.status_var.set(
-                "⚠ Bioximiya: mos test topilmadi. "
-                "Buyurtmada BIO testlar mavjudligini tekshiring."
-            )
+        self.status_var.set(
+            f"✅ Bioximiya: {count} ta natija o'tkazildi "
+            f"({patient_info.get('name', sample_id)}) — bazaga saqlash uchun F2 bosing"
+        )
         return count
 
     def open_urine_raw(self):
@@ -20655,10 +20982,10 @@ Sana: {_sana_fmt}"""
         # Topilgan BARCHA siydik testlariga (odatda 1 ta) barcha analitlarni yozish.
         # Har bir analizatordan kelgan qiymatlar all_analytes deb saqlanadi,
         # popup da to'liq ro'yxat ko'rsatiladi.
-        count = 0
+        plan = []   # [(test_id, test_nomi, natija_json)]
         for matched in urine_tests:
             test_id = matched['id']
-            result_json = json.dumps({
+            new_data = {
                 'result':       display_id,
                 'type':         'urine',
                 'sid':          sample_id,
@@ -20666,9 +20993,34 @@ Sana: {_sana_fmt}"""
                 'source':       'URIT-50',
                 'all_analytes': all_analytes,
                 'abnormal_params': patient_info.get('abnormal_params', []),
-            }, ensure_ascii=False)
-            self.test_results[test_id] = result_json
+            }
+            # Qo'lda kiritilgan MIKROSKOPIYA va FIZIK ko'rsatkichlarni saqlab
+            # qolamiz — analizatordan qayta import qilinganda mikroskop natijasi
+            # yo'qolmasin (uni analizator emas, laborant kiritadi).
+            old_raw = self.test_results.get(test_id, '')
+            if old_raw and str(old_raw).strip().startswith('{'):
+                try:
+                    old_data = json.loads(old_raw)
+                    if isinstance(old_data, dict):
+                        for _keep in ('mikroskopiya', 'fizik'):
+                            if old_data.get(_keep):
+                                new_data[_keep] = old_data[_keep]
+                except Exception:
+                    pass
+            plan.append((test_id, matched.get('nomi', ''),
+                         json.dumps(new_data, ensure_ascii=False)))
 
+        # ── Mavjud natija ustiga yozilsa — TASDIQ so'raymiz ──────────────────
+        if not self._confirm_result_overwrite(
+                plan, manba=f"URIT-50 siydik (Sample ID: {display_id})"):
+            self.status_var.set(
+                "[BEKOR] Siydik natijasi yangilanmadi — eski natija qoldi")
+            return 0
+
+        count = 0
+        for test_id, _tname, result_json in plan:
+            self.test_results[test_id] = result_json
+            self._mark_result_pending(test_id, result_json)
             if test_id in item_map:
                 self.refresh_single_test_display(item_map[test_id], test_id)
             count += 1
@@ -20676,7 +21028,7 @@ Sana: {_sana_fmt}"""
         if count > 0:
             self.status_var.set(
                 f"✅ Siydik: natijalar {count} ta testga o'tkazildi "
-                f"({patient_info.get('name', display_id)})"
+                f"({patient_info.get('name', display_id)}) — bazaga saqlash uchun F2 bosing"
             )
         return count
 
