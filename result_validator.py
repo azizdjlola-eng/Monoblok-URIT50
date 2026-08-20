@@ -150,7 +150,7 @@ DEFAULT_CONFIG = {
         "43":  {"ref": "xolesterin_tc"},                 # ← LIPID SPEKTRI bilan umumiy
         "123": {"ref": "ldl", "name": "LDL-Past zichlikli lipoprotein"},   # ← LIPID SPEKTRI bilan umumiy
         "124": {"ref": "hdl", "name": "HDL-Yuqori zichlikli lipoprotein"}, # ← LIPID SPEKTRI bilan umumiy
-        "128": {"name": "Xolinesteraza (CHE)",                "unit": "E/l",     "min": 300,  "max": 19000,  "fmt": "int"},
+        "128": {"name": "Xolinesteraza (CHE)",                "unit": "E/l",     "min": 300,  "max": 19000,  "fmt": "decimal"},   # analizator kasr xona bilan beradi
 
         # --- Gemostaz (alohida buyurtma qilinganda) ---
         "76":  {"ref": "achtv"},                         # ← KOAGULOGRAMMA bilan umumiy
@@ -173,32 +173,32 @@ DEFAULT_CONFIG = {
         "109": {"name": "AT-TPO IFA",                         "unit": "ME/ml",   "min": 0,    "max": 1000,   "fmt": "decimal"},
         "69":  {"name": "CA 72-4 (oshqozon onkomarkeri)",     "unit": "E/ml",    "min": 0,    "max": 300,    "fmt": "decimal"},
         "70":  {"name": "CA15-3 (ko'krak saratoni belgisi)",  "unit": "E/ml",    "min": 0,    "max": 300,    "fmt": "decimal"},
-        "86":  {"name": "Gepatit A (IgG, IFA)",               "unit": "KP",      "min": 0,    "max": 15,     "fmt": "decimal"},
-        "82":  {"name": "Gepatit B (HBsAg, IFA)",             "unit": "KP",      "min": 0,    "max": 15,     "fmt": "decimal"},
-        "84":  {"name": "Gepatit C (Anti-HCV, IFA)",          "unit": "KP",      "min": 0,    "max": 15,     "fmt": "decimal"},
-        "85":  {"name": "Gepatit D (D-antitela, IFA)",        "unit": "KP",      "min": 0,    "max": 15,     "fmt": "decimal"},
+        "86":  {"name": "Gepatit A (IgG, IFA)",               "unit": "KP",      "min": 0,    "max": 1000,     "fmt": "decimal"},   # KP kuchli musbatda 300+ bo'lishi mumkin
+        "82":  {"name": "Gepatit B (HBsAg, IFA)",             "unit": "KP",      "min": 0,    "max": 1000,     "fmt": "decimal"},   # KP kuchli musbatda 300+ bo'lishi mumkin
+        "84":  {"name": "Gepatit C (Anti-HCV, IFA)",          "unit": "KP",      "min": 0,    "max": 1000,     "fmt": "decimal"},   # KP kuchli musbatda 300+ bo'lishi mumkin
+        "85":  {"name": "Gepatit D (D-antitela, IFA)",        "unit": "KP",      "min": 0,    "max": 1000,     "fmt": "decimal"},   # KP kuchli musbatda 300+ bo'lishi mumkin
         "98":  {"name": "IgE umumiy (Allergiya uchun)",       "unit": "ME/ml",   "min": 0,    "max": 2500,   "fmt": "decimal"},
         "118": {"name": "Insulin IFA",                        "unit": "mkED/ml", "min": 0,    "max": 300,    "fmt": "decimal"},
-        "113": {"name": "Estradiol IFA",                      "unit": "pg/ml",   "min": 0,    "max": 3000,   "fmt": "decimal"},
+        "113": {"name": "Estradiol IFA",                      "unit": "nmol/l",   "min": 0,    "max": 100,     "fmt": "decimal"},   # bazadagi norma nmol/l da (0.029-80)
         "105": {"name": "Ferritin",                           "unit": "ng/ml",   "min": 0,    "max": 1500,   "fmt": "decimal"},
-        "111": {"name": "FSG (FSH) IFA",                      "unit": "mME/ml",  "min": 0,    "max": 200,    "fmt": "decimal"},
+        "111": {"name": "FSG (FSH) IFA",                      "unit": "ME/l",  "min": 0,    "max": 200,    "fmt": "decimal"},
         "90":  {"name": "Helicobakter pylori IgG IFA",        "unit": "KP",      "min": 0,    "max": 15,     "fmt": "decimal"},
-        "119": {"name": "Kortizol IFA",                       "unit": "nmol/l",  "min": 0,    "max": 1750,   "fmt": "decimal"},
-        "110": {"name": "LG (LH) IFA",                        "unit": "mME/ml",  "min": 0,    "max": 200,    "fmt": "decimal"},
+        "119": {"name": "Kortizol IFA",                       "unit": "nmol/l",  "min": 10,    "max": 1750,   "fmt": "decimal"},
+        "110": {"name": "LG (LH) IFA",                        "unit": "ME/l",  "min": 0,    "max": 200,    "fmt": "decimal"},
         "100": {"name": "Lyambliya-antitela IFA",             "unit": "KP",      "min": 0,    "max": 15,     "fmt": "decimal"},
         "67":  {"name": "Pepsinogen I (PGI) IFA",             "unit": "ng/ml",   "min": 0,    "max": 500,    "fmt": "decimal"},
         "68":  {"name": "Pepsinogen II (PGII) IFA",           "unit": "ng/ml",   "min": 0,    "max": 200,    "fmt": "decimal"},
         "114": {"name": "Progesteron IFA",                    "unit": "nmol/l",  "min": 0,    "max": 640,    "fmt": "decimal"},
-        "112": {"name": "Prolaktin IFA",                      "unit": "mME/ml",  "min": 0,    "max": 10000,  "fmt": "int"},
+        "112": {"name": "Prolaktin IFA",                      "unit": "mME/l",  "min": 10,    "max": 10000,  "fmt": "decimal"},   # IFA da butundan keyin 3 xona yoziladi
         "108": {"name": "T3 erkin IFA",                       "unit": "pmol/l",  "min": 0,    "max": 30,     "fmt": "decimal"},
         "107": {"name": "T4 erkin IFA",                       "unit": "pmol/l",  "min": 0,    "max": 100,    "fmt": "decimal"},
         "116": {"name": "Testesteron Erkin IFA",              "unit": "pg/ml",   "min": 0,    "max": 50,     "fmt": "decimal"},
         "115": {"name": "Testesteron IFA",                    "unit": "nmol/l",  "min": 0,    "max": 52,     "fmt": "decimal"},
         "106": {"name": "TTG (TSH) IFA",                      "unit": "mME/l",   "min": 0,    "max": 100,    "fmt": "decimal"},
         "117": {"name": "Umumiy PSA IFA",                     "unit": "ng/ml",   "min": 0,    "max": 100,    "fmt": "decimal"},
-        "104": {"name": "Vitamin B12",                        "unit": "pg/ml",   "min": 0,    "max": 2000,   "fmt": "int"},
+        "104": {"name": "Vitamin B12",                        "unit": "pg/ml",   "min": 50,    "max": 2000,   "fmt": "decimal"},   # IFA da butundan keyin 3 xona yoziladi
         "103": {"name": "Vitamin D (25-OH)",                  "unit": "ng/ml",   "min": 0,    "max": 150,    "fmt": "decimal"},
-        "120": {"name": "XGCh (Homiladorlik gormoni) IFA",    "unit": "mME/ml",  "min": 0,    "max": 225000, "fmt": "int"},
+        "120": {"name": "XGCh (Homiladorlik gormoni) IFA",    "unit": "mME/ml",  "min": 0,    "max": 225000, "fmt": "decimal"},   # IFA da butundan keyin 3 xona yoziladi
         "66":  {"name": "Troponin T",                         "unit": "ng/ml",   "min": 0,    "max": 50,     "fmt": "decimal"},
     },
 
@@ -275,7 +275,7 @@ DEFAULT_CONFIG = {
         # miqdori_1..miqdori_8 va solishtirma_1..solishtirma_8 — pastdagi
         # _ZIMNITSKIY_PREFIX qoidasi orqali avtomatik qo'llaniladi.
         "34.miqdori":         {"name": "Porsiya miqdori",       "unit": "ml", "min": 0,     "max": 600,   "fmt": "int"},
-        "34.solishtirma":     {"name": "Solishtirma zichlik",   "unit": "",   "min": 1.000, "max": 1.040, "fmt": "decimal"},
+        "34.solishtirma":     {"name": "Solishtirma zichlik",   "unit": "",   "min": 1.000, "max": 1.040, "fmt": "decimal", "alt_divisor": 1000},   # "1.020" ham, "1020" ham qabul qilinadi
         "34.kunduzgi_diurez": {"name": "Kunduzgi diurez",       "unit": "ml", "min": 0,     "max": 3000,  "fmt": "int"},
         "34.tungi_diurez":    {"name": "Tungi diurez",          "unit": "ml", "min": 0,     "max": 2000,  "fmt": "int"},
         "34.jami_diurez":     {"name": "Jami diurez",           "unit": "ml", "min": 0,     "max": 4000,  "fmt": "int"},
@@ -364,8 +364,16 @@ DEFAULT_CONFIG = {
         "zimnitskiy_diurez_tolerance": 1,
         # Lipid: LDL + HDL + VLDL umumiy xolesterindan shu ulushdan ko'p oshsa
         "lipid_sum_tolerance": 1.15,
+        # Butundan keyin ruxsat etilgan maksimal kasr xonasi (null = tekshirilmaydi)
+        "max_decimals": 3,
     },
 }
+
+# Butundan keyin ruxsat etilgan MAKSIMAL kasr xonasi soni.
+# 2.817 / 2.87 / 2.9 — hammasi qonuniy; 2.8176566 — xatolik ehtimoli.
+# Alohida tahlilga boshqacha qilish uchun spec ga "max_decimals": N yozing,
+# butunlay o'chirish uchun "max_decimals": null.
+MAX_DECIMALS = 3
 
 # Zimnitskiy raqamlangan kalitlari (miqdori_1 ... solishtirma_8) uchun prefiks moslashuvi
 _ZIMNITSKIY_PREFIX = ("miqdori", "solishtirma")
@@ -460,6 +468,14 @@ def load_config(force=False):
     except Exception as e:
         print(f"[OGOHLANTIRISH] result_limits.json yuklashda xato: {e}")
     _CFG_CACHE[0] = cfg
+    # Kasr xonasi chegarasini konfigdan olish (check_format global konstantani
+    # o'qiydi — spec da alohida "max_decimals" bo'lsa u ustunroq)
+    global MAX_DECIMALS
+    try:
+        _md = cfg.get("rules", {}).get("max_decimals", MAX_DECIMALS)
+        MAX_DECIMALS = None if _md is None else int(_md)
+    except Exception:
+        pass
     check_config_consistency(cfg)
     return cfg
 
@@ -751,7 +767,9 @@ def check_titer(raw, spec, label):
     if _is_qualitative_text(s):
         return issues, None
 
-    m = re.match(r"^[<>]?\s*1\s*:\s*(\d+)$", s)
+    # Titrdan keyin izoh yozilishi mumkin ("1:50  qayta topshirish") —
+    # bu laboratoriya amaliyotida odatiy, xato emas.
+    m = re.match(r"^[<>]?\s*1\s*:\s*(\d+)\s*(?:[^\d].*)?$", s)
     if not m:
         issues.append((label, raw,
                        "kutilgan format: '1:NN', '<1:NN' (masalan '1:80') "
@@ -827,6 +845,18 @@ def check_format(raw, spec, label):
             issues.append((label, raw, "raqam emas — harf yoki noto'g'ri belgi bor"))
         return issues, None
 
+    # X14 — butundan keyin 3 xonadan ortiq raqam ("2.8176566")
+    #   Laboratoriya odatda 3 xonagacha yozadi (2.817 / 2.87 / 2.9 — hammasi
+    #   qonuniy). 4 va undan ortiq xona — klaviatura yopishib qolgani belgisi.
+    #   Chegara: cfg["rules"]["max_decimals"] yoki spec["max_decimals"].
+    _maxdec = (spec or {}).get("max_decimals", MAX_DECIMALS)
+    if _maxdec is not None and "." in norm:
+        _dec = len(norm.split(".", 1)[1])
+        if _dec > int(_maxdec):
+            issues.append((label, raw,
+                           "butundan keyin %d xonadan ortiq raqam yozilgan (%d ta) — "
+                           "tugma yopishib qolgan bo'lishi mumkin" % (int(_maxdec), _dec)))
+
     # X3 — boshida ortiqcha nol ("00.976", "007")
     body = norm[1:] if norm.startswith("-") else norm
     if re.match(r"^0\d", body):
@@ -856,6 +886,17 @@ def check_range(val, spec, label, raw):
     u = f" {unit}" if unit else ""
     lo = spec.get("min")
     hi = spec.get("max")
+
+    # Ikki xil yozuv (siydik solishtirma zichligi "1.020" ham, "1020" ham
+    # qonuniy) — spec da "alt_divisor" bo'lsa, katta yozuv ham qabul qilinadi
+    _div = spec.get("alt_divisor")
+    if _div and hi is not None and val > hi:
+        try:
+            _alt = val / float(_div)
+            if (lo is None or _alt >= lo) and _alt <= hi:
+                return issues
+        except (TypeError, ZeroDivisionError):
+            pass
 
     # X7 — kutilmagan manfiy son
     if val < 0 and (lo is None or lo >= 0):

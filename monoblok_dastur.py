@@ -212,6 +212,17 @@ def db_conn():
         if _db_connection is not None:
             try:
                 _db_connection.ping(reconnect=True, attempts=1, delay=0)
+                # ⚠ ESKI MA'LUMOT MUAMMOSI (stale read)
+                # MySQL InnoDB REPEATABLE READ + autocommit=0 da ulanish
+                # BIRINCHI SELECT paytidagi "surat" (snapshot) ni eslab qoladi
+                # va commit/rollback bo'lmaguncha shu suratni ko'rsataveradi.
+                # Shu sababli registratsiya kompyuterida yangi qo'shilgan bemor
+                # bu yerda "topilmadi" bo'lardi (DB testidan keyin ulanish
+                # yopilib qayta ulangani uchun keyingi qidiruvda chiqardi).
+                # Yechim: umumiy ulanish DOIM autocommit rejimida — har bir
+                # so'rov yangi surat oladi.
+                if not _db_connection.autocommit:
+                    _db_connection.autocommit = True   # ochiq tranzaksiyani ham yopadi
                 return _db_connection
             except Exception as e:
                 print(f"[OGOHLANTIRISH] DB qayta ulanmoqda: {e}")
@@ -227,6 +238,10 @@ def db_conn():
                 "connection_timeout": 10,
                 "raise_on_warnings": False,
                 "use_pure": True,   # C-extension "Failed raising error" nosozligidan saqlanish
+                # Umumiy (o'qish) ulanishi — har so'rov yangi surat olishi uchun.
+                # Ko'p bosqichli YOZISH oqimlari (save_to_db) o'zining mustaqil
+                # ulanishini ishlatadi (_create_fresh_connection, autocommit=False).
+                "autocommit": True,
             })
 
             if _db_first_connect:
@@ -2444,10 +2459,13 @@ def _add_run_tnr(para, text: str, size_pt: float, bold=False, color_rgb=None, it
         run.font.highlight_color = highlight
     return run
 
-def _add_multiline_norma(para, norma_text: str, size_pt: float = 11, bold_hints: list = None, patient_jins: str = ""):
+def _add_multiline_norma(para, norma_text: str, size_pt: float = 11, bold_hints: list = None,
+                         patient_jins: str = "", result_value=None):
     """Ko'p qatorli norma — har bir qism alohida qatorda.
     bold_hints: bemorga mos keladigan kategoriya nomlari ro'yxati — shu qatorlar qalin ko'rsatiladi.
-    patient_jins: bemor jinsi — qarama-qarshi jins qatorlari hech qachon qalin bo'lmaydi."""
+    patient_jins: bemor jinsi — qarama-qarshi jins qatorlari hech qachon qalin bo'lmaydi.
+    result_value: natija — BOSQICHLI normada (Vitamin D kabi) natija tushgan
+                  bosqich qatori qalin ko'rsatiladi (jins/yosh hintlari o'rniga)."""
     if not norma_text or not str(norma_text).strip():
         _add_run_tnr(para, '-', size_pt)
         return
@@ -2457,6 +2475,16 @@ def _add_multiline_norma(para, norma_text: str, size_pt: float = 11, bold_hints:
     if not parts:
         _add_run_tnr(para, str(norma_text).strip(), size_pt)
         return
+
+    # BOSQICHLI norma — faqat natija tushgan bosqich qalin bo'ladi
+    if result_value not in (None, ''):
+        _stage_line = _get_norma_stage_line(norma_text, result_value)
+        if _stage_line:
+            for i, part in enumerate(parts):
+                if i > 0:
+                    para.add_run().add_break(WD_BREAK.LINE)
+                _add_run_tnr(para, part, size_pt, bold=(part == _stage_line))
+            return
 
     jins_up = (patient_jins or '').upper()
     pt_erkak = jins_up in ("ERKAK", "ЭРКАК", "M", "MALE", "E")
@@ -2654,6 +2682,94 @@ def _parse_norma_min_max(norma_str, jins=''):
     return None, None
 
 
+# ══════════════════════════════════════════════════════════════════════════
+#  BOSQICHLI (INTERPRETATSION) NORMA — masalan Vitamin D (25-OH)
+#
+#  Ba'zi tahlillarda norma "min-max" oralig'i emas, balki KETMA-KET
+#  bosqichlar ro'yxati bo'ladi:
+#       Juda kuchli yetmaslik: 0.0-5.0
+#       Og'ir yetishmovchilik: 5.1-10.0
+#       ...
+#       Norma (optimal): 30.1-50.0
+#       Potensial toksiklik: 150.1-200.0
+#
+#  Bunday normada "↑ baland / ↓ past" strelkasi MA'NOSIZ (birinchi qator
+#  0.0-5.0 tasodifan "norma" deb olinib, deyarli har qanday natijaga ↑
+#  qo'yilardi). To'g'ri talqin — natija QAYSI BOSQICHGA tushsa, o'sha
+#  qatorni blankada QALIN ko'rsatish.
+#
+#  Toifali (jins/yosh/faza bo'yicha) normalardan farqi: bosqichlar
+#  bir-biri bilan KESISHMAYDI va ketma-ket (uzuqsiz) boradi.
+# ══════════════════════════════════════════════════════════════════════════
+_NORMA_TOIFA_SOZLARI = (
+    'erkak', 'ayol', 'yosh', 'oy', 'hafta', 'kun', 'trimestr', 'menopauza',
+    'emizikli', 'homilador', 'follikul', 'ovulya', 'lyutein', "tug'ilgan",
+    'bola', 'chaqaloq', 'лет', 'год',
+)
+
+
+def _parse_bosqich_chegara(text):
+    """'0.0-5.0' / '<5' / '>200' → (min, max) float juft. Topilmasa (None, None)."""
+    t = str(text).replace(',', '.').replace('–', '-').replace('—', '-').strip()
+    m = re.search(r'(\d+\.?\d*)\s*-\s*(\d+\.?\d*)', t)
+    if m:
+        return float(m.group(1)), float(m.group(2))
+    m = re.search(r'[<≤]\s*=?\s*(\d+\.?\d*)', t)
+    if m:
+        return float('-inf'), float(m.group(1))
+    m = re.search(r'[>≥]\s*=?\s*(\d+\.?\d*)', t)
+    if m:
+        return float(m.group(1)), float('inf')
+    return None, None
+
+
+def _parse_staged_norma(norma_text):
+    """Norma bosqichli bo'lsa [(qator_matni, min, max), ...] qaytaradi, aks holda None."""
+    if not norma_text or str(norma_text).strip() in ('-', ''):
+        return None
+    parts = [p.strip() for p in re.split(r'[;\n]|,\s+(?=\S)', str(norma_text)) if p and p.strip()]
+    if len(parts) < 3:
+        return None
+    stages = []
+    for part in parts:
+        low = part.lower()
+        # Jins/yosh/faza toifasi bo'lsa — bu bosqichli norma emas
+        if any(w in low for w in _NORMA_TOIFA_SOZLARI):
+            return None
+        if ':' not in part:
+            return None
+        label, rng = part.split(':', 1)
+        if not label.strip():
+            return None
+        mn, mx = _parse_bosqich_chegara(rng)
+        if mn is None and mx is None:
+            return None
+        stages.append((part, mn, mx))
+    stages.sort(key=lambda s: s[1])
+    for a, b in zip(stages, stages[1:]):
+        if b[1] <= a[2]:
+            return None                     # kesishadi → toifali norma
+        gap = b[1] - a[2]
+        if gap > max(1.0, abs(a[2]) * 0.05):
+            return None                     # uzuq → ketma-ket bosqich emas
+    return stages
+
+
+def _get_norma_stage_line(norma_text, result_value):
+    """Bosqichli normada natija tushgan qatorni qaytaradi (yo'q bo'lsa None)."""
+    stages = _parse_staged_norma(norma_text)
+    if not stages:
+        return None
+    try:
+        val = float(str(result_value).replace(',', '.').strip())
+    except (ValueError, TypeError):
+        return None
+    for line, mn, mx in stages:
+        if mn <= val <= mx:
+            return line
+    return None
+
+
 def _get_result_color_and_arrow(result_value, norma_info, jins=''):
     """
     Natijani normaga solishtiradi.
@@ -2680,6 +2796,13 @@ def _get_result_color_and_arrow(result_value, norma_info, jins=''):
         # Norma MATNIDAN parse — yosh/jins bo'yicha tanlangan satr ishlatiladi
         # selected_norma: select_norma_by_patient() tomonidan tanlangan (masalan ">3 yosh: 66-85" → "66-85")
         _norma_for_parse = norma_info.get('selected_norma') or norma_info.get('norma', '')
+        # BOSQICHLI norma (Vitamin D kabi): natija bosqichlardan biriga tushsa —
+        # ↑/↓ strelka qo'yilmaydi, o'rniga normada mos bosqich QALIN ko'rsatiladi
+        # (_add_multiline_norma → result_value). Faqat hech bir bosqichga
+        # tushmagan (shkaladan tashqari) natijaga odatdagi strelka ishlaydi.
+        if (_get_norma_stage_line(norma_info.get('norma', ''), result_value)
+                or _get_norma_stage_line(_norma_for_parse, result_value)):
+            return None, ''
         text_min, text_max = _parse_norma_min_max(_norma_for_parse, jins)
         # Matn parse muvaffaqiyatli bo'lsa — ustuvorlik, aks holda DB ustunlar
         min_val = text_min if text_min is not None else db_min
@@ -3584,8 +3707,7 @@ def _fuzzy_search_bemorlar(ref_fish, ref_year, ref_jins=None, min_score=90):
     finally:
         try: cursor.close()
         except: pass
-        try: conn.close()
-        except: pass
+        # conn.close() QILMAYMIZ — umumiy (global) db_conn() ulanishi
 
     results = []
     for row in rows:
@@ -4145,8 +4267,7 @@ def _get_revmoproba_component_normas(test_name: str) -> dict:
     finally:
         try: cursor.close()
         except: pass
-        try: conn.close()
-        except: pass
+        # conn.close() QILMAYMIZ — umumiy (global) db_conn() ulanishi
 
 def _is_revmoproba_qolda_test(test_name: str) -> bool:
     tn = (test_name or '').lower()
@@ -5043,7 +5164,8 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
             p2 = cells[2].paragraphs[0]
             p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
             _set_para_spacing(p2, 0, 0, line_spacing=1)
-            _add_multiline_norma(p2, norma_text, 11, bold_hints=bold_hints, patient_jins=jins)
+            _add_multiline_norma(p2, norma_text, 11, bold_hints=bold_hints, patient_jins=jins,
+                                 result_value=result_value)
 
             # O'lchov birligi
             unit_text = norma_info.get('unit', '')
@@ -5195,7 +5317,8 @@ def create_simple_table_for_tests(doc: Document, tests: list, order_info: dict, 
             p2 = cells[2].paragraphs[0]
             p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
             _set_para_spacing(p2, 0, 0, line_spacing=1)
-            _add_multiline_norma(p2, norma_text, 11, bold_hints=bold_hints, patient_jins=jins)
+            _add_multiline_norma(p2, norma_text, 11, bold_hints=bold_hints, patient_jins=jins,
+                                 result_value=result_value)
 
             unit_text = norma_info.get('unit', '')
             p3 = cells[3].paragraphs[0]
@@ -6638,7 +6761,8 @@ def generate_unified_blank(order_id):
                 p_norma = cells_r[3].paragraphs[0]
                 p_norma.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 _set_para_spacing(p_norma, 0, 0, line_spacing=1)
-                _add_multiline_norma(p_norma, norma_text or '-', 11, bold_hints=bold_hints_e, patient_jins=jins)
+                _add_multiline_norma(p_norma, norma_text or '-', 11, bold_hints=bold_hints_e,
+                                     patient_jins=jins, result_value=natija_val)
             doc.add_paragraph()
         blood = [r for r in results_without_template if r.get('test_type') == 'blood_group' or r.get('test_type_from_norma') == 'blood_group'
                  or any(k in (r.get('test_name') or '').lower() for k in ['qon guruhi', 'rezus'])]
@@ -6998,7 +7122,8 @@ def generate_unified_blank(order_id):
                 p2 = cells_r[2].paragraphs[0]
                 p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 _set_para_spacing(p2, 0, 0, line_spacing=1)
-                _add_multiline_norma(p2, norma_text, 11, bold_hints=bold_hints_g, patient_jins=jins)
+                _add_multiline_norma(p2, norma_text, 11, bold_hints=bold_hints_g, patient_jins=jins,
+                                     result_value=natija_val)
                 p3 = cells_r[3].paragraphs[0]
                 p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 _set_para_spacing(p3, 0, 0, line_spacing=1)
@@ -9486,12 +9611,10 @@ class MonoblokApp:
             traceback.print_exc()
             messagebox.showerror("DB Test xatosi", f"Database xatosi:\n{type(e).__name__}: {e}")
             return False
-        finally:
-            if conn:
-                try:
-                    conn.close()
-                except:
-                    pass
+        # conn.close() QILMAYMIZ — bu db_conn() ning UMUMIY ulanishi.
+        # Uni yopish butun dastur ulanishini uzib qo'yardi va keyingi so'rovda
+        # qayta ulanardi — aynan shuning uchun "DB test qilgandan keyin qidiruv
+        # ishlab ketadi" degan holat yuzaga kelgan edi.
     
     def stop_existing_urit50_processes(self):
         """Mavjud URIT-50 jarayonlarini to'xtatish"""
@@ -10942,7 +11065,7 @@ Sana: {_sana_fmt}"""
             """, (bemor_id,))
             rows = cursor.fetchall()
             cursor.close()
-            conn.close()
+            # conn.close() QILMAYMIZ — umumiy (global) db_conn() ulanishi
 
             for row in rows:
                 oid = row.get('order_id')
@@ -12597,7 +12720,7 @@ Sana: {_sana_fmt}"""
                 ), tags=(tag,))
             
             cursor.close()
-            conn.close()
+            # conn.close() QILMAYMIZ — umumiy (global) db_conn() ulanishi
         
         except Exception as e:
             messagebox.showerror("Xato", f"Jadval yangilashda xato: {e}")
@@ -12669,7 +12792,7 @@ Sana: {_sana_fmt}"""
             
             test_data = cursor.fetchone()
             cursor.close()
-            conn.close()
+            # conn.close() QILMAYMIZ — umumiy (global) db_conn() ulanishi
             
             if not test_data:
                 messagebox.showerror("Xato", f"Test '{test_name}' topilmadi!")

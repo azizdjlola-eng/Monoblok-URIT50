@@ -269,7 +269,7 @@
       "unit": "E/l",
       "min": 300,
       "max": 19000,
-      "fmt": "int"
+      "fmt": "decimal"
     },
     "76": {
       "ref": "achtv"
@@ -347,28 +347,28 @@
       "name": "Gepatit A (IgG, IFA)",
       "unit": "KP",
       "min": 0,
-      "max": 15,
+      "max": 1000,
       "fmt": "decimal"
     },
     "82": {
       "name": "Gepatit B (HBsAg, IFA)",
       "unit": "KP",
       "min": 0,
-      "max": 15,
+      "max": 1000,
       "fmt": "decimal"
     },
     "84": {
       "name": "Gepatit C (Anti-HCV, IFA)",
       "unit": "KP",
       "min": 0,
-      "max": 15,
+      "max": 1000,
       "fmt": "decimal"
     },
     "85": {
       "name": "Gepatit D (D-antitela, IFA)",
       "unit": "KP",
       "min": 0,
-      "max": 15,
+      "max": 1000,
       "fmt": "decimal"
     },
     "98": {
@@ -387,9 +387,9 @@
     },
     "113": {
       "name": "Estradiol IFA",
-      "unit": "pg/ml",
+      "unit": "nmol/l",
       "min": 0,
-      "max": 3000,
+      "max": 100,
       "fmt": "decimal"
     },
     "105": {
@@ -401,7 +401,7 @@
     },
     "111": {
       "name": "FSG (FSH) IFA",
-      "unit": "mME/ml",
+      "unit": "ME/l",
       "min": 0,
       "max": 200,
       "fmt": "decimal"
@@ -416,13 +416,13 @@
     "119": {
       "name": "Kortizol IFA",
       "unit": "nmol/l",
-      "min": 0,
+      "min": 10,
       "max": 1750,
       "fmt": "decimal"
     },
     "110": {
       "name": "LG (LH) IFA",
-      "unit": "mME/ml",
+      "unit": "ME/l",
       "min": 0,
       "max": 200,
       "fmt": "decimal"
@@ -457,10 +457,10 @@
     },
     "112": {
       "name": "Prolaktin IFA",
-      "unit": "mME/ml",
-      "min": 0,
+      "unit": "mME/l",
+      "min": 10,
       "max": 10000,
-      "fmt": "int"
+      "fmt": "decimal"
     },
     "108": {
       "name": "T3 erkin IFA",
@@ -507,9 +507,9 @@
     "104": {
       "name": "Vitamin B12",
       "unit": "pg/ml",
-      "min": 0,
+      "min": 50,
       "max": 2000,
-      "fmt": "int"
+      "fmt": "decimal"
     },
     "103": {
       "name": "Vitamin D (25-OH)",
@@ -523,7 +523,7 @@
       "unit": "mME/ml",
       "min": 0,
       "max": 225000,
-      "fmt": "int"
+      "fmt": "decimal"
     },
     "66": {
       "name": "Troponin T",
@@ -693,7 +693,7 @@
       "unit": "ml/min",
       "min": 0,
       "max": 200,
-      "fmt": "int"
+      "fmt": "decimal"
     },
     "33.leykot": {
       "name": "Leykotsitlar",
@@ -728,7 +728,8 @@
       "unit": "",
       "min": 1.0,
       "max": 1.04,
-      "fmt": "decimal"
+      "fmt": "decimal",
+      "alt_divisor": 1000
     },
     "34.kunduzgi_diurez": {
       "name": "Kunduzgi diurez",
@@ -793,6 +794,7 @@
   "rules": {
     "bilirubin_direct_ge_total": true,
     "zimnitskiy_diurez_tolerance": 1,
-    "lipid_sum_tolerance": 1.15
+    "lipid_sum_tolerance": 1.15,
+    "max_decimals": 3
   }
 }
