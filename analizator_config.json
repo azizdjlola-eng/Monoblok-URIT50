@@ -1,6 +1,6 @@
 {
   "database": {
-    "host": "127.0.0.1",
+    "host": "192.168.0.40",
     "user": "lims",
     "password": "azizmed2026",
     "database": "lab_tizim",
@@ -37,6 +37,6 @@
     "encoding": "utf-8"
   },
   "printer": {
-    "blanka_printer": "EPSON L8050 Series"
+    "blanka_printer": "EPSON L8050 Series (копия 1)"
   }
 }
