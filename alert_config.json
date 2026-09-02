@@ -242,5 +242,18 @@
       "kreatinin_low": 40,
       "kre_urea_ratio_min": 8
     }
+  },
+  "onedrive": {
+    "enabled": true,
+    "check_interval_min": 10,
+    "pending_warn_min": 20,
+    "pending_crit_min": 45,
+    "repeat_alert_min": 30,
+    "check_days": 3,
+    "report_days": 14,
+    "auto_restart": true,
+    "sound": true,
+    "popup": true,
+    "alert_on_warn": false
   }
 }

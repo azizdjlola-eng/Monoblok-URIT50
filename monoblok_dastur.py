@@ -109,6 +109,15 @@ except ImportError as e:
     URINE_WINDOW_AVAILABLE = False
     open_urine_window = None
 
+# OneDrive sinxronizatsiya nazorati (natija bulutga chiqdimi?)
+try:
+    import onedrive_monitor
+    ONEDRIVE_MONITOR_AVAILABLE = True
+except ImportError as e:
+    print(f"[OGOHLANTIRISH] OneDrive monitor import qilinmadi: {e}")
+    onedrive_monitor = None
+    ONEDRIVE_MONITOR_AVAILABLE = False
+
 # Sifat Nazorati (QC) moduli
 try:
     from qc_module import open_qc_window as _open_qc_window
@@ -9158,6 +9167,8 @@ class MonoblokApp:
         # BC-20S HL7 Listener ni ishga tushirish (avtomatik ishga tushirish funksiyasida)
         self.bc20s_listener = None
         self.bk280_listener_thread = None  # BK-280 listener thread
+        self.onedrive_watcher = None  # OneDrive sinxronizatsiya nazoratchisi
+        self._onedrive_last = None    # oxirgi tekshiruv natijasi
         self.bk280_lis_thread = None  # BK-280 LIS query server thread
         
         # Blanka generation uses blanka_generator.py directly (no pre-initialization needed)
@@ -9303,6 +9314,21 @@ class MonoblokApp:
                 print(f"   [XATO] BC-20S ishga tushirishda xato: {e}")
                 services_status['BC-20S'] = False
             time.sleep(1)
+
+            # 5. OneDrive sinxronizatsiya nazorati
+            #    Natija PDF lari haqiqatan bulutga chiqyaptimi? OneDrive jimgina
+            #    ishdan chiqsa — natija nargi kompyuterga bormaydi va SMS ketmaydi.
+            print("\n☁ 5. OneDrive sinxronizatsiya nazoratini yoqyapman...")
+            try:
+                od_ok = self.start_onedrive_monitor()
+                services_status['OneDrive'] = od_ok
+                if od_ok:
+                    print("   [OK] OneDrive nazorati yoqildi")
+                else:
+                    print("   [OGOHLANTIRISH] OneDrive nazorati yoqilmadi")
+            except Exception as e:
+                print(f"   [XATO] OneDrive nazoratida xato: {e}")
+                services_status['OneDrive'] = False
 
             # Statusni yangilash
             successful_services = [name for name, ok in services_status.items() if ok]
@@ -9949,8 +9975,155 @@ class MonoblokApp:
             traceback.print_exc()
             return False
 
+    # ══════════════════════════════════════════════════════════════════════
+    #  ONEDRIVE SINXRONIZATSIYA NAZORATI
+    #  Natija PDF yaratilgani — u bemorga yetdi degani EMAS. Zanjir:
+    #     PDF -> OneDrive -> nargi kompyuter -> SMS
+    #  OneDrive jimgina ishdan chiqsa hech qanday xato chiqmaydi, natija esa
+    #  bulutga chiqmay qoladi (bir necha bor soatlab sezilmagan).
+    # ══════════════════════════════════════════════════════════════════════
+    def start_onedrive_monitor(self) -> bool:
+        """OneDrive nazoratchisini fon oqimida ishga tushirish."""
+        if not ONEDRIVE_MONITOR_AVAILABLE:
+            print("[OGOHLANTIRISH] OneDrive monitor moduli mavjud emas (onedrive_monitor.py)")
+            return False
+        try:
+            if getattr(self, "onedrive_watcher", None):
+                return True
+            self.onedrive_watcher = onedrive_monitor.OneDriveWatcher(
+                on_alert=lambda res: self.root.after(0, lambda r=res: self._onedrive_alert(r)),
+                on_status=lambda res: self.root.after(0, lambda r=res: self._onedrive_status_update(r)),
+            )
+            # Birinchi tekshiruv 90 sekunddan keyin — dastur ochilishiga xalaqit bermaydi
+            return bool(self.onedrive_watcher.start(first_delay_sec=90))
+        except Exception as e:
+            print(f"[XATO] OneDrive nazoratini yoqishda xato: {e}")
+            return False
+
+    def _onedrive_status_update(self, res):
+        """Har tekshiruvdan keyin tugma rangi/matnini yangilash (UI oqimi)."""
+        try:
+            self._onedrive_last = res
+            btn = getattr(self, "onedrive_btn", None)
+            if not btn:
+                return
+            level = res.get("level", "ok")
+            if level == "ok":
+                btn.config(text="☁ OneDrive ✓", bg="#DFF5DF", activebackground="#DFF5DF",
+                           fg="#005500")
+            elif level == "warn":
+                btn.config(text="☁ OneDrive !", bg="#FFF3CD", activebackground="#FFF3CD",
+                           fg="#8A6D00")
+            else:
+                btn.config(text="☁ OneDrive ✗", bg="#F8B4B4", activebackground="#F8B4B4",
+                           fg="#8B0000")
+        except Exception as e:
+            print(f"[OneDrive] Holat tugmasini yangilashda xato: {e}")
+
+    def _onedrive_alert(self, res):
+        """Muammo topilganda ovoz + popup (UI oqimi)."""
+        try:
+            cfg = onedrive_monitor.load_config()
+            if cfg.get("sound", True):
+                try:
+                    import critical_alert
+                    critical_alert.play_alert_sound()
+                except Exception:
+                    try:
+                        import winsound
+                        winsound.MessageBeep(-1)
+                    except Exception:
+                        pass
+            self.status_var.set("[OGOHLANTIRISH] " + res.get("summary", "OneDrive muammosi"))
+            if not cfg.get("popup", True):
+                return
+
+            body = (onedrive_monitor.format_report(res) + "\n\n"
+                    "Natijalar bulutga chiqmasa, nargi kompyuter ularni ko'rmaydi\n"
+                    "va bemorga SMS ketmaydi.\n\n"
+                    "OneDrive ni hozir qayta ishga tushiraymi?")
+            if messagebox.askyesno("⚠ ONEDRIVE — NATIJA BULUTGA CHIQMAYAPTI",
+                                   body, parent=self.root, icon="warning"):
+                ok, msg = onedrive_monitor.restart_onedrive()
+                messagebox.showinfo("OneDrive", msg, parent=self.root)
+                if ok:
+                    # 3 daqiqadan keyin qayta tekshiramiz
+                    self.root.after(180000, lambda: threading.Thread(
+                        target=self.onedrive_watcher.check_now, daemon=True).start())
+        except Exception as e:
+            print(f"[OneDrive] Ogohlantirishda xato: {e}")
+
+    def open_onedrive_status(self):
+        """OneDrive holati oynasi — batafsil hisobot va tuzatish tugmalari."""
+        if not ONEDRIVE_MONITOR_AVAILABLE:
+            messagebox.showwarning("OneDrive", "onedrive_monitor.py topilmadi.", parent=self.root)
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title("☁ OneDrive — natija sinxronizatsiyasi")
+        win.geometry("760x560")
+        win.transient(self.root)
+
+        head = ttk.Label(win, text="Tekshirilmoqda...", font=("Arial", 11, "bold"))
+        head.pack(anchor="w", padx=12, pady=(10, 4))
+
+        txt = scrolledtext.ScrolledText(win, font=("Consolas", 10), wrap=tk.WORD)
+        txt.pack(fill=tk.BOTH, expand=True, padx=12, pady=4)
+
+        btns = ttk.Frame(win)
+        btns.pack(fill=tk.X, padx=12, pady=10)
+
+        def _render(res):
+            head.config(text=res.get("summary", ""),
+                        foreground={"ok": "#005500", "warn": "#8A6D00"}.get(res.get("level"), "#8B0000"))
+            txt.config(state=tk.NORMAL)
+            txt.delete("1.0", tk.END)
+            txt.insert("1.0", onedrive_monitor.format_report(res))
+            txt.config(state=tk.DISABLED)
+
+        def _refresh():
+            head.config(text="Tekshirilmoqda...", foreground="#333333")
+            def _work():
+                try:
+                    days = int(onedrive_monitor.load_config(force=True).get("report_days", 14))
+                    res = onedrive_monitor.check(days=days)
+                except Exception as e:
+                    res = {"level": "warn", "summary": f"Tekshirishda xato: {e}",
+                           "problems": [], "stats": {}}
+                win.after(0, lambda: _render(res))
+                # Asosiy oynadagi ko'rsatkichni ham yangilaymiz
+                self.root.after(0, lambda: self._onedrive_status_update(res))
+            threading.Thread(target=_work, daemon=True).start()
+
+        def _restart():
+            ok, msg = onedrive_monitor.restart_onedrive()
+            messagebox.showinfo("OneDrive", msg, parent=win)
+            if ok:
+                win.after(20000, _refresh)
+
+        def _open_folder():
+            path = onedrive_monitor.get_natijalar_root()
+            if path and os.path.isdir(path):
+                os.startfile(path)
+            else:
+                messagebox.showwarning("OneDrive", "Papka topilmadi.", parent=win)
+
+        ttk.Button(btns, text="🔄 Qayta tekshirish", command=_refresh, width=20).pack(side=tk.LEFT, padx=3)
+        ttk.Button(btns, text="♻ OneDrive ni qayta yoqish", command=_restart, width=26).pack(side=tk.LEFT, padx=3)
+        ttk.Button(btns, text="📁 Natijalar papkasi", command=_open_folder, width=20).pack(side=tk.LEFT, padx=3)
+        ttk.Button(btns, text="Yopish", command=win.destroy, width=10).pack(side=tk.RIGHT, padx=3)
+
+        _refresh()
+
     def on_closing(self):
         """Dastur yopilganda"""
+        # OneDrive nazoratchisini to'xtatish
+        try:
+            if getattr(self, "onedrive_watcher", None):
+                self.onedrive_watcher.stop()
+                print("[OK] OneDrive nazorati to'xtatildi")
+        except Exception as e:
+            print(f"[OGOHLANTIRISH] OneDrive nazoratini to'xtatishda xato: {e}")
         # BC-20S listener ni to'xtatish
         if BC20S_AVAILABLE:
             try:
@@ -10254,6 +10427,18 @@ class MonoblokApp:
             command=self.test_database_read,
             width=20
         ).pack(side=tk.LEFT, padx=2)
+
+        # OneDrive sinxronizatsiya ko'rsatkichi — natija bulutga chiqyaptimi?
+        # (ttk emas, tk.Button — chunki rangni o'zgartirish kerak: yashil/sariq/qizil)
+        self.onedrive_btn = tk.Button(
+            left_buttons,
+            text="☁ OneDrive …",
+            command=self.open_onedrive_status,
+            width=14,
+            relief=tk.RAISED,
+            font=("Arial", 9)
+        )
+        self.onedrive_btn.pack(side=tk.LEFT, padx=2)
         
         ttk.Button(
             left_buttons,
