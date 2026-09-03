@@ -621,6 +621,58 @@ def is_categorical_test(test_name: str):
     ]
     return any(keyword in test_name_lower for keyword in categorical_keywords)
 
+_AGE_UNIT_WORD = r'(?:yosh|yil|god|лет|year)?'
+
+
+def _parse_age_condition(cat_text: str):
+    """Kategoriya matnidan (jinssiz) SOF yosh shartini ajratadi.
+    Qaytaradi: ('range', lo, hi) | ('lt', n) | ('gt', n) | None.
+    Ikkala yozuv tartibini ham qo'llab-quvvatlaydi: '<16 yosh' VA '16< yosh'
+    (shuningdek '>N'/'N>'). Sondan keyin "yosh/yil" dan boshqa qo'shimcha so'z
+    bo'lsa (masalan '12< yosh qandli diabet') — bu maxsus/tibbiy shart, avtomatik
+    moslashtirilmasin deb None qaytariladi (avvalgi xatti-harakat saqlanadi).
+    """
+    t = (cat_text or '').strip()
+    if not t:
+        return None
+    m = re.fullmatch(rf'(\d+)\s*-\s*(\d+)\s*{_AGE_UNIT_WORD}', t, re.IGNORECASE)
+    if m:
+        return ('range', int(m.group(1)), int(m.group(2)))
+    m = re.fullmatch(rf'[<≤]\s*(\d+)\s*{_AGE_UNIT_WORD}', t, re.IGNORECASE)
+    if m:
+        return ('lt', int(m.group(1)))
+    m = re.fullmatch(rf'[>≥]\s*(\d+)\s*{_AGE_UNIT_WORD}', t, re.IGNORECASE)
+    if m:
+        return ('gt', int(m.group(1)))
+    m = re.fullmatch(rf'(\d+)\s*[<≤]\s*{_AGE_UNIT_WORD}', t, re.IGNORECASE)
+    if m:
+        return ('gt', int(m.group(1)))   # "16<" => 16 < yosh => yosh > 16
+    m = re.fullmatch(rf'(\d+)\s*[>≥]\s*{_AGE_UNIT_WORD}', t, re.IGNORECASE)
+    if m:
+        return ('lt', int(m.group(1)))   # "16>" => 16 > yosh => yosh < 16
+    return None
+
+
+def _age_condition_matches(cond, yosh, age_days):
+    """None — shart yo'q/aniqlanmadi, True/False — mos keladi/kelmaydi."""
+    if cond is None:
+        return None
+    cmp_yosh = yosh if yosh is not None else (age_days // 365 if age_days is not None else None)
+    if cmp_yosh is None:
+        return None
+    kind = cond[0]
+    if kind == 'range':
+        return cond[1] <= cmp_yosh <= cond[2]
+    if kind == 'lt':
+        return cmp_yosh < cond[1]
+    if kind == 'gt':
+        return cmp_yosh > cond[1]
+    return None
+
+
+_GENDER_WORD_RE = re.compile(r'erkak|ayol|эркак|аёл|male|female|women|woman', re.IGNORECASE)
+
+
 def select_norma_by_patient(norma_text: str, jins: str = "", yosh: int = None, age_days: int = None):
     """Bemor jinsi va yoshiga qarab norma matnidan mos diapazonni tanlash.
     norma_text: "Kat1: min-max; Kat2: min-max" yoki "Kat1: min-max, Kat2: min-max"
@@ -634,7 +686,11 @@ def select_norma_by_patient(norma_text: str, jins: str = "", yosh: int = None, a
     elif "\n" in norma_text:
         parts = [p.strip() for p in norma_text.split("\n")]
     elif "," in norma_text:
-        parts = re.split(r',\s+(?=[A-Za-zA-Яа-яЎўҚқҒғҲҳ>])', norma_text)
+        # Kategoriya raqam bilan ham boshlanishi mumkin (masalan "1-6 yosh",
+        # "16< yosh") — shuning uchun harflar bilan bir qatorda raqam ham
+        # lookahead'ga qo'shilgan, aks holda bunday qatorlar oldingi
+        # kategoriyaga yopishib qolib, hech qachon ajratilmas edi.
+        parts = re.split(r',\s+(?=[A-Za-zA-Яа-яЎўҚқҒғҲҳ0-9>])', norma_text)
         parts = [p.strip() for p in parts]
     else:
         return norma_text
@@ -660,10 +716,15 @@ def select_norma_by_patient(norma_text: str, jins: str = "", yosh: int = None, a
             jins_up = jins.upper()
             is_erkak_pt = jins_up in ("ERKAK", "ЭРКАК", "M", "MALE", "E")
             is_ayol_pt  = jins_up in ("AYOL", "АЁЛ", "F", "FEMALE", "A", "WOMEN", "WOMAN")
-            if is_erkak_cat and is_erkak_pt:
-                matched_norms.append(range_part)
-            elif is_ayol_cat and is_ayol_pt:
-                matched_norms.append(range_part)
+            gender_ok = (is_erkak_cat and is_erkak_pt) or (is_ayol_cat and is_ayol_pt)
+            if gender_ok:
+                # Jins so'zi bilan birga yosh sharti ham bo'lishi mumkin
+                # (masalan "61< yosh Erkak: 0.0-7.0") — bo'lsa, uni ham tekshiramiz.
+                cat_wo_gender = _GENDER_WORD_RE.sub('', cat).strip()
+                age_cond = _parse_age_condition(cat_wo_gender)
+                age_ok = _age_condition_matches(age_cond, yosh, age_days)
+                if age_ok is not False:
+                    matched_norms.append(range_part)
             continue
 
         # === YOSH moslashtirish ===
@@ -696,26 +757,14 @@ def select_norma_by_patient(norma_text: str, jins: str = "", yosh: int = None, a
                     matched_norms.append(range_part)
             continue
 
-        # "> N yosh"
-        if ">" in cat:
-            try:
-                age_limit = int(re.search(r'>(\d+)', cat).group(1))
-                cmp_yosh = yosh if yosh is not None else (age_days // 365 if age_days else None)
-                if cmp_yosh is not None and cmp_yosh > age_limit:
-                    matched_norms.append(range_part)
-            except:
-                pass
-            continue
-
-        # "< N yosh"
-        if "<" in cat:
-            try:
-                age_limit = int(re.search(r'<(\d+)', cat).group(1))
-                cmp_yosh = yosh if yosh is not None else (age_days // 365 if age_days else None)
-                if cmp_yosh is not None and cmp_yosh < age_limit:
-                    matched_norms.append(range_part)
-            except:
-                pass
+        # "> N yosh" / "N < yosh" / "< N yosh" / "N > yosh" — barcha yozuv
+        # tartiblari qo'llab-quvvatlanadi (masalan "16< yosh" ham "> 16 yosh"
+        # bilan bir xil ma'noni bildiradi).
+        if ">" in cat or "<" in cat:
+            age_cond = _parse_age_condition(cat)
+            age_ok = _age_condition_matches(age_cond, yosh, age_days)
+            if age_ok:
+                matched_norms.append(range_part)
             continue
 
         # "N-M yosh" oralig'i
@@ -875,14 +924,27 @@ def _get_norma_bold_hints(norma_text: str, jins: str = "", yosh=None, emizikli: 
             _acat = _aline.split(':')[0].strip()
             if not _acat:
                 continue
+            # Jins so'zi bilan birga yozilgan bo'lishi mumkin (masalan
+            # "61< yosh Erkak") — yosh shartini shundan ajratib olamiz,
+            # hint sifatida esa TO'LIQ _acat (jins bilan) qo'shiladi.
+            _acat_age = _re_age.sub(r'erkak|ayol|эркак|аёл|male|female|women|woman', '', _acat,
+                                    flags=_re_age.IGNORECASE).strip()
             # Faqat yosh belgisi bo'lgan kategoriyalarga qaraladi
-            _has_age_sign = any(c in _acat for c in '<>≥≤+') or _re_age.search(r'\d+\s*(yosh|лет|год)', _acat.lower())
+            _has_age_sign = any(c in _acat_age for c in '<>≥≤+') or _re_age.search(r'\d+\s*(yosh|лет|год)', _acat_age.lower())
             if not _has_age_sign:
                 continue
-            _gt = _re_age.search(r'[>≥]\s*=?\s*(\d+)', _acat)
-            _lt = _re_age.search(r'[<≤]\s*=?\s*(\d+)', _acat)
-            _rng = _re_age.search(r'(\d+)\s*[-–]\s*(\d+)', _acat)
-            _plus = _re_age.search(r'(\d+)\s*\+', _acat)
+            _gt = _re_age.search(r'[>≥]\s*=?\s*(\d+)', _acat_age)
+            _lt = _re_age.search(r'[<≤]\s*=?\s*(\d+)', _acat_age)
+            # Teskari yozuv tartibi: "16< yosh" ("> 16 yosh" bilan bir xil ma'no)
+            # va "16> yosh" ("< 16 yosh" bilan bir xil). Faqat SOF yosh yozuvida
+            # (ortiqcha so'zsiz, masalan "qandli diabet" bo'lmasa) qo'llaniladi —
+            # aks holda maxsus/tibbiy shart avtomatik moslashtirilmay qoladi.
+            if not _gt:
+                _gt = _re_age.fullmatch(r'(\d+)\s*[<≤]\s*(?:yosh|yil|лет|год)?', _acat_age, _re_age.IGNORECASE)
+            if not _lt:
+                _lt = _re_age.fullmatch(r'(\d+)\s*[>≥]\s*(?:yosh|yil|лет|год)?', _acat_age, _re_age.IGNORECASE)
+            _rng = _re_age.search(r'(\d+)\s*[-–]\s*(\d+)', _acat_age)
+            _plus = _re_age.search(r'(\d+)\s*\+', _acat_age)
             _matched = False
             if _gt and int(yosh) > int(_gt.group(1)):
                 _matched = True

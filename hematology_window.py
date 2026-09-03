@@ -159,6 +159,29 @@ MULTI_REF_NORMALS = {
 }
 
 
+def _hl7_age_to_years(value_str, unit_str) -> str:
+    """HL7 OBX Age (30525-0) qiymatini BUTUN YIL songa aylantiradi.
+
+    BC-20S 1 yoshdan kichik bemorlar uchun yoshni "mo" (oy) yoki "d" (kun)
+    birligida yuboradi (masalan "7|mo"). MULTI_REF_NORMALS jadvali esa
+    doim BUTUN YIL kutadi — birlik hisobga olinmasa, masalan 7 oylik chaqaloq
+    xato ravishda "7 yoshli bola" normasi bilan solishtiriladi. Shu funksiya
+    buni oldini oladi (7 oy → 0 yosh, 45 kun → 0 yosh, 18 oy → 1 yosh).
+    """
+    try:
+        v = float(str(value_str).strip())
+    except (ValueError, TypeError):
+        return str(value_str).strip()
+    u = (unit_str or "yr").strip().lower()
+    if u in ("d", "day", "days", "кун", "kun"):
+        return str(int(v // 365))
+    if u in ("mo", "mon", "month", "months", "oy"):
+        return str(int(v // 12))
+    if u in ("wk", "week", "weeks", "hafta"):
+        return str(int(v // 52))
+    return str(int(v))
+
+
 def get_multi_ref(param: str, age_str, gender: str) -> tuple:
     """
     Yosh va jinsga qarab norma oralig'ini qaytaradi.
@@ -1301,10 +1324,13 @@ def parse_hl7_file(file_path):
                     test_code = parts[0].strip()
                     test_name = parts[1].strip() if len(parts) >= 2 else test_code
 
-                # Yosh OBX dan olish (30525-0 = Age)
+                # Yosh OBX dan olish (30525-0 = Age) — OBX-6 birligi (yr/mo/d)
+                # bilan birga, BUTUN YIL songa aylantirib olinadi (aks holda
+                # 1 yoshdan kichik bemor yoshi noto'g'ri talqin qilinadi).
                 if test_code == '30525-0' and len(f) > 5 and f[5].strip():
                     if not patient['age']:
-                        patient['age'] = f[5].strip()
+                        _age_unit = f[6].strip() if len(f) > 6 else ''
+                        patient['age'] = _hl7_age_to_years(f[5].strip(), _age_unit)
                     continue
 
                 # Jins OBX dan olish (01002 = Ref Group)
