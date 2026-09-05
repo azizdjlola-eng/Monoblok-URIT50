@@ -452,13 +452,13 @@
       "name": "Progesteron IFA",
       "unit": "nmol/l",
       "min": 0,
-      "max": 640,
+      "max": 800,
       "fmt": "decimal"
     },
     "112": {
       "name": "Prolaktin IFA",
       "unit": "mME/l",
-      "min": 10,
+      "min": 1,
       "max": 10000,
       "fmt": "decimal"
     },
@@ -515,7 +515,7 @@
       "name": "Vitamin D (25-OH)",
       "unit": "ng/ml",
       "min": 0,
-      "max": 150,
+      "max": 250,
       "fmt": "decimal"
     },
     "120": {
@@ -527,6 +527,13 @@
     },
     "66": {
       "name": "Troponin T",
+      "unit": "ng/ml",
+      "min": 0,
+      "max": 50,
+      "fmt": "decimal"
+    },
+    "160": {
+      "name": "Troponin I miqdoriy IFA",
       "unit": "ng/ml",
       "min": 0,
       "max": 50,
@@ -754,6 +761,14 @@
     }
   },
   "options": {
+    "164": [
+      "Manfiy",
+      "Musbat"
+    ],
+    "159": [
+      "Manfiy",
+      "Musbat"
+    ],
     "81": [
       "Manfiy",
       "Musbat"

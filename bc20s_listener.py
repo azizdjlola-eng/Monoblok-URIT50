@@ -138,6 +138,30 @@ def _extract_sample_id_from_orm(message: str) -> str:
                 return f[3].split("^")[0].strip()
     return ""
 
+def _hl7_age_to_years(value_str, unit_str) -> str:
+    """HL7 OBX Age (30525-0) qiymatini BUTUN YIL songa aylantiradi.
+
+    BC-20S 1 yoshdan kichik bemorlar uchun yoshni "mo" (oy) yoki "d" (kun)
+    birligida yuboradi (masalan "7|mo"). Bazadagi/blankadagi yosh-asosli
+    normalar (hematology_window.get_multi_ref) doim BUTUN YIL kutadi —
+    birlik hisobga olinmasa, 7 oylik chaqaloq xato ravishda "7 yoshli bola"
+    normasi bilan solishtiriladi. Bu funksiya buni oldini oladi
+    (7 oy → 0 yosh, 45 kun → 0 yosh, 18 oy → 1 yosh).
+    """
+    try:
+        v = float(str(value_str).strip())
+    except (ValueError, TypeError):
+        return str(value_str).strip()
+    u = (unit_str or "yr").strip().lower()
+    if u in ("d", "day", "days", "кун", "kun"):
+        return str(int(v // 365))
+    if u in ("mo", "mon", "month", "months", "oy"):
+        return str(int(v // 12))
+    if u in ("wk", "week", "weeks", "hafta"):
+        return str(int(v // 52))
+    return str(int(v))
+
+
 def _parse_oru_r01(message: str) -> dict:
     """ORU^R01 dan bemor va natijalarni chiqarish"""
     now_str = datetime.now().strftime("%d.%m.%Y %H:%M")
@@ -221,9 +245,13 @@ def _parse_oru_r01(message: str) -> dict:
             test_code = parts[0].strip()
             test_name = parts[1].strip() if len(parts) > 1 else test_code
 
-            # Yosh (30525-0) va jins guruhi (01002)
+            # Yosh (30525-0) va jins guruhi (01002) — OBX-6 birligi (yr/mo/d)
+            # hisobga olinadi, aks holda 1 yoshdan kichik bemor yoshi (masalan
+            # "7|mo") xato ravishda "7 yosh" deb talqin qilinib, blankadagi
+            # multi-ref normasi (get_multi_ref) noto'g'ri diapazon tanlaydi.
             if test_code == "30525-0" and len(f) > 5 and f[5] and not patient["age"]:
-                patient["age"] = f[5].strip()
+                _age_unit = f[6].strip() if len(f) > 6 else ""
+                patient["age"] = _hl7_age_to_years(f[5].strip(), _age_unit)
                 continue
             if test_code == "01002" and len(f) > 5 and f[5]:
                 rg = f[5].strip()
@@ -416,6 +444,38 @@ def _build_ack(msg_id: str, code: str = "AA", error: str = "") -> str:
     msa = f"MSA|{code}|{msg_id}" + (f"|{error}" if error else "")
     return f"{msh}\r{msa}"
 
+def _compute_age_value_unit(dob_str: str, ref_dt=None, fallback_years=0):
+    """Tug'ilgan sanadan BC-20S tushunadigan (qiymat, birlik) juftini hisoblaydi.
+
+    BC-20S o'zi ham natija xabarlarida (OBX-6, 30525-0^Age^LN) faqat shu 3 ta
+    birlik kodini ishlatadi (eski TXT fayllardan tasdiqlangan): "d" (kun),
+    "mo" (oy), "yr" (yil). 1 yoshdan kichik bemorga har doim "yr" birligida
+    "0" yuborilsa, analizator buni "Недопуст. возраст" deb rad etadi — shuning
+    uchun yosh mos birlikda (kun/oy/yil) hisoblanadi.
+    """
+    try:
+        if not dob_str or len(str(dob_str)) < 8:
+            return fallback_years, "yr"
+        s = str(dob_str)
+        by, bm, bd = int(s[0:4]), int(s[4:6]), int(s[6:8])
+        birth = date(by, bm, bd)
+        ref = ref_dt.date() if hasattr(ref_dt, "date") else (ref_dt or date.today())
+        days = (ref - birth).days
+        if days < 0:
+            return fallback_years, "yr"
+        if days < 31:
+            return days, "d"
+        months = (ref.year - birth.year) * 12 + (ref.month - birth.month)
+        if ref.day < birth.day:
+            months -= 1
+        if months < 12:
+            return max(months, 1), "mo"
+        years = ref.year - birth.year - ((ref.month, ref.day) < (birth.month, birth.day))
+        return years, "yr"
+    except Exception:
+        return fallback_years, "yr"
+
+
 def _build_orr_o02(patient_data: dict, msg_id: str, req_msg_id: str = "") -> str:
     """Worklist Response (ORR^O02) — analizatorga bemor ismi yuboriladi
 
@@ -429,9 +489,15 @@ def _build_orr_o02(patient_data: dict, msg_id: str, req_msg_id: str = "") -> str
     gender  = str(patient_data.get("gender", "U")).strip()
     age     = patient_data.get("age", 0)
     sample  = str(patient_data.get("sample_id", pid_val)).strip()
-    dob     = str(patient_data.get("date_of_birth") or "19000101")
-    if len(dob) > 10:
-        dob = dob[:10].replace("-", "")
+    dob_raw = str(patient_data.get("date_of_birth") or "").strip()
+    dob = dob_raw[:10].replace("-", "") if dob_raw else ""
+    # Yosh (mos birlikda) — dob mavjud bo'lsa aniq hisoblanadi (1 yoshdan
+    # kichiklar uchun "d"/"mo"), aks holda DB dagi yillik "yosh" ustuni "yr"
+    # birligida zaxira sifatida ishlatiladi.
+    age_val, age_unit = (_compute_age_value_unit(dob, patient_data.get("order_time"), fallback_years=age)
+                         if dob else (age, "yr"))
+    if not dob:
+        dob = "19000101"
     op  = str(patient_data.get("operator", "admin")).strip()
 
     # Vaqtlar
@@ -461,7 +527,7 @@ def _build_orr_o02(patient_data: dict, msg_id: str, req_msg_id: str = "") -> str
     obr = f"OBR|1||{sample}|00001^Automated Count^99MRC||{collection_time}||||{op}||||{delivery_time}||||||||||HM||||||||{op}"
     obx1 = "OBX|1|IS|08002^Blood Mode^99MRC||W||||||F"
     obx2 = "OBX|2|IS|08003^Test Mode^99MRC||CBC||||||F"
-    obx3 = f"OBX|3|NM|30525-0^Age^LN||{age}|yr|||||F"
+    obx3 = f"OBX|3|NM|30525-0^Age^LN||{age_val}|{age_unit}|||||F"
     return "\r".join([msh, msa, pid, pv1, orc, obr, obx1, obx2, obx3])
 
 # ─────────────────────────── DB QUERY (WORKLIST) ──────────────
