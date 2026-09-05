@@ -690,7 +690,10 @@ def select_norma_by_patient(norma_text: str, jins: str = "", yosh: int = None, a
         # "16< yosh") — shuning uchun harflar bilan bir qatorda raqam ham
         # lookahead'ga qo'shilgan, aks holda bunday qatorlar oldingi
         # kategoriyaga yopishib qolib, hech qachon ajratilmas edi.
-        parts = re.split(r',\s+(?=[A-Za-zA-Яа-яЎўҚқҒғҲҳ0-9>])', norma_text)
+        # DIQQAT: "<"/"≤"/"≥" ham ro'yxatda bo'lishi SHART. Aks holda
+        # "Ayol: 2.15-2.6, <3 yosh: 2.2-2.7" bitta bo'lak bo'lib qolib,
+        # ayol bemorning normasi "≤3.0" ga aylanib ketardi (Kalsiy Ca).
+        parts = re.split(r',\s+(?=[A-Za-zA-Яа-яЎўҚқҒғҲҳ0-9<>≤≥])', norma_text)
         parts = [p.strip() for p in parts]
     else:
         return norma_text
@@ -859,11 +862,34 @@ def _get_norma_bold_hints(norma_text: str, jins: str = "", yosh=None, emizikli: 
                 hints.append("2-trimestr")
             else:
                 hints.append("3-trimestr")
-            # Aniq haftalar uchun (HCG normalari)
-            if hafta <= 2:
-                hints.append("1-Hafta")
-            elif hafta <= 4:
-                hints.append(f"{hafta}-Hafta")
+            # Aniq haftalar (XGCh normalari) — norma matnining O'ZIDAGI
+            # "N-Hafta" / "N-M Hafta" / "N Hafta" toifalaridan bemor haftasiga
+            # mos keladigani topiladi. Busiz homilador ayolning XGCh natijasi
+            # "Ayol: 0-15" ga solishtirilib, har doim ↑ qizil chiqardi.
+            import re as _re_hafta
+            _hafta_topildi = False
+            for _hline in _re_hafta.split(r'[;\n]|,\s+(?=\S)', str(norma_text)):
+                if ':' not in _hline:
+                    continue
+                _hcat = _hline.split(':')[0].strip()
+                if 'hafta' not in _hcat.lower():
+                    continue
+                _hr = _re_hafta.search(r'(\d+)\s*[-–]\s*(\d+)', _hcat)
+                if _hr:
+                    if int(_hr.group(1)) <= hafta <= int(_hr.group(2)):
+                        hints.append(_hcat)
+                        _hafta_topildi = True
+                    continue
+                _hs = _re_hafta.search(r'(\d+)', _hcat)
+                if _hs and int(_hs.group(1)) == hafta:
+                    hints.append(_hcat)
+                    _hafta_topildi = True
+            # Zaxira: normada hafta toifasi topilmasa — eski qisqa yozuv
+            if not _hafta_topildi:
+                if hafta <= 1:
+                    hints.append("1-Hafta")
+                elif hafta <= 4:
+                    hints.append(f"{hafta}-Hafta")
         except (ValueError, TypeError):
             pass
 
@@ -959,6 +985,120 @@ def _get_norma_bold_hints(norma_text: str, jins: str = "", yosh=None, emizikli: 
 
     # Takrorlanishni oldini olish
     return list(dict.fromkeys(hints))
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  QAYSI NORMA QATORI BEMORGA TEGISHLI
+#
+#  Blankada bemorga mos norma qatori QALIN ko'rsatiladi. Natijaning ↑/↓
+#  strelkasi HAM AYNAN SHU qatorga solishtirilishi kerak — aks holda
+#  "qalin qator boshqa, strelka boshqa" holati chiqadi.
+#
+#  Ilgari min/max faqat select_norma_by_patient() dan olinardi. U esa
+#  menstrual faza (Follikulyar/Ovulyatsiya/Lyutein), menopauza, trimestr
+#  kabi toifalarni BILMAYDI — natijada ayol bemorning LG/FSG/Prolaktin/
+#  Estradiol/Progesteron/XGCh natijasi ERKAK oralig'iga solishtirilib,
+#  me'yordagi qiymat ham ↑ qizil chiqardi.
+# ══════════════════════════════════════════════════════════════════════════
+_NORMA_QATOR_AJRATGICH = r'[;\n]|,\s+(?=\S)'
+_NORMA_JINS_SOZLARI = {"erkak", "ayol"}
+
+
+def _norma_line_is_bold(part: str, bold_hints: list, patient_jins: str = "") -> bool:
+    """Norma matnidagi bitta qator bemorga mos keladimi (qalin bo'ladimi)."""
+    if not bold_hints:
+        return False
+    jins_up = (patient_jins or '').upper()
+    pt_erkak = jins_up in ("ERKAK", "ЭРКАК", "M", "MALE", "E")
+    pt_ayol = jins_up in ("AYOL", "АЁЛ", "F", "FEMALE", "A", "WOMEN", "WOMAN")
+    other_hints = [h for h in bold_hints
+                   if h and h.strip().lower() not in _NORMA_JINS_SOZLARI]
+
+    part_lower = (part or '').lower()
+    line_has_erkak = 'erkak' in part_lower
+    line_has_ayol = 'ayol' in part_lower
+
+    if pt_ayol and line_has_erkak and not line_has_ayol:
+        return False          # ayol bemor — sof erkak qatori hech qachon
+    if pt_erkak and line_has_ayol and not line_has_erkak:
+        return False          # erkak bemor — sof ayol qatori hech qachon
+    if (line_has_erkak or line_has_ayol) and other_hints:
+        # Jins + yosh/faza birga: yosh/faza ham mos kelishi shart
+        return any(h and h.strip().lower() in part_lower for h in other_hints)
+    for hint in bold_hints:
+        if hint and hint.strip().lower() in part_lower:
+            return True
+    return False
+
+
+def _select_norma_range_by_hints(norma_text: str, bold_hints: list, patient_jins: str = ""):
+    """Bemorga mos AYNAN BITTA norma qatori topilsa, uning oraliq qismini
+    ("Lyutein: 7.5-80.0" → "7.5-80.0") qaytaradi. Aks holda None.
+
+    Bitta qator shart: bir nechta qator mos kelsa (masalan emizikli + 3-trimestr)
+    qaysi biri asosiy ekani noaniq — eski yo'l (select_norma_by_patient)
+    ishlatilaveradi.
+    """
+    if not norma_text or not bold_hints:
+        return None
+    parts = [p.strip() for p in re.split(_NORMA_QATOR_AJRATGICH, str(norma_text))
+             if p and p.strip()]
+    if len(parts) < 2:
+        return None
+    mos = [p for p in parts if _norma_line_is_bold(p, bold_hints, patient_jins)]
+    if len(mos) != 1:
+        return None
+    line = mos[0]
+    return line.split(':', 1)[1].strip() if ':' in line else line
+
+
+def _norma_union_min_max(norma_text: str, patient_jins: str = ""):
+    """Bemorga MOS bitta qator topilmaganda ishlatiladigan ENG KENG oraliq:
+    bemor jinsiga zid BO'LMAGAN barcha qatorlarning birlashmasi (eng kichik
+    min .. eng katta max).
+
+    Nima uchun: ayol bemorning menstrual fazasi kiritilmagan bo'lsa, qaysi
+    faza normasiga solishtirish noma'lum. Ilgari birinchi uchragan (ko'pincha
+    ERKAK) oraliq olinardi va me'yordagi natija ham ↑ qizil chiqardi.
+    Endi barcha ayol fazalarining birlashmasi olinadi: shu keng oraliqdan
+    ham chiqib ketgan natijagina belgilanadi — noto'g'ri signal bo'lmaydi,
+    haqiqatan keskin chetlashgan natija esa e'tibordan qolmaydi.
+    """
+    if not norma_text:
+        return None, None
+    jins_up = (patient_jins or '').upper()
+    pt_erkak = jins_up in ("ERKAK", "ЭРКАК", "M", "MALE", "E")
+    pt_ayol = jins_up in ("AYOL", "АЁЛ", "F", "FEMALE", "A", "WOMEN", "WOMAN")
+    mins, maxs = [], []
+    for part in re.split(_NORMA_QATOR_AJRATGICH, str(norma_text)):
+        part = (part or '').strip()
+        if not part or ':' not in part:
+            continue
+        pl = part.lower()
+        has_e, has_a = 'erkak' in pl, 'ayol' in pl
+        if pt_ayol and has_e and not has_a:
+            continue
+        if pt_erkak and has_a and not has_e:
+            continue
+        mn, mx = _parse_norma_min_max(part.split(':', 1)[1], patient_jins)
+        if mn is not None:
+            mins.append(mn)
+        if mx is not None:
+            maxs.append(mx)
+    if not mins and not maxs:
+        return None, None
+    return (min(mins) if mins else None), (max(maxs) if maxs else None)
+
+
+def _norma_toifali(norma_text: str) -> bool:
+    """Norma bemor toifalariga (jins/yosh/faza) bo'lingan ko'p qatorli
+    normami? Shunday bo'lsa-yu, bemorga MOS qator topilmasa — natijaga
+    tasodifiy oraliq bo'yicha ↑/↓ qo'yish XATO bo'ladi."""
+    if not norma_text:
+        return False
+    parts = [p.strip() for p in re.split(_NORMA_QATOR_AJRATGICH, str(norma_text))
+             if p and p.strip()]
+    return sum(1 for p in parts if ':' in p) >= 2
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1157,10 +1297,22 @@ def get_test_norma(test_name: str, jins: str = "", guruh: str = "", yosh: int = 
 
                 # min/max qiymatlarni hisoblash uchun filterlangan normani olish
                 selected_for_minmax = select_norma_by_patient(norma_text, jins, yosh)
+                # BLANKADA QALIN KO'RSATILADIGAN QATOR USTUVOR — strelka
+                # aynan shu qatorga solishtiriladi (menstrual faza, trimestr,
+                # menopauza kabi toifalarni select_norma_by_patient bilmaydi).
+                _hint_range = _select_norma_range_by_hints(norma_text, bold_hints, jins)
+                if _hint_range:
+                    selected_for_minmax = _hint_range
+                # Toifali norma bo'lib, bemorga MOS qator topilmagan bo'lsa —
+                # tasodifiy oraliqqa solishtirmaymiz (noto'g'ri ↑/↓ bermaslik uchun)
+                _band_mos = bool(_hint_range) or (
+                    selected_for_minmax and selected_for_minmax != norma_text)
 
                 norma_info = {
                     "norma": norma_text,   # TO'LIQ norma text (filtersiz)
                     "selected_norma": selected_for_minmax,  # Yosh/jins bo'yicha tanlangan (min/max uchun)
+                    "band_mos": _band_mos,          # bemorga mos qator topildimi
+                    "toifali": _norma_toifali(norma_text),  # norma toifalarga bo'linganmi
                     "bold_hints": bold_hints,  # Qalin ko'rsatiladigan kategoriyalar
                     "unit": result.get('birlik', ''), "type": test_type,
                     "min": float(result['min_val']) if result.get('min_val') else None,
@@ -2557,37 +2709,14 @@ def _add_multiline_norma(para, norma_text: str, size_pt: float = 11, bold_hints:
                 _add_run_tnr(para, part, size_pt, bold=(part == _stage_line))
             return
 
-    jins_up = (patient_jins or '').upper()
-    pt_erkak = jins_up in ("ERKAK", "ЭРКАК", "M", "MALE", "E")
-    pt_ayol  = jins_up in ("AYOL", "АЁЛ", "F", "FEMALE", "A", "WOMEN", "WOMAN")
-    # Yosh/faza hintlarini jins hintlaridan ajratish (faqat "erkak"/"ayol" so'zlari jins hintidir)
-    _GENDER_WORDS = {"erkak", "ayol"}
-    other_hints = [h for h in (bold_hints or []) if h and h.strip().lower() not in _GENDER_WORDS]
-
+    # DIQQAT: qaysi qator qalin bo'lishi _norma_line_is_bold() da — AYNAN
+    # shu funksiya natijaning ↑/↓ oralig'ini tanlashda ham ishlatiladi
+    # (_select_norma_range_by_hints). Ikkalasi bir manbadan olingani uchun
+    # "qalin qator boshqa, strelka boshqa" holati yuzaga kelmaydi.
     for i, part in enumerate(parts):
         if i > 0:
             para.add_run().add_break(WD_BREAK.LINE)
-        is_bold = False
-        if bold_hints:
-            part_lower = part.lower()
-            line_has_erkak = 'erkak' in part_lower
-            line_has_ayol  = 'ayol'  in part_lower
-
-            if pt_ayol and line_has_erkak and not line_has_ayol:
-                # Ayol bemor — faqat erkak deb belgilangan qatorni HECH QACHON qalin qilma
-                is_bold = False
-            elif pt_erkak and line_has_ayol and not line_has_erkak:
-                # Erkak bemor — faqat ayol deb belgilangan qatorni HECH QACHON qalin qilma
-                is_bold = False
-            elif (line_has_erkak or line_has_ayol) and other_hints:
-                # Jins + yosh/faza birgalikda: jins mos bo'lsa, yosh/faza hintig ham mos kelishi shart
-                is_bold = any(h and h.strip().lower() in part_lower for h in other_hints)
-            else:
-                # Jinsiz qator yoki faqat jins bor — oddiy substring moslik
-                for hint in bold_hints:
-                    if hint and hint.strip().lower() in part_lower:
-                        is_bold = True
-                        break
+        is_bold = _norma_line_is_bold(part, bold_hints, patient_jins)
         _add_run_tnr(para, part, size_pt, bold=is_bold)
 
 def _set_para_spacing(para, before=0, after=0, line_spacing=None):
@@ -2874,7 +3003,20 @@ def _get_result_color_and_arrow(result_value, norma_info, jins=''):
         if (_get_norma_stage_line(norma_info.get('norma', ''), result_value)
                 or _get_norma_stage_line(_norma_for_parse, result_value)):
             return None, ''
-        text_min, text_max = _parse_norma_min_max(_norma_for_parse, jins)
+        # TOIFALI norma (Erkak/Ayol/faza/trimestr/yosh qatorlari) bo'lib,
+        # bemorga MOS qator topilmagan bo'lsa — birinchi uchragan oraliqqa
+        # solishtirish XATO strelka beradi (masalan 35 yoshli erkakning
+        # testosteroni "<18 yosh Ayol" oralig'iga tushib ↑ chiqardi).
+        # Bunday holatda strelka umuman qo'yilmaydi; norma to'liq ko'rinadi.
+        if norma_info.get('toifali') and not norma_info.get('band_mos'):
+            # Bitta qator emas — bemorga zid bo'lmagan BARCHA qatorlarning
+            # birlashmasi (eng keng oraliq). Faqat undan ham chetda qolgan
+            # natija belgilanadi.
+            text_min, text_max = _norma_union_min_max(norma_info.get('norma', ''), jins)
+            if text_min is None and text_max is None and db_min is None and db_max is None:
+                return None, ''
+        else:
+            text_min, text_max = _parse_norma_min_max(_norma_for_parse, jins)
         # Matn parse muvaffaqiyatli bo'lsa — ustuvorlik, aks holda DB ustunlar
         min_val = text_min if text_min is not None else db_min
         max_val = text_max if text_max is not None else db_max
@@ -2936,6 +3078,16 @@ def _get_ifa_result_color(result_str, norma_text):
             return float('-inf'), float(m.group(1))
         return None, None
 
+    def _rang(is_shubhali, is_musbat):
+        # Shubhali birinchi tekshiriladi — "kuchsiz musbat (shubhali)"
+        # kabi aralash yozuvda ham chegaraviy zona ustun bo'lsin
+        if is_shubhali:
+            return RGBColor(0xE6, 0x7E, 0x22)   # To'q sariq — chegaraviy zona
+        if is_musbat:
+            return RGBColor(0xFF, 0x00, 0x00)   # Qizil — Musbat (+)
+        return None                              # Qora  — Manfiy (-)
+
+    bands = []      # [(min, max, is_shubhali, is_musbat), ...]
     for line in lines:
         line = line.strip()
         if not line:
@@ -2949,16 +3101,28 @@ def _get_ifa_result_color(result_str, norma_text):
         min_v, max_v = _parse_range_bounds(line)
         if min_v is None:
             continue
+        bands.append((min_v, max_v, is_shubhali, is_musbat))
         if min_v <= result_float <= max_v:
-            # Shubhali birinchi tekshiriladi — "kuchsiz musbat (shubhali)"
-            # kabi aralash yozuvda ham chegaraviy zona ustun bo'lsin
-            if is_shubhali:
-                return RGBColor(0xE6, 0x7E, 0x22)   # To'q sariq — chegaraviy zona
-            if is_musbat:
-                return RGBColor(0xFF, 0x00, 0x00)   # Qizil — Musbat (+)
-            return None                              # Qora  — Manfiy (-)
+            return _rang(is_shubhali, is_musbat)
 
-    return None  # Moslik topilmadi — qora
+    # ── Hech bir bosqichga tushmadi ───────────────────────────────────────
+    # Ilgari bunday natija QORA (ya'ni "Manfiy" kabi) chiqardi. Bu XAVFLI:
+    # norma "0-1 Manfiy, 1.1-40 Musbat" bo'lsa, indeksi 50 bo'lgan KUCHLI
+    # MUSBAT natija manfiy kabi qora bo'lib ketardi; 1.05 esa ikki bosqich
+    # orasidagi bo'shliqqa tushib yana qora bo'lardi.
+    # Endi eng yaqin bosqich tanlanadi — chegaradan yuqorisi Musbat qatoriga,
+    # pastrog'i Manfiy qatoriga tegishli bo'ladi.
+    if not bands:
+        return None
+    def _masofa(b):
+        mn, mx = b[0], b[1]
+        if result_float < mn:
+            return mn - result_float
+        if result_float > mx:
+            return result_float - mx
+        return 0.0
+    nearest = min(bands, key=_masofa)
+    return _rang(nearest[2], nearest[3])
 
 
 def _blood_group_word(symbol: str) -> str:
@@ -3071,7 +3235,7 @@ CBC_HEMA_ROWS = [
     ("Eritrotsitdagi gemoglobin konsentratsiyasi", "MCHC", "g/L", "310 – 360"),
     ("Eritrotsitlar hajmi variatsiyasi", "RDW-CV", "%", "11 – 16"),
     ("Eritrotsitlar hajmi tarqalish kengligi", "RDW-SD", "fL", "35 – 56"),
-    ("Trombotsitlar soni", "PLT", "10⁹/L", "150 – 400"),
+    ("Trombotsitlar soni", "PLT", "10⁹/L", "100 – 400"),
     ("Trombotsitlarning o'rtacha hajmi", "MPV", "fL", "7 – 12"),
     ("Trombotsitlar hajmi variatsiyasi", "PDW", "%", "9 – 17"),
     ("Trombokrit", "PCT", "%", "0.10 – 0.28"),
@@ -5912,7 +6076,7 @@ def create_unified_blank(order_id: int, order_info: dict, organized: dict, test_
 
 # [15] get_save_dir() va create_filename()
 def get_save_dir():
-    """
+    r"""
     Blankalar (Word/.docx) saqlanadigan papkani qaytaradi.
     Format: <asos>\DD.MM.YYYY\
     Asos papka: Blanka Sozlamalaridagi `word_save_dir` (bo'sh bo'lsa BASE_DIR).
@@ -12171,7 +12335,13 @@ Sana: {_sana_fmt}"""
                         COALESCE(t.sample, '') as test_type,
                         COALESCE(tn.response_options, '') as response_options,
                         COALESCE(tn.standard_blank_path, '') as standard_blank_path,
-                        COALESCE(tn.type, '') as type
+                        COALESCE(tn.type, '') as type,
+                        -- `norma` SHART: natija kiritish oynasi shu ustunga
+                        -- qarab "raqamli IFA" ni "ekspress Manfiy/Musbat" dan
+                        -- ajratadi (_norma_has_number). Ilgari ustun so'ralmagani
+                        -- uchun bu himoya umuman ishlamas edi.
+                        COALESCE(tn.norma, '') as norma,
+                        COALESCE(tn.birlik, '') as birlik
                     FROM order_items oi
                     LEFT JOIN tahlillar t ON oi.tahlil_id = t.id
                     LEFT JOIN tahlillar_norma tn ON oi.nomi = tn.tahlil_nomi
@@ -12392,6 +12562,8 @@ Sana: {_sana_fmt}"""
                     _row_id = _norma_cache.get(_nm) or {}
                     _t['type'] = _row_id.get('type') or ''
                     _t['response_options'] = _row_id.get('response_options') or ''
+                    _t['norma'] = _row_id.get('norma') or ''
+                    _t['birlik'] = _row_id.get('birlik') or ''
 
             # Kesh yordamida norma oluvchi ichki funksiya (DB so'rovi YO'Q)
             def _get_norma_fast(tn):
@@ -12544,8 +12716,8 @@ Sana: {_sana_fmt}"""
                     _insert_sub_row("PT sekundalarda",          "pt_sek",     str(rd.get('pt_sek', '')),     "13-15 sek")
                     _insert_sub_row("PT bo\u2018yicha Kviku (%)", "pt_kviku",   str(rd.get('pt_kviku', '')),   "70-100 %")
                     _insert_sub_row("MNO / INR",                "pt_mno",     str(rd.get('pt_mno', '')),     "0.9-1.15 INR")
-                    _insert_sub_row("Trombin vaqti (TT)", "tt",         str(rd.get('tt', '')),         "11-18 sek")
-                    _insert_sub_row("ACHTV",                    "achtv",      str(rd.get('achtv', '')),      "25-40 sek")
+                    _insert_sub_row("Trombin vaqti (TT)", "tt",         str(rd.get('tt', '')),         "10.3-30.0 sek")
+                    _insert_sub_row("ACHTV",                    "achtv",      str(rd.get('achtv', '')),      "25.4-36.9 sek")
                     _insert_sub_row("Fibrinogen",               "fibrinogen", str(rd.get('fibrinogen', '')), "2.0-4.0 g/l")
 
                 elif is_gtt:
@@ -12560,10 +12732,10 @@ Sana: {_sana_fmt}"""
                     rd = _parse_json_result(test_id)
                     _insert_sub_row("Umumiy xolesterin (TC)",                    "tc",      str(rd.get('tc', '')),      "<5.2 mmol/l")
                     _insert_sub_row("HDL — Yuqori zichlikli lipoprotein",         "hdl",     str(rd.get('hdl', '')),     "E:≥1.0 / A:≥1.2 mmol/l")
-                    _insert_sub_row("LDL — Past zichlikli lipoprotein",           "ldl",     str(rd.get('ldl', '')),     "<3.4 mmol/l")
+                    _insert_sub_row("LDL — Past zichlikli lipoprotein",           "ldl",     str(rd.get('ldl', '')),     "<3.0 mmol/l")
                     _insert_sub_row("Trigliseridlar (TG)",                        "tg",      str(rd.get('tg', '')),      "0.7-1.7 mmol/l")
                     _insert_sub_row("VLDL-xolesterin (hisoblangan)",              "vldl",    str(rd.get('vldl', '')),    "0.26-1.04 mmol/l")
-                    _insert_sub_row("Non-HDL xolesterin (TC−HDL)",               "non_hdl", str(rd.get('non_hdl', '')), "<3.4 mmol/l")
+                    _insert_sub_row("Non-HDL xolesterin (TC−HDL)",               "non_hdl", str(rd.get('non_hdl', '')), "<3.8 mmol/l")
                     _insert_sub_row("Aterogenlik koeffisienti (KA) — xavf darajasi", "ka",   str(rd.get('ka', '')),      "<3.0 yaxshi / 3-4 xavf / >4 yuqori")
                     _insert_sub_row("TC/HDL nisbati",                             "tc_hdl",  str(rd.get('tc_hdl', '')),  "<5.0")
                     _insert_sub_row("LDL/HDL nisbati",                            "ldl_hdl", str(rd.get('ldl_hdl', '')), "<3.5")
@@ -13547,6 +13719,16 @@ Sana: {_sana_fmt}"""
         if any(k in test_name_lower for k in ['surtma', 'mazok']):
             self.show_ginekologik_form(test_id, test_name, test_data)
             return
+        # 2k. UZI protokoli (a'zo-guruhlangan + MKB-10 xulosa)
+        if 'uzi' in test_name_lower or 'узи' in test_name_lower:
+            self.show_uzi_protokol_form_v2(test_id, test_name, test_data)
+            return
+        # 2l. REVMOPROBA — 3 komponentli (CRP/RF/ASLO). response_options
+        # bo'lgani uchun quyidagi 4-qadamga tushib, bitta dropdown ochilib
+        # ketmasin: to'liq dialog show_result_input_dialog da.
+        if 'revmoproba' in test_name_lower or ('revmo' in test_name_lower and 'proba' in test_name_lower):
+            self.show_result_input_dialog(test_id)
+            return
 
         # 3. Express (Manfiy/Musbat) — gepatit, RW, sifilis va boshqalar
         # IFA/ИФА testlarida raqamli natija kiritiladi — Manfiy/Musbat ko'rsatilmaydi
@@ -13594,8 +13776,8 @@ Sana: {_sana_fmt}"""
             ]
             if any(k in test_name_lower for k in ['koagulogramma', 'koagul']):
                 _coag_components += [
-                    {"name": "Trombin vaqti (TT)", "key": "tt",         "unit": "sek", "norma": "11-18",   "readonly": False},
-                    {"name": "ACHTV",                    "key": "achtv",      "unit": "sek", "norma": "25-40",   "readonly": False},
+                    {"name": "Trombin vaqti (TT)", "key": "tt",         "unit": "sek", "norma": "10.3-30.0",   "readonly": False},
+                    {"name": "ACHTV",                    "key": "achtv",      "unit": "sek", "norma": "25.4-36.9",   "readonly": False},
                     {"name": "Fibrinogen",               "key": "fibrinogen", "unit": "g/l", "norma": "2.0-4.0", "readonly": False},
                 ]
             self.show_template_based_dialog(test_id, test_name, test_data,
@@ -15319,6 +15501,9 @@ Sana: {_sana_fmt}"""
         if any(k in tname_lower for k in ['zimnitskiy', 'зимницкий']):
             self.show_zimnitskiy_form(test_id, test_name, test_data)
             return
+        if _is_gtt_test(tname_lower):
+            self.show_gtt_form(test_id, test_name, test_data)
+            return
         if 'spermogramma' in tname_lower:
             self.show_spermogramma_form(test_id, test_name, test_data)
             return
@@ -15328,10 +15513,22 @@ Sana: {_sana_fmt}"""
         if any(k in tname_lower for k in ['urologik', 'mujskoy', 'erkaklar']):
             self.show_urologik_form(test_id, test_name, test_data)
             return
+        # Qondan mazok (morfologiya) — 'mazok' so'zi bor, lekin GINEKOLOGIK EMAS.
+        # Shu tekshiruv ginekologik shartdan OLDIN turishi SHART.
+        if 'qondan' in tname_lower and 'mazok' in tname_lower:
+            self.show_qondan_mazok_form(test_id, test_name, test_data)
+            return
+        if 'uzi' in tname_lower or 'узи' in tname_lower:
+            self.show_uzi_protokol_form_v2(test_id, test_name, test_data)
+            return
 
         # 2. Ginekologik surtma
         if any(k in tname_lower for k in ['ginekolog', 'surtma', 'mazok']):
             self.show_ginekologik_form(test_id, test_name, test_data)
+            return
+        # 2l. REVMOPROBA — 3 komponentli, bitta dropdown ochilmasin
+        if 'revmoproba' in tname_lower or ('revmo' in tname_lower and 'proba' in tname_lower):
+            self.show_result_input_dialog(test_id)
             return
 
         # 3. Express (Manfiy / Musbat) — nom yoki tur bo'yicha
@@ -15380,8 +15577,8 @@ Sana: {_sana_fmt}"""
             ]
             if any(k in tname_lower for k in ['koagulogramma', 'koagul']):
                 _coag_components += [
-                    {"name": "Trombin vaqti (TT)", "key": "tt",         "unit": "sek", "norma": "11-18",   "readonly": False},
-                    {"name": "ACHTV",                    "key": "achtv",      "unit": "sek", "norma": "25-40",   "readonly": False},
+                    {"name": "Trombin vaqti (TT)", "key": "tt",         "unit": "sek", "norma": "10.3-30.0",   "readonly": False},
+                    {"name": "ACHTV",                    "key": "achtv",      "unit": "sek", "norma": "25.4-36.9",   "readonly": False},
                     {"name": "Fibrinogen",               "key": "fibrinogen", "unit": "g/l", "norma": "2.0-4.0", "readonly": False},
                 ]
             self.show_template_based_dialog(test_id, test_name, test_data,
@@ -15530,9 +15727,9 @@ Sana: {_sana_fmt}"""
                         {"name": "MNO / INR",                "key": "pt_mno",     "unit": "INR",
                          "norma": "0.9-1.15",   "readonly": False},
                         {"name": "Trombin vaqti (TT)", "key": "tt",         "unit": "sek",
-                         "norma": "11-18",      "readonly": False},
+                         "norma": "10.3-30.0",      "readonly": False},
                         {"name": "ACHTV",                    "key": "achtv",      "unit": "sek",
-                         "norma": "25-40",      "readonly": False},
+                         "norma": "25.4-36.9",      "readonly": False},
                         {"name": "Fibrinogen",               "key": "fibrinogen", "unit": "g/l",
                          "norma": "2.0-4.0",   "readonly": False},
                     ]
@@ -15569,8 +15766,8 @@ Sana: {_sana_fmt}"""
                     {"name": "PT sekundalarda",          "key": "pt_sek",     "unit": "sek", "norma": "13-15",    "readonly": False},
                     {"name": "PT bo'yicha Kviku (%)",    "key": "pt_kviku",   "unit": "%",   "norma": "70-100",   "readonly": False},
                     {"name": "MNO / INR",                "key": "pt_mno",     "unit": "INR", "norma": "0.9-1.15", "readonly": False},
-                    {"name": "Trombin vaqti (TT)", "key": "tt",         "unit": "sek", "norma": "11-18",    "readonly": False},
-                    {"name": "ACHTV",                    "key": "achtv",      "unit": "sek", "norma": "25-40",    "readonly": False},
+                    {"name": "Trombin vaqti (TT)", "key": "tt",         "unit": "sek", "norma": "10.3-30.0",    "readonly": False},
+                    {"name": "ACHTV",                    "key": "achtv",      "unit": "sek", "norma": "25.4-36.9",    "readonly": False},
                     {"name": "Fibrinogen",               "key": "fibrinogen", "unit": "g/l", "norma": "2.0-4.0",  "readonly": False},
                 ]
             }
@@ -16383,7 +16580,7 @@ Sana: {_sana_fmt}"""
             ("MCH",    "MCH (o'rtacha Hgb)",   "27-34",      "pg"),
             ("MCHC",   "MCHC",                 "310-360",    "g/L"),
             ("RDW-CV", "RDW-CV",               "11-16",      "%"),
-            ("PLT",    "Trombotsitlar",        "150-400",    "10⁹/л"),
+            ("PLT",    "Trombotsitlar",        "100-400",    "10⁹/л"),
             ("MPV",    "MPV",                  "6.5-12.0",   "fL"),
             ("NLR",    "NLR nisbati",          "1.0-3.0",    ""),
         ]

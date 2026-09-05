@@ -197,6 +197,12 @@
         "low": null,
         "high": 0.1
       },
+      "160": {
+        "name": "Troponin I miqdoriy IFA",
+        "unit": "ng/ml",
+        "low": null,
+        "high": 0.4
+      },
       "75": {
         "name": "Fibrinogen",
         "unit": "g/l",
