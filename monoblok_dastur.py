@@ -3443,10 +3443,21 @@ def create_urine_full_table_in_doc(doc: Document, result_data, order_info: dict)
         ('BACT', "Bakteriyalar", "manfiy", "preparatda"),
         ('YEAST', "Zamburug'lar", "manfiy", "preparatda"),
     ]
+    # ACR (Mikroalbumin/Kreatinin nisbati) — KDIGO 3 bosqichli shkalasi
+    # (A1/A2/A3). Norma ustunida natijaga mos KELGAN BITTA bosqich chiqadi
+    # (boshqa qatorlar kabi bir qatorli) — barcha 3 tasini birga ko'rsatish
+    # qatorni haddan tashqari cho'zib, tushunarsiz qilib qo'ygan edi. Qaysi
+    # bosqich tanlanishi pastda (ACR qiymatini formatlash joyida) analizator
+    # natijasining o'z kategoriyasidan (< / oraliq / >) aniqlanadi.
+    # _ACR_BOSQICH_NORMA faqat kategoriya aniqlanmagan kamdan-kam holatda
+    # zaxira sifatida ishlatiladi.
+    _ACR_BOSQICH_NORMA = ("A1 (norma): 0-3.3; "
+                          "A2 (mikroalbuminuriya): 3.4-33.9; "
+                          "A3 (klinik albuminuriya): 34-999")
     URIT_NORMA = {'LEU': '(0) manfiy', 'KET': '(0) manfiy', 'NIT': '(0) manfiy', 'URO': '(3.2-16)  normal',
                   'BIL': '(0) manfiy', 'GLU': '<2.8', 'PRO': '<0.15', 'SG': '1.010-1.025',
                   'PH': '5.5-7.0', 'BLD': '<10', 'Vc': '(0) manfiy', 'MA': '<20', 'Ca': '1.5-9.0',
-                  'CR': '2.0-22.0', 'ACR': '<3.4'}
+                  'CR': '2.0-22.0', 'ACR': _ACR_BOSQICH_NORMA}
     URIT_UNITS = {'LEU': 'Leyk/mkl', 'KET': 'Mmol/l', 'NIT': 'Mmol/l', 'URO': 'Mkmol/l',
                   'BIL': 'Mkmol/l', 'GLU': 'Mmol/l', 'PRO': 'G/l', 'SG': 'g/l',
                   'PH': '', 'BLD': 'Erit/mkl', 'Vc': 'Mmol/l', 'MA': 'Mg/l',
@@ -3528,16 +3539,24 @@ def create_urine_full_table_in_doc(doc: Document, result_data, order_info: dict)
     has_analyzer_flags = 'abnormal_params' in rd
     # Blankada to'liq nomlar (UI dan farqli)
     _BLANK_NAMES = {'ACR': "Mikroalbumin/Kreatinin nisbati"}
-    # ACR haqiqiy qiymatini MA/CR dan hisoblash
+    # ACR (Mikroalbumin/Kreatinin nisbati) haqiqiy qiymatini MA/CR dan
+    # hisoblash — MA cheklangan (">=150" kabi) bo'lsa ham hisoblanadi,
+    # natija shunga mos ">"/"<" belgisi bilan chiqadi (masalan MA=">=150",
+    # CR=17.6 → ACR ">8.5": haqiqiy qiymat noma'lum, lekin 8.5 dan katta).
     _acr_calculated = None
+    _acr_calc_prefix = ''
     try:
         _ma_s = (all_analytes.get('MA') or '').strip()
         _cr_s = (all_analytes.get('CR') or '').strip()
-        if _ma_s and _cr_s and '<' not in _ma_s and '>' not in _ma_s:
+        if _ma_s and _cr_s:
             _ma_n = float(re.search(r'([\d.]+)', _ma_s).group(1))
             _cr_n = float(re.search(r'([\d.]+)', _cr_s).group(1))
             if _cr_n > 0:
                 _acr_calculated = round(_ma_n / _cr_n, 1)
+                if '>' in _ma_s:
+                    _acr_calc_prefix = '>'
+                elif '<' in _ma_s:
+                    _acr_calc_prefix = '<'
     except Exception:
         pass
     for code in ['LEU', 'KET', 'NIT', 'URO', 'BIL', 'GLU', 'PRO', 'SG', 'PH', 'BLD', 'Vc', 'MA', 'Ca', 'CR', 'ACR']:
@@ -3546,27 +3565,40 @@ def create_urine_full_table_in_doc(doc: Document, result_data, order_info: dict)
         # 11-parametrli poloskа: MA, Ca, CR, ACR yo'q bo'lsa — qatorni o'tkazib yuborish
         if code in ('MA', 'Ca', 'CR', 'ACR') and not val:
             continue
-        # ACR: birlikni olib tashlash + kategoriya matni + haqiqiy qiymat
+        # ACR: Natija ustunida FAQAT hisoblangan (MA/CR) raqam chiqadi —
+        # analizatorning o'z bucket-oralig'i ("3.4-33.9" kabi) BU YERDA
+        # ko'rsatilmaydi, chunki u aslida norma (kategoriya chegarasi),
+        # bemorning aniq natijasi emas. Norma ustunida HAR DOIM bazaviy
+        # chegara "<3.4" ko'rinadi (vrach "normadaku" deb adashmasligi
+        # uchun), yonida esa bemorning natijasi qaysi toifaga tushgani
+        # ("Norma" / oraliq+"Mikroalbuminuriya" / oraliq+"Klinik
+        # albuminuriya") qo'shiladi. MUHIM: toifa HISOBLANGAN qiymatga
+        # qarab tanlanadi (analizatorning o'z bucket matniga emas) — aks
+        # holda ikkalasi bir-biriga zid chiqishi mumkin edi (masalan
+        # analizator "<3.4 Norma" desa-yu, hisoblangan MA/CR 8.5 chiqsa).
+        _acr_stage_norma = None
+        _ACR_BASE = "<3.4"
         if code == 'ACR' and val:
             val_raw = re.sub(r'\s*mg/mmol\s*$', '', val, flags=re.IGNORECASE).strip()
-            if val_raw.startswith('<'):
-                # < 3.4 → Norma (sog'lom buyrak)
-                val = "<3.4 Norma"
-            elif val_raw.startswith('>'):
-                # > 33.9 → Klinik albuminuriya
-                if _acr_calculated is not None:
-                    val = f"{_acr_calculated} Klinik albuminuriya"
+            if _acr_calculated is not None:
+                val = f"{_acr_calc_prefix}{_acr_calculated}"
+                if _acr_calculated < 3.4:
+                    _acr_stage_norma = f"{_ACR_BASE}   Norma"
+                elif _acr_calculated <= 33.9:
+                    _acr_stage_norma = f"{_ACR_BASE}   (3.4-33.9) Mikroalbuminuriya"
                 else:
-                    val = f"{val_raw} Klinik albuminuriya"
-            elif '-' in val_raw:
-                # 3.4-33.9 → Mikroalbuminuriya
-                if _acr_calculated is not None:
-                    val = f"{_acr_calculated} Mikroalbuminuriya"
-                else:
-                    val = f"{val_raw} Mikroalbuminuriya"
+                    _acr_stage_norma = f"{_ACR_BASE}   (>33.9) Klinik albuminuriya"
             else:
+                # Hisoblab bo'lmagan kamdan-kam holat — analizatorning o'z
+                # bucket matniga tayanamiz
                 val = val_raw
-        norma = URIT_NORMA.get(code, '-')
+                if val_raw.startswith('<'):
+                    _acr_stage_norma = f"{_ACR_BASE}   Norma"
+                elif val_raw.startswith('>'):
+                    _acr_stage_norma = f"{_ACR_BASE}   (>33.9) Klinik albuminuriya"
+                elif '-' in val_raw:
+                    _acr_stage_norma = f"{_ACR_BASE}   (3.4-33.9) Mikroalbuminuriya"
+        norma = _acr_stage_norma if (code == 'ACR' and _acr_stage_norma) else URIT_NORMA.get(code, '-')
         birlik = URIT_UNITS.get(code, '')
         if has_analyzer_flags:
             # Analizator * belgisi bor — shu asosda rang
@@ -10574,10 +10606,26 @@ class MonoblokApp:
         self.tests_tree.heading("Norma", text="Norma")
         self.tests_tree.column("Norma", width=250, anchor=tk.W)
         
+        # Jadval ostida IZOH qatori — Natija ustunidagi belgilar nimani bildiradi
+        # (ranglar yuqoridagi analizator tugmalari bilan bir xil)
+        legend = tk.Frame(parent, bg="#F0F0F0")
+        legend.pack(side=tk.BOTTOM, fill=tk.X, pady=(2, 0))
+        for _txt, _fg, _bold in (
+            ("✎ qo'lda", "#333333", False),
+            ("▼ tanlang", "#333333", False),
+            ("⧉ oynada", "#333333", False),
+            ("● Siydik", "#C62828", True),
+            ("● Gemotologiya", "#1565C0", True),
+            ("● Bioximiya", "#388E3C", True),
+        ):
+            tk.Label(legend, text=_txt, bg="#F0F0F0", fg=_fg,
+                     font=("Arial", 9, "bold" if _bold else "normal")
+                     ).pack(side=tk.LEFT, padx=(4, 6))
+
         # Scrollbar
         scrollbar = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=self.tests_tree.yview)
         self.tests_tree.configure(yscrollcommand=scrollbar.set)
-        
+
         self.tests_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
@@ -12585,6 +12633,21 @@ Sana: {_sana_fmt}"""
                 # Faqat bazadan — kod ichidagi TEST_NORMAS ishlatilmaydi
                 return {"norma": "-", "unit": "", "type": "text"}
 
+            def _panel_norma(_tid, _fallback):
+                """Buyrak paneli / Lipid spektri kabi guruh a'zosining haqiqiy
+                laboratoriya normasini (tahlillar_norma.tahlil_id orqali) oladi —
+                blankada ko'rsatiladigan norma bilan bir xil bo'lishi uchun.
+                DB'da topilmasa eski hardcode qilingan matn qaytariladi."""
+                try:
+                    _ni = get_test_norma('', jins, 'BIO', yosh_int, tahlil_id=_tid)
+                    _nt = (_ni or {}).get('norma', '')
+                    if _nt and _nt != '-':
+                        _unit = (_ni or {}).get('unit', '')
+                        return f"{_nt} {_unit}".strip()
+                except Exception:
+                    pass
+                return _fallback
+
             # Tahlillarni ko'rsatish
             has_siydik = False
             row_idx = 0
@@ -12678,24 +12741,52 @@ Sana: {_sana_fmt}"""
                         _st = 'tayyor'
                         _status_text = "Tayyor"
                     _rt  = 'row_even' if row_idx % 2 == 0 else 'row_odd'
+                    # Bo'sh komponent \u2014 "alohida oynada kiritiladi" ishorasi
+                    _val_disp = val if str(val or '').strip() else self.NATIJA_HINT_FORM
                     self.tests_tree.insert("", tk.END, values=(
                         row_idx,
                         f"  \u2514\u2500 {display_name}",
                         _status_text,
-                        val,
+                        _val_disp,
                         norma_t
                     ), tags=(f"{test_id}_{tag_suffix}", _st, _rt))
 
                 if is_bilirubin:
                     # 3 ta sub-qator: Umumiy, Bog'langan, Erkin
                     rd = _parse_json_result(test_id)
-                    norma_info = _get_norma_fast(test_name)
-                    nt = norma_info.get("norma", "-")
+                    _bili_norma = {
+                        "umumiy":     ("3.4 – 20.5", "mkmol/l"),
+                        "bog_langan": ("0.86 – 5.3",  "mkmol/l"),
+                    }
+                    try:
+                        _bn_conn = db_conn()
+                        if _bn_conn:
+                            _bn_cur = _bn_conn.cursor(dictionary=True)
+                            _bn_cur.execute(
+                                "SELECT result_template, birlik FROM tahlillar_norma WHERE tahlil_nomi LIKE %s LIMIT 1",
+                                ('%bilirubin%',))
+                            _bn_row = _bn_cur.fetchone()
+                            _bn_cur.close(); _bn_conn.close()
+                            if _bn_row and _bn_row.get('result_template'):
+                                _tmpl = json.loads(_bn_row['result_template'])
+                                for _comp in _tmpl.get('components', []):
+                                    _ck = _comp.get('key', '')
+                                    _cn = (_comp.get('norma') or '').strip()
+                                    _cu = (_comp.get('unit') or _bn_row.get('birlik') or 'mkmol/l').strip()
+                                    if _ck in _bili_norma and _cn:
+                                        _bili_norma[_ck] = (_cn, _cu)
+                    except Exception:
+                        pass
+                    _um_raw, _um_unit = _bili_norma["umumiy"]
+                    nt = f"{select_norma_by_patient(_um_raw, jins, yosh_int) or _um_raw} {_um_unit}".strip()
+                    _bog_raw, _bog_unit = _bili_norma["bog_langan"]
+                    _bog_nt = f"{select_norma_by_patient(_bog_raw, jins, yosh_int) or _bog_raw} {_bog_unit}".strip()
+                    _erk_nt = f"= Umumiy − Bog‘langan {_um_unit}".strip()
                     row_idx += 1  # header qatori (birinchi sub-row shu bo'ladi)
                     row_idx -= 1  # undo – _insert_sub_row o'zi ko'taradi
                     _insert_sub_row("Umumiy bilirubin",    "umumiy",     str(rd.get('umumiy', '')),     nt)
-                    _insert_sub_row("Bog\u2018langan bilirubin", "bog_langan", str(rd.get('bog_langan', '')), nt)
-                    _insert_sub_row("Erkin bilirubin",     "erkin",      str(rd.get('erkin', '')),      nt)
+                    _insert_sub_row("Bog\u2018langan bilirubin", "bog_langan", str(rd.get('bog_langan', '')), _bog_nt)
+                    _insert_sub_row("Erkin bilirubin",     "erkin",      str(rd.get('erkin', '')),      _erk_nt)
 
                 elif is_revmoproba:
                     # 3 ta sub-qator: CRP, RF, ASLO (foydalanuvchi tartibi)
@@ -12729,11 +12820,14 @@ Sana: {_sana_fmt}"""
 
                 elif is_lipid_spektri:
                     # LIPID SPEKTRI: 10 ta sub-qator (4 manual + 6 hisoblangan)
+                    # 4 ta manual komponentning normasi endi DB'dan (tahlillar_norma,
+                    # LIPID_PANEL_MEMBER_IDS orqali) olinadi — avval hardcode qilingan
+                    # matn blankadagi (asosiy) norma bilan mos kelmasdi.
                     rd = _parse_json_result(test_id)
-                    _insert_sub_row("Umumiy xolesterin (TC)",                    "tc",      str(rd.get('tc', '')),      "<5.2 mmol/l")
-                    _insert_sub_row("HDL — Yuqori zichlikli lipoprotein",         "hdl",     str(rd.get('hdl', '')),     "E:≥1.0 / A:≥1.2 mmol/l")
-                    _insert_sub_row("LDL — Past zichlikli lipoprotein",           "ldl",     str(rd.get('ldl', '')),     "<3.0 mmol/l")
-                    _insert_sub_row("Trigliseridlar (TG)",                        "tg",      str(rd.get('tg', '')),      "0.7-1.7 mmol/l")
+                    _insert_sub_row("Umumiy xolesterin (TC)",                    "tc",      str(rd.get('tc', '')),      _panel_norma(43, "<5.2 mmol/l"))
+                    _insert_sub_row("HDL — Yuqori zichlikli lipoprotein",         "hdl",     str(rd.get('hdl', '')),     _panel_norma(124, "E:≥1.0 / A:≥1.2 mmol/l"))
+                    _insert_sub_row("LDL — Past zichlikli lipoprotein",           "ldl",     str(rd.get('ldl', '')),     _panel_norma(123, "<3.0 mmol/l"))
+                    _insert_sub_row("Trigliseridlar (TG)",                        "tg",      str(rd.get('tg', '')),      _panel_norma(44, "0.7-1.7 mmol/l"))
                     _insert_sub_row("VLDL-xolesterin (hisoblangan)",              "vldl",    str(rd.get('vldl', '')),    "0.26-1.04 mmol/l")
                     _insert_sub_row("Non-HDL xolesterin (TC−HDL)",               "non_hdl", str(rd.get('non_hdl', '')), "<3.8 mmol/l")
                     _insert_sub_row("Aterogenlik koeffisienti (KA) — xavf darajasi", "ka",   str(rd.get('ka', '')),      "<3.0 yaxshi / 3-4 xavf / >4 yuqori")
@@ -12769,10 +12863,14 @@ Sana: {_sana_fmt}"""
                                 rd['gfr'] = round(_gfr_tv, 1)
                     except Exception:
                         pass
-                    _insert_sub_row("Mochevina",                               "mochevina",        str(rd.get('mochevina', '')),        "2.5-8.3 mmol/l")
-                    _insert_sub_row("Kreatinin",                               "kreatinin",        str(rd.get('kreatinin', '')),        "E:62-115 / A:53-97 mkmol/l")
-                    _insert_sub_row("Siydik kislotasi",                        "siydik_kislota",   str(rd.get('siydik_kislota', '')),   "E:210-420 / A:150-350 mkmol/l")
-                    _insert_sub_row("Albumin",                                 "albumin",          str(rd.get('albumin', '')),          "35-52 g/l")
+                    # 4 ta manual komponentning normasi DB'dan (tahlillar_norma,
+                    # BUYRAK_PANEL_MEMBER_IDS orqali) olinadi — avval hardcode
+                    # qilingan matn (masalan Kreatinin "E:62-115/A:53-97")
+                    # blankadagi haqiqiy normadan ("E:44-115/A:44-97") farq qilardi.
+                    _insert_sub_row("Mochevina",                               "mochevina",        str(rd.get('mochevina', '')),        _panel_norma(42, "2.5-8.3 mmol/l"))
+                    _insert_sub_row("Kreatinin",                               "kreatinin",        str(rd.get('kreatinin', '')),        _panel_norma(41, "E:62-115 / A:53-97 mkmol/l"))
+                    _insert_sub_row("Siydik kislotasi",                        "siydik_kislota",   str(rd.get('siydik_kislota', '')),   _panel_norma(50, "E:210-420 / A:150-350 mkmol/l"))
+                    _insert_sub_row("Albumin",                                 "albumin",          str(rd.get('albumin', '')),          _panel_norma(35, "35-52 g/l"))
                     _insert_sub_row("Mochevina azoti (BUN, hisoblangan)",        "bun",              str(rd.get('bun', '')),              "1.1-3.9 mmol/l")
                     _insert_sub_row("Mochevina/Kreatinin nisbati",              "bun_cr",           str(rd.get('bun_cr', '')),           "10-20")
                     _insert_sub_row("Umumiy azot miqdori (hisoblangan)",        "umumiy_azot",      str(rd.get('umumiy_azot', '')),      "1.2-4.1 mmol/l")
@@ -12796,7 +12894,7 @@ Sana: {_sana_fmt}"""
                         _st = 'saqlandi' if _q_saved else 'tayyor'
                         _st_txt = "Saqlandi" if _q_saved else "Tayyor"
                     else:
-                        _display = ""
+                        _display = self.NATIJA_HINT_FORM
                         _st = 'kutilmoqda'
                         _st_txt = "Kutilmoqda"
                     self.tests_tree.insert("", tk.END, values=(
@@ -12879,11 +12977,16 @@ Sana: {_sana_fmt}"""
                     # Standart blanka fayl yo'lini keshdan olish (DB so'rovi yo'q)
                     standard_blank_path = _blank_cache.get(test_name, '')
                     
-                    # Norma ustunida shablon fayl yo'lini ko'rsatish (agar standart blanka bo'lsa)
+                    # Norma ustunida standart blanka bo'lsa — to'liq fayl yo'li o'rniga
+                    # tugmaga o'xshash, tushunarli belgi (bosilganda shablon ochiladi;
+                    # on_norma_cell_click yo'lni DB dan oladi, katak matnidan emas)
                     display_norma = norma_text
                     if standard_blank_path:
-                        # Norma ustunida shablon fayl yo'li (to'liq yo'l)
-                        display_norma = standard_blank_path
+                        display_norma = f"▤ [ Standart blanka: {os.path.basename(standard_blank_path)} ]"
+
+                    # Natija bo'sh bo'lsa — hamshira uchun "qanday kiritiladi" ishorasi
+                    if not str(display_result or '').strip():
+                        display_result = self._natija_kirit_hint(test_id, test_name, test)
                     
                     # Status rangini belgilash
                     if status == 'Kutilmoqda':
@@ -14287,9 +14390,10 @@ Sana: {_sana_fmt}"""
         saved_mikro  = result_dict.get('mikroskopiya', {})
 
         # ── LEU + BLD dan avtomatik mikroskopiya hisoblash ────────────────
-        def _calc_auto_mikro(leu_val, bld_val):
+        def _calc_auto_mikro(leu_val, bld_val, nit_val):
             leu = (leu_val or '0').strip().upper()
             bld = (bld_val or '0').strip().upper()
+            nit = (nit_val or '').strip().upper()
 
             # WBC (LEU dan)
             if '+3' in leu or '500' in leu:
@@ -14315,6 +14419,19 @@ Sana: {_sana_fmt}"""
             else:
                 rbcd, rbcu, rbc_red = "1-2", "0-1", False
 
+            # BACT (NIT dan) — nitrit musbat bo'lsa, bakteriuriya ehtimoli
+            # yuqori: mikroskopiyada "+++" (qizil) deb avtomatik belgilanadi.
+            # Bu faqat BOSHLANG'ICH taklif — laborant mikroskopni ko'rib
+            # allaqachon qo'lda kiritgan bo'lsa, o'sha ustun turadi (yuqoridagi
+            # "saved_mikro > auto_mikro" ustuvorligi orqali).
+            nit_manfiy = 'MANFIY' in nit or nit in ('', '0', '-', 'NEG', 'NEGATIVE', 'NEGATIV')
+            nit_musbat = (not nit_manfiy) and (
+                '+' in nit or 'POSITIVE' in nit or 'ПОЛОЖИТЕЛЬНЫЙ' in nit or 'MUSBAT' in nit)
+            if nit_musbat:
+                bact, bact_red = "+++", True
+            else:
+                bact, bact_red = "-", False
+
             return {
                 'SEC':   {'value': '2-3',  'is_red': False},
                 'TEC':   {'value': '-',    'is_red': False},
@@ -14325,13 +14442,14 @@ Sana: {_sana_fmt}"""
                 'CAST':  {'value': '-',    'is_red': False},
                 'MUC':   {'value': '-',    'is_red': False},
                 'CRY':   {'value': '-',    'is_red': False},
-                'BACT':  {'value': '-',    'is_red': False},
+                'BACT':  {'value': bact,   'is_red': bact_red},
                 'YEAST': {'value': '-',    'is_red': False},
             }
 
         leu_raw  = all_analytes.get('LEU', '') or all_analytes.get('leu', '')
         bld_raw  = all_analytes.get('BLD', '') or all_analytes.get('bld', '')
-        auto_mikro = _calc_auto_mikro(leu_raw, bld_raw)
+        nit_raw  = all_analytes.get('NIT', '') or all_analytes.get('nit', '')
+        auto_mikro = _calc_auto_mikro(leu_raw, bld_raw, nit_raw)
 
         # ── Popup oyna ────────────────────────────────────────────────────
         popup = tk.Toplevel(self.root)
@@ -14754,11 +14872,18 @@ Sana: {_sana_fmt}"""
         if not bbox:
             return
         
-        # Entry widget yaratish - kattaroq va ko'rinadigan
-        self.result_entry = ttk.Entry(self.tests_tree, font=("Arial", 11))
+        # Entry widget yaratish - kattaroq va ko'rinadigan.
+        # Chegarasi ANIQ ko'rinsin (to'q sariq ramka + och sariq fon) —
+        # hamshira qayerga yozish kerakligini darhol ko'rsin.
+        self.result_entry = tk.Entry(
+            self.tests_tree, font=("Arial", 11, "bold"),
+            bg="#FFFBE6", fg="#000000", insertbackground="#000000",
+            relief=tk.SOLID, borderwidth=2,
+            highlightthickness=2, highlightbackground="#FF8C00", highlightcolor="#FF8C00",
+        )
         # Katakcha kattaligini biroz kattalashtirish
         entry_width = max(bbox[2], 200)
-        entry_height = max(bbox[3], 25)
+        entry_height = max(bbox[3], 28)
         self.result_entry.place(x=bbox[0], y=bbox[1], width=entry_width, height=entry_height)
         
         # Eski natijani ko'rsatish
@@ -14895,13 +15020,15 @@ Sana: {_sana_fmt}"""
             popup_w = max(bbox[2], 280)
             popup_h = len(options) * ROW_H + 6
 
+            # Chegarasi ANIQ ko'rinsin — inline Entry bilan bir xil to'q sariq ramka
             popup_frame = tk.Frame(
                 self.tests_tree,
                 bg="white",
                 relief=tk.SOLID,
-                borderwidth=1,
-                highlightthickness=1,
-                highlightbackground="#3377CC"
+                borderwidth=2,
+                highlightthickness=2,
+                highlightbackground="#FF8C00",
+                highlightcolor="#FF8C00"
             )
             popup_frame.place(
                 x=bbox[0],
@@ -15223,6 +15350,82 @@ Sana: {_sana_fmt}"""
         self.editing_item = None
         self.editing_test_id = None
     
+    # ── Natija ustuni uchun "qanday kiritiladi" ko'rsatkichi ────────────────
+    # Bo'sh natija katakchasi hamshira uchun tushunarli bo'lishi kerak:
+    # qaysi tahlil qo'lda YOZILADI, qaysi biri ro'yxatdan TANLANADI, qaysi
+    # biri alohida OYNADA kiritiladi, qaysi birini ANALIZATOR to'ldiradi.
+    # Belgilar on_test_cell_edit() dagi yo'naltirish tartibiga mos keladi.
+    # Belgilar yuqoridagi analizator tugmalari bilan BIR XIL: ● Siydik (qizil),
+    # ● Gemotologiya (ko'k), ● Bioximiya (yashil) — hamshira qaysi tugmani
+    # bosishni darhol tushunadi.
+    # Qisqa va sodda — ortiqcha so'zsiz (bachkana bo'lib ketmasin)
+    NATIJA_HINT_TEXT     = "✎  Qo'lda"
+    NATIJA_HINT_SELECT   = "▼  Tanlang"
+    NATIJA_HINT_FORM     = "⧉  Oynada"
+    NATIJA_HINT_BIO      = "✎  Qo'lda   yoki   ● Bioximiya"
+    NATIJA_HINT_FORM_BIO = "✎  Qo'lda   yoki   ● Bioximiya"
+    NATIJA_HINT_URINE    = "● Siydik"
+    NATIJA_HINT_CBC      = "● Gemotologiya"
+    NATIJA_HINT_ANALYZER = "⟳  Analizator"
+
+    def _bk280_tahlil_ids(self):
+        """BK-280 (Bioximiya) analizatori to'ldira oladigan tahlillar ID to'plami
+        (biochemistry_window.LIS_TO_TAHLIL_ID). Bir marta yuklanib keshlanadi."""
+        ids = getattr(self, '_bk280_ids_cache', None)
+        if ids is None:
+            ids = set()
+            try:
+                import biochemistry_window as _bw
+                try:
+                    _bw.load_db_names()
+                except Exception:
+                    pass
+                ids = {v for v in _bw.LIS_TO_TAHLIL_ID.values() if v}
+            except Exception:
+                pass
+            self._bk280_ids_cache = ids
+        return ids
+
+    def _natija_kirit_hint(self, test_id, test_name, test_data):
+        """Bo'sh natija katakchasida ko'rsatiladigan ishora matni."""
+        try:
+            _an = self._get_analyzer_managed_type(test_id)
+            if _an == 'urine':
+                return self.NATIJA_HINT_URINE
+            if _an in ('hematology', 'hematology_cbc'):
+                return self.NATIJA_HINT_CBC
+            if _an:
+                return self.NATIJA_HINT_ANALYZER
+        except Exception:
+            pass
+        tn = (test_name or '').lower()
+        td = test_data or {}
+        type_from_norma = (td.get('type') or '').strip().lower()
+        # Bioximiya: qo'lda ham, BK-280 analizatoridan ham kelishi mumkin
+        _is_bio = ((td.get('test_type') or '').strip().upper() == 'BIO'
+                   or (td.get('tahlil_id') in self._bk280_tahlil_ids()))
+        # 1) Ro'yxatdan tanlanadigan: qon guruhi / ekspress / response_options
+        if type_from_norma == 'blood_group' or any(k in tn for k in ('qon guruhi', 'rezus')):
+            return self.NATIJA_HINT_SELECT
+        _is_ifa = 'ifa' in tn or 'ифа' in tn
+        _norma_has_number = any(ch.isdigit() for ch in (td.get('norma') or ''))
+        _name_is_express = (not _norma_has_number and
+                            any(k in tn for k in ('gepatit', 'hbsag', 'hcv', 'rw', 'sifilis', 'ekspress', 'hiv')))
+        if not _is_ifa and (type_from_norma in ('positive_negative', 'express', 'ekspress') or _name_is_express):
+            return self.NATIJA_HINT_SELECT
+        if (td.get('response_options') or '').strip() and 'revmoproba' not in tn:
+            return self.NATIJA_HINT_SELECT
+        # 2) Alohida oynada kiritiladigan (maxsus forma / ko'p komponentli)
+        FORM_KEYS = ('brutsellez', 'brusellez', 'heddelson', 'xeddelson', 'rayta', 'najas',
+                     'pepsinogen', 'nechiporenko', 'nicheporenko', 'zimnitskiy', 'зимницкий',
+                     'spermogramma', 'torch', 'urologik', 'mujskoy', 'erkaklar', 'mazok',
+                     'surtma', 'ginekolog', 'uzi', 'узи', 'revmoproba', 'bilirubin',
+                     'koagulogramma', 'koagul', 'protrombin', 'prothrombin', 'pt/mno')
+        if any(k in tn for k in FORM_KEYS) or _is_gtt_test(tn):
+            return self.NATIJA_HINT_FORM_BIO if _is_bio else self.NATIJA_HINT_FORM
+        # 3) Oddiy — to'g'ridan-to'g'ri yoziladi (bioximiya bo'lsa analizatordan ham)
+        return self.NATIJA_HINT_BIO if _is_bio else self.NATIJA_HINT_TEXT
+
     def refresh_single_test_display(self, item, test_id):
         """Bitta tahlilni jadvalda yangilash"""
         try:
@@ -15307,6 +15510,10 @@ Sana: {_sana_fmt}"""
                         norma_text = "Natijani ko'rish"
                 except Exception:
                     pass
+
+            # Natija bo'sh bo'lsa — hamshira uchun "qanday kiritiladi" ishorasi
+            if not str(display_result or '').strip():
+                display_result = self._natija_kirit_hint(test_id, test_name, test_data)
 
             # Qatorni yangilash
             self.tests_tree.item(item, values=(
@@ -16262,8 +16469,18 @@ Sana: {_sana_fmt}"""
             """old_result yoki default bo'sh string"""
             return str(old.get(key, '') or '')
 
+        # CBC JSON'da ba'zi kalitlar HL7 nomi bilan emas, DB nomi bilan saqlanadi
+        # (hematology_window.HL7_TO_DB_NAME): LYM% -> Lymph%, MID% -> Mid%, GRAN% -> Gran% va h.k.
+        _CBC_KOD_ALIAS = {
+            'LYM#': 'Lymph#', 'LYM%': 'Lymph%',
+            'MID#': 'Mid#',   'MID%': 'Mid%',
+            'GRAN#': 'Gran#', 'GRAN%': 'Gran%',
+        }
+
         def _cbc_val(kod):
             v = cbc.get(kod)
+            if v is None:
+                v = cbc.get(_CBC_KOD_ALIAS.get(kod, ''))
             if v is None: return ''
             try: return f"{float(v):.2f}".rstrip('0').rstrip('.')
             except: return str(v)
@@ -21597,6 +21814,20 @@ Sana: {_sana_fmt}"""
                 f"✅ Siydik: natijalar {count} ta testga o'tkazildi "
                 f"({patient_info.get('name', display_id)}) — bazaga saqlash uchun F2 bosing"
             )
+            # Cho'kma MIKROSKOPIYASI oynasini DARHOL avtomatik ochamiz —
+            # aks holda laborant mikroskopiyani kiritmasdan blanka chop etib
+            # yuborishi mumkin (cho'kma "-"/"manfiy" bo'lib ketardi). Kimyoviy
+            # natija bilan birga mikroskopiya ham shu zahoti kiritiladi.
+            # after() orqali — URIT-50 oynasi yopilib bo'lgach ochilsin
+            # (popup grab_set() bilan ziddiyat bo'lmasligi uchun).
+            _first_tid, _first_name, _first_json = plan[0]
+            def _open_mikro_popup(tid=_first_tid, tname=_first_name, rjson=_first_json):
+                try:
+                    rd = json.loads(rjson)
+                    self._show_urine_mikroskopiya_popup(tid, tname, rd)
+                except Exception as _e:
+                    print(f"[SIYDIK] Mikroskopiya oynasini avtomatik ochib bo'lmadi: {_e}")
+            self.root.after(300, _open_mikro_popup)
         return count
 
 
