@@ -360,6 +360,67 @@ def get_db_name(lis_code, analyzer_name):
     return analyzer_name if analyzer_name else f"Kod:{lis_code}"
 
 
+def _lookup_patient_jins_yosh(sample_id):
+    """Sample_id orqali buyurtma/bemorni topib, jinsi va yoshini qaytaradi
+    (gender/age-mos norma tanlash uchun — asosiy oyna/blanka shu ma'lumotdan
+    foydalanadi, RAW oynasi esa buni bilmagani uchun normalar farq qilardi)."""
+    if not sample_id or not DB_AVAILABLE:
+        return '', None
+    conn = db_conn()
+    if not conn:
+        return '', None
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("""
+            SELECT b.yosh, b.jins FROM orders o
+            INNER JOIN bemorlar b ON o.bemor_id = b.id
+            WHERE o.sample_id = %s
+            ORDER BY o.sana_vaqt DESC LIMIT 1
+        """, (sample_id,))
+        row = cur.fetchone()
+        if row:
+            return (row.get('jins') or ''), row.get('yosh')
+    except Exception:
+        pass
+    finally:
+        try: conn.close()
+        except Exception: pass
+    return '', None
+
+
+_LAB_NORMA_CACHE = {}
+
+def _lookup_lab_norma(tahlil_id, jins='', yosh=None):
+    """
+    Asosiy ekran va blankada ishlatiladigan LABORATORIYA normasini oladi
+    (monoblok_dastur.get_test_norma → tahlillar_norma jadvali).
+
+    MUHIM: BK-280 HL7 faylida keladigan 'ref' — analizatorning O'Z ZAVOD
+    ma'lumotnomasi (masalan AST uchun 0-40), bu AzizMedLine laboratoriyasi
+    o'zi sozlagan normadan (masalan 0-35) farq qilishi mumkin. Shu farq
+    tufayli RAW oynasi, asosiy ekran va blanka turli norma ko'rsatib kelgan.
+    Bu funksiya DB normasini ustuvor qiladi — barcha oynalarda bir xil
+    ko'rinishi uchun; DB'da topilmasa (tahlil_id yo'q yoki norma kiritilmagan)
+    None qaytaradi va chaqiruvchi tomon analizator normasiga (ref) qaytadi.
+    """
+    if not tahlil_id:
+        return None
+    cache_key = (tahlil_id, jins or '', yosh)
+    if cache_key in _LAB_NORMA_CACHE:
+        return _LAB_NORMA_CACHE[cache_key]
+    norma = None
+    try:
+        from monoblok_dastur import get_test_norma  # aylanma import — funksiya ichida, lazy
+        info = get_test_norma('', jins=jins or '', guruh='BIO', yosh=yosh, tahlil_id=tahlil_id)
+        _norma = (info or {}).get('norma', '')
+        if _norma and str(_norma).strip() not in ('', '-'):
+            norma = str(_norma).strip()
+    except Exception:
+        norma = None
+    _LAB_NORMA_CACHE[cache_key] = norma
+    return norma
+
+
 def open_window(parent=None, on_import_callback=None):
     """Bioximiya oynasini ochish.
     on_import_callback(sample_id, patient_info) → int  — asosiy oynaga natija o'tkazish uchun
@@ -524,6 +585,10 @@ def open_window(parent=None, on_import_callback=None):
         tests = patients_data[sid].get('tests', {})
         edits = edited_values.get(sid, {})
 
+        # Bemorning jinsi/yoshi — asosiy ekran/blanka bilan bir xil (gender-mos)
+        # normani ko'rsatish uchun (masalan Kreatinin: Erkak/Ayol boshqacha)
+        _jins, _yosh = _lookup_patient_jins_yosh(sid)
+
         # ── Kritik natija tekshiruvi (nom bo'yicha qizil qilinadigan qatorlar) ──
         crit_names = set()
         if critical_alert is not None:
@@ -556,6 +621,11 @@ def open_window(parent=None, on_import_callback=None):
                     display_value = value
                     row_tag       = "normal_res"
             ref = t.get('ref', '').replace('~', ' - ')
+            # Laboratoriya (DB) normasi bor bo'lsa — ustuvor (asosiy ekran/blanka
+            # bilan bir xil bo'lishi uchun); topilmasa analizator normasiga (ref) qaytamiz
+            lab_norma = _lookup_lab_norma(t.get('tahlil_id'), _jins, _yosh)
+            if lab_norma:
+                ref = lab_norma
             if t.get('name', '') in crit_names:
                 row_tag = "critical"
             rtree.insert("", tk.END, values=(
