@@ -80,7 +80,7 @@
  {
   "guruh": "IFA",
   "tahlil_nomi": "Anti HBsAg (Antitelo) immunitet  IFA  ИФА",
-  "norma": "0.0-10.01 Manfiy(-), >10 Musbat (+)",
+  "norma": ">10.0 Musbat (+), 0-10.0 Manfiy (-)",
   "birlik": "mME/ml",
   "type": "numeric",
   "min_val": 0.0,
@@ -184,7 +184,7 @@
  {
   "guruh": "IFA",
   "tahlil_nomi": "AT-TPO IFA",
-  "norma": "Erkak: 0.0-30.0, Ayol: 0.0-30.0, >50 yosh Ayol: 0.0-50.0",
+  "norma": "Erkak: 0.0-30.0, Ayol: 0.0-50.0, >50 yosh Ayol: 0.0-50.0",
   "birlik": "",
   "type": "numeric",
   "min_val": null,
@@ -223,6 +223,19 @@
  {
   "guruh": "BIO",
   "tahlil_nomi": "Bilirubin",
+  "norma": "",
+  "birlik": "",
+  "type": "numeric",
+  "min_val": null,
+  "max_val": null,
+  "min_val_m": null,
+  "max_val_m": null,
+  "min_val_f": null,
+  "max_val_f": null
+ },
+ {
+  "guruh": "TEST",
+  "tahlil_nomi": "Brutselyoz (Reaktsiya Xedelson +  Rayta)",
   "norma": "",
   "birlik": "",
   "type": "numeric",
@@ -431,7 +444,7 @@
  {
   "guruh": "IFA",
   "tahlil_nomi": "Gepatit A (IgG, IFA) ИФА",
-  "norma": "0-20 Manfiy (-), 20-200 Musbat (+)",
+  "norma": "0-20 Manfiy (-), >20 Musbat (+)",
   "birlik": "Ed/l",
   "type": "numeric",
   "min_val": 0.0,
@@ -457,7 +470,7 @@
  {
   "guruh": "IFA",
   "tahlil_nomi": "Gepatit B (HBsAg, IFA ИФА)",
-  "norma": "0-1.00 Manfiy (-), 1.1-40 Musbat (+)",
+  "norma": "0-1.0 Manfiy (-), >1.0 Musbat (+)",
   "birlik": "",
   "type": "numeric",
   "min_val": 0.0,
@@ -470,7 +483,7 @@
  {
   "guruh": "IFA",
   "tahlil_nomi": "Gepatit C (Anti-HCV, IFA ИФА)",
-  "norma": "0-1.00 Manfiy (-), 1.1-40 Musbat (+)",
+  "norma": "0-1.0 Manfiy (-), >1.0 Musbat (+)",
   "birlik": "",
   "type": "numeric",
   "min_val": 0.0,
@@ -483,7 +496,7 @@
  {
   "guruh": "TEST",
   "tahlil_nomi": "Gepatit C (HCV-Ab, ekspress)",
-  "norma": "Manfiy  (-)",
+  "norma": "Manfiy (-)",
   "birlik": "",
   "type": "numeric",
   "min_val": null,
@@ -496,7 +509,7 @@
  {
   "guruh": "IFA",
   "tahlil_nomi": "Gepatit D (D-antitela, IFA ИФА)",
-  "norma": "1.1-10.00  Manfiy (-),  0-1  Musbat (+)",
+  "norma": "0-1.0 Musbat (+), >1.0 Manfiy (-)",
   "birlik": "indeks (teskari reaksiya)",
   "type": "numeric",
   "min_val": 1.1,
@@ -678,7 +691,7 @@
  {
   "guruh": "IFA",
   "tahlil_nomi": "Helicobakter pylori IgG IFA ИФА",
-  "norma": "0-0.9 Manfiy (-)\n0.9-1.1 Shubhali (chegaraviy) - qayta tekshirish\n1.1-999 Musbat (+)",
+  "norma": "0-0.9 Manfiy (-)\n0.9-1.1 Shubhali (chegaraviy) - qayta tekshirish\n>1.1 Musbat (+)",
   "birlik": "Ed/l",
   "type": "hormone",
   "min_val": null,
@@ -912,7 +925,7 @@
  {
   "guruh": "",
   "tahlil_nomi": "LDG",
-  "norma": "207-414",
+  "norma": "207-417",
   "birlik": "Ед/л",
   "type": "numeric",
   "min_val": 207.0,
@@ -1054,6 +1067,19 @@
  },
  {
   "guruh": "TEST",
+  "tahlil_nomi": "Mujskoy mazok (Erkaklar surtmasi)",
+  "norma": "",
+  "birlik": "",
+  "type": "numeric",
+  "min_val": null,
+  "max_val": null,
+  "min_val_m": null,
+  "max_val_m": null,
+  "min_val_f": null,
+  "max_val_f": null
+ },
+ {
+  "guruh": "TEST",
   "tahlil_nomi": "Najac tahlili (Gijja uchun)",
   "norma": "",
   "birlik": "",
@@ -1119,8 +1145,34 @@
  },
  {
   "guruh": "IFA",
+  "tahlil_nomi": "Pepsinogen I (PGI) IFA",
+  "norma": "30-130",
+  "birlik": "mkg/l",
+  "type": "numeric",
+  "min_val": null,
+  "max_val": null,
+  "min_val_m": null,
+  "max_val_m": null,
+  "min_val_f": null,
+  "max_val_f": null
+ },
+ {
+  "guruh": "IFA",
+  "tahlil_nomi": "Pepsinogen II (PGII) IFA",
+  "norma": "4-22",
+  "birlik": "mkg/l",
+  "type": "numeric",
+  "min_val": null,
+  "max_val": null,
+  "min_val_m": null,
+  "max_val_m": null,
+  "min_val_f": null,
+  "max_val_f": null
+ },
+ {
+  "guruh": "IFA",
   "tahlil_nomi": "prog",
-  "norma": "Erkak: 0.0-4.0, 1-trimestr: 36.0-240.0, 2-trimestr: 60.0-240.0, 3-trimestr: 156.0-722.0, Follikulyar: 0.6-4.6, Ovulyatsiya: 7.5-80.0, Lyutein: 11.0-80.0, Menopauza: 0.0-2.3, 12-17 yosh: 0.3-4.3",
+  "norma": "Erkak: 0.0-4.0, 1-trimestr: 36.0-240.0, 2-trimestr: 60.0-240.0, 3-trimestr: 156.0-722.0, Follikulyar: 0.6-4.6, Ovulyatsiya: 11.0-80.0, Lyutein: 7.5-80.0, Menopauza: 0.0-2.3, 12-17 yosh: 0.3-4.3",
   "birlik": "nmol/l",
   "type": "numeric",
   "min_val": null,
@@ -1183,6 +1235,19 @@
   "max_val_f": null
  },
  {
+  "guruh": "COAG",
+  "tahlil_nomi": "Protrombin Time (PTI, PT/MNO)",
+  "norma": "",
+  "birlik": "",
+  "type": "numeric",
+  "min_val": null,
+  "max_val": null,
+  "min_val_m": null,
+  "max_val_m": null,
+  "min_val_f": null,
+  "max_val_f": null
+ },
+ {
   "guruh": "TEST",
   "tahlil_nomi": "Qo'tir kanasi aniqlash",
   "norma": "Aniqlanmadi",
@@ -1198,6 +1263,19 @@
  {
   "guruh": "GEM",
   "tahlil_nomi": "Qon guruhi va rezus faktorini aniqlash",
+  "norma": "",
+  "birlik": "",
+  "type": "numeric",
+  "min_val": null,
+  "max_val": null,
+  "min_val_m": null,
+  "max_val_m": null,
+  "min_val_f": null,
+  "max_val_f": null
+ },
+ {
+  "guruh": "GEM",
+  "tahlil_nomi": "Qondan mazok (morfologiya) ko'rish",
   "norma": "",
   "birlik": "",
   "type": "numeric",
@@ -1311,6 +1389,19 @@
   "max_val_m": 420.0,
   "min_val_f": 150.0,
   "max_val_f": 350.0
+ },
+ {
+  "guruh": "TEST",
+  "tahlil_nomi": "Spermogramma",
+  "norma": "",
+  "birlik": "",
+  "type": "numeric",
+  "min_val": null,
+  "max_val": null,
+  "min_val_m": null,
+  "max_val_m": null,
+  "min_val_f": null,
+  "max_val_f": null
  },
  {
   "guruh": "",
@@ -1445,7 +1536,7 @@
  {
   "guruh": "IFA",
   "tahlil_nomi": "Testesteron IFA ИФА",
-  "norma": "12-19 yosh Erkak: 1.0-38.0, 40-55 yosh Erkak: 6.9-21.0, >55 yosh Erkak: 5.9-18.1, <18 yosh Ayol: 0.2-2.5, >18 yosh Ayol: 0.0-4.6",
+  "norma": "12-19 yosh Erkak: 1.0-38.0, 20-39 yosh Erkak: 8.6-29.0, 40-55 yosh Erkak: 6.9-21.0, >55 yosh Erkak: 5.9-18.1, <18 yosh Ayol: 0.2-2.5, >18 yosh Ayol: 0.0-4.6",
   "birlik": "nmol/l",
   "type": "numeric",
   "min_val": 12.0,
@@ -1495,6 +1586,19 @@
   "max_val_f": null
  },
  {
+  "guruh": "TEST",
+  "tahlil_nomi": "TORCH test IgM va IgG (to'liq)",
+  "norma": "",
+  "birlik": "",
+  "type": "numeric",
+  "min_val": null,
+  "max_val": null,
+  "min_val_m": null,
+  "max_val_m": null,
+  "min_val_f": null,
+  "max_val_f": null
+ },
+ {
   "guruh": "",
   "tahlil_nomi": "Trigliserid",
   "norma": "-",
@@ -1534,6 +1638,19 @@
   "max_val_f": null
  },
  {
+  "guruh": "TEST",
+  "tahlil_nomi": "Troponin I",
+  "norma": "Manfiy (-)",
+  "birlik": "",
+  "type": "numeric",
+  "min_val": null,
+  "max_val": null,
+  "min_val_m": null,
+  "max_val_m": null,
+  "min_val_f": null,
+  "max_val_f": null
+ },
+ {
   "guruh": "IFA",
   "tahlil_nomi": "Troponin I miqdoriy  ИФА",
   "norma": "0.000-0.100 Manfiy (-), 0.101-0.400 Shubhali — 3 soatdan keyin takrorlash, >0.400 Musbat (+)",
@@ -1541,6 +1658,19 @@
   "type": "hormone",
   "min_val": null,
   "max_val": 0.1,
+  "min_val_m": null,
+  "max_val_m": null,
+  "min_val_f": null,
+  "max_val_f": null
+ },
+ {
+  "guruh": "TEST",
+  "tahlil_nomi": "Troponin I test",
+  "norma": "Manfiy (-)",
+  "birlik": "",
+  "type": "numeric",
+  "min_val": null,
+  "max_val": null,
   "min_val_m": null,
   "max_val_m": null,
   "min_val_f": null,
@@ -1601,7 +1731,7 @@
  {
   "guruh": "IFA",
   "tahlil_nomi": "Umumiy PSA IFA ИФА",
-  "norma": "<40 yosh Erkak: 0.0-4.0, 41-60 yosh Erkak: 0.0-5.5, 61< yosh Erkak: 0.0-7.0, >40 yosh Ayol: 0.0-0.45",
+  "norma": "0-40 yosh Erkak: 0.0-4.0, 41-60 yosh Erkak: 0.0-5.5, 61< yosh Erkak: 0.0-7.0, Ayol: 0.0-0.45",
   "birlik": "ng/ml",
   "type": "numeric",
   "min_val": null,
@@ -1926,7 +2056,7 @@
  {
   "guruh": "",
   "tahlil_nomi": "ЛДГ",
-  "norma": "207-414",
+  "norma": "207-417",
   "birlik": "Ед/л",
   "type": "numeric",
   "min_val": 207.0,
