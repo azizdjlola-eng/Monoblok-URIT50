@@ -255,5 +255,24 @@
     "sound": true,
     "popup": true,
     "alert_on_warn": false
+  },
+  "gemotologiya": {
+    "enabled": true,
+    "check_interval_min": 5,
+    "delay_alert_min": 60,
+    "morning_check_time": "08:20",
+    "heartbeat_timeout_sec": 30,
+    "repeat_alert_min": 30,
+    "cbc_tahlil_ids": [
+      27
+    ],
+    "cbc_name_parts": [
+      "qonning umumiy",
+      "umumiy qon"
+    ],
+    "work_start": "07:00",
+    "work_end": "19:00",
+    "sound": true,
+    "popup": true
   }
 }
