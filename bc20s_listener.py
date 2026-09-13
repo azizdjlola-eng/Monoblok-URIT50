@@ -63,9 +63,43 @@ _connected       = False
 _lock            = threading.Lock()
 
 # ─────────────────────────── LOGGING ──────────────────────────
+# Loglar konsolga VA faylga yoziladi: logs/bc20s_YYYYMMDD.log
+# (dastur "start /min" bilan ochilgani uchun konsol ko'rinmaydi — 12.09.2026 da
+#  "natija tushmayapti" muammosini tekshirganda hech qanday iz qolmagan edi).
+_LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+_last_rx_time = None      # analizatordan oxirgi bayt (heartbeat ham) kelgan vaqt
+_last_result_time = None  # oxirgi ORU^R01 (natija) kelgan vaqt
+
+# Konsolga yozish ALOHIDA oqimda: Windows konsoli (QuickEdit da matn belgilansa)
+# print() ni cheksiz bloklaydi — 12.09.2026 da shu sabab ulanish oqimi birinchi
+# _log() da qotib, analizatorga umuman ulanmagan. Fayl log — to'g'ridan-to'g'ri.
+import queue as _queue
+_print_q = _queue.Queue()
+
+def _console_printer():
+    while True:
+        line = _print_q.get()
+        try:
+            print(line, flush=True)
+        except Exception:
+            pass
+
+threading.Thread(target=_console_printer, daemon=True, name="bc20s-log").start()
+
 def _log(msg):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[BC-20S {ts}] {msg}", flush=True)
+    line = f"[BC-20S {ts}] {msg}"
+    try:
+        os.makedirs(_LOG_DIR, exist_ok=True)
+        fpath = os.path.join(_LOG_DIR, f"bc20s_{datetime.now().strftime('%Y%m%d')}.log")
+        with open(fpath, "a", encoding="utf-8", errors="replace") as fh:
+            fh.write(line + "\n")
+    except Exception:
+        pass
+    try:
+        _print_q.put_nowait(line)
+    except Exception:
+        pass
 
 # ─────────────────────────── MLLP ─────────────────────────────
 def _wrap_mllp(hl7: str) -> bytes:
@@ -587,7 +621,7 @@ _msg_counter = [1]
 
 def _process_message(message: str, sock: socket.socket):
     """Kelgan HL7 xabarni qayta ishlash"""
-    global _result_callback
+    global _result_callback, _last_result_time
 
     msh_line = message.split("\r")[0] if "\r" in message else message[:200]
 
@@ -626,6 +660,7 @@ def _process_message(message: str, sock: socket.socket):
 
     # ── ORU^R01 — Natija ──────────────────────────────────────
     elif "ORU^R01" in msh_line or "ORU" in msh_line:
+        _last_result_time = datetime.now()
         _log("◄ ORU^R01 (Natija) qabul qilindi")
         msg_id = _extract_msg_id(message)
 
@@ -705,7 +740,7 @@ def _client_loop(ip: str, port: int):
       3. Uzilsa → qayta ulanish (cheksiz)
     Bu URIT siydik analizatori kabi — ma'lumot HECH QACHON yo'qolmaydi.
     """
-    global _running, _socket, _connected
+    global _running, _socket, _connected, _last_rx_time
 
     _log(f"BC-20S client ishga tushdi — analizator: {ip}:{port}")
 
@@ -754,6 +789,8 @@ def _client_loop(ip: str, port: int):
                         # Socket yopilgan
                         _log("Analizator ulanishni yopdi (no data)")
                         break
+
+                    _last_rx_time = datetime.now()
 
                     # Heartbeat — analizator har 3 soniyada \x02 yuboradi
                     if data == HEARTBEAT:
@@ -845,6 +882,15 @@ def stop_bc20s_listener():
 
 def is_running() -> bool:
     return _running and _client_thread is not None and _client_thread.is_alive()
+
+def get_status() -> dict:
+    """Diagnostika: ulanish holati, oxirgi heartbeat va oxirgi natija vaqti."""
+    return {
+        "running":     is_running(),
+        "connected":   _connected,
+        "last_rx":     _last_rx_time,
+        "last_result": _last_result_time,
+    }
 
 # ─────────────────────────── STANDALONE TEST ──────────────────
 if __name__ == "__main__":

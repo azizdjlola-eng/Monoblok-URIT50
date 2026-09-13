@@ -15,6 +15,21 @@ import sys
 import io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
+# Konsol "QuickEdit" rejimini O'CHIRISH. 12.09.2026: qora konsol oynasida sichqoncha
+# bilan bosilganda Windows barcha chiqishni to'xtatadi va print() qilgan HAR BIR
+# oqim (BC-20S ulanish oqimi ham) muzlab qoladi — analizator ulanmay qolgan edi.
+try:
+    if sys.platform == "win32":
+        import ctypes
+        _k32 = ctypes.windll.kernel32
+        _hin = _k32.GetStdHandle(-10)  # STD_INPUT_HANDLE
+        _mode = ctypes.c_uint()
+        if _k32.GetConsoleMode(_hin, ctypes.byref(_mode)):
+            # ENABLE_EXTENDED_FLAGS=0x80 bilan ENABLE_QUICK_EDIT_MODE=0x40 ni olib tashlaymiz
+            _k32.SetConsoleMode(_hin, (_mode.value | 0x80) & ~0x40)
+except Exception:
+    pass
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 from datetime import datetime
@@ -117,6 +132,16 @@ except ImportError as e:
     print(f"[OGOHLANTIRISH] OneDrive monitor import qilinmadi: {e}")
     onedrive_monitor = None
     ONEDRIVE_MONITOR_AVAILABLE = False
+
+# Gemotologiya (BC-20S) natija kelishini nazorat qilish — analizator "jim"
+# natija yubormay qo'ysa (12.09.2026 holati) ovoz + popup bilan ogohlantiradi
+try:
+    import gemo_monitor
+    GEMO_MONITOR_AVAILABLE = True
+except ImportError as e:
+    print(f"[OGOHLANTIRISH] Gemo monitor import qilinmadi: {e}")
+    gemo_monitor = None
+    GEMO_MONITOR_AVAILABLE = False
 
 # Sifat Nazorati (QC) moduli
 try:
@@ -9588,6 +9613,22 @@ class MonoblokApp:
                 print(f"   [XATO] OneDrive nazoratida xato: {e}")
                 services_status['OneDrive'] = False
 
+            # 6. Gemotologiya natija nazorati
+            #    Analizator ulangan-u natija yubormasa (avtопередача o'chgan),
+            #    tartib buzilsa (bio/siydik keldi, qon yo'q), 1 soat kechiksa
+            #    yoki 08:20 gacha hech narsa kelmasa — ovoz + popup.
+            print("\n🩸 6. Gemotologiya natija nazoratini yoqyapman...")
+            try:
+                gm_ok = self.start_gemo_monitor()
+                services_status['Gemo nazorat'] = gm_ok
+                if gm_ok:
+                    print("   [OK] Gemotologiya nazorati yoqildi")
+                else:
+                    print("   [OGOHLANTIRISH] Gemotologiya nazorati yoqilmadi")
+            except Exception as e:
+                print(f"   [XATO] Gemotologiya nazoratida xato: {e}")
+                services_status['Gemo nazorat'] = False
+
             # Statusni yangilash
             successful_services = [name for name, ok in services_status.items() if ok]
             failed_services = [name for name, ok in services_status.items() if not ok]
@@ -9900,63 +9941,61 @@ class MonoblokApp:
         # qayta ulanardi — aynan shuning uchun "DB test qilgandan keyin qidiruv
         # ishlab ketadi" degan holat yuzaga kelgan edi.
     
-    def stop_existing_urit50_processes(self):
-        """Mavjud URIT-50 jarayonlarini to'xtatish"""
+    def _find_urit50_pids(self):
+        """COM4_Urit50_to_Blank... skriptini bajarayotgan python jarayonlarining PID ro'yxati.
+
+        DIQQAT: `tasklist` faqat "python.exe" ni ko'rsatadi, buyruq satrini EMAS —
+        shuning uchun ilgari skript nomi hech qachon topilmas, eski jarayon
+        o'ldirilmas edi (12.09.2026: 07:28 dagi yetim jarayon COM4 ni ushlab
+        turib, yangi jarayon "Отказано в доступе" olgan). CIM orqali buyruq
+        satri bilan qidiriladi.
+        """
+        pids = []
         try:
-            # Python jarayonlarini topish
+            ps_cmd = ("Get-CimInstance Win32_Process -Filter \"Name='python.exe' or Name='pythonw.exe'\" | "
+                      "Where-Object { $_.CommandLine -like '*COM4_Urit50*' } | "
+                      "ForEach-Object { $_.ProcessId }")
             result = subprocess.run(
-                ['tasklist', '/FI', 'IMAGENAME eq python.exe'],
-                capture_output=True,
-                text=True,
+                ['powershell', '-NoProfile', '-Command', ps_cmd],
+                capture_output=True, text=True, timeout=20,
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
-            
-            script_name = "COM4_Urit50"
-            lines = result.stdout.split('\n')
+            for line in result.stdout.split('\n'):
+                line = line.strip()
+                if line.isdigit() and int(line) != os.getpid():
+                    pids.append(int(line))
+        except Exception as e:
+            print(f"[OGOHLANTIRISH] URIT-50 jarayonlarini qidirishda xato: {e}")
+        return pids
+
+    def stop_existing_urit50_processes(self):
+        """Mavjud (eski/yetim) URIT-50 jarayonlarini to'xtatish — COM4 bo'shasin"""
+        try:
             stopped_count = 0
-            
-            for line in lines:
-                if script_name in line or 'COM4_Urit50' in line:
-                    # PID ni ajratish
-                    parts = line.split()
-                    if len(parts) > 1:
-                        try:
-                            pid = int(parts[1])
-                            # Jarayonni to'xtatish
-                            subprocess.run(
-                                ['taskkill', '/PID', str(pid), '/F'],
-                                capture_output=True,
-                                creationflags=subprocess.CREATE_NO_WINDOW
-                            )
-                            stopped_count += 1
-                            print(f"[OK] Eski URIT-50 jarayoni to'xtatildi (PID: {pid})")
-                            time.sleep(0.5)  # Kichik kutish
-                        except:
-                            pass
-            
+            for pid in self._find_urit50_pids():
+                try:
+                    subprocess.run(
+                        ['taskkill', '/PID', str(pid), '/F'],
+                        capture_output=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW
+                    )
+                    stopped_count += 1
+                    print(f"[OK] Eski URIT-50 jarayoni to'xtatildi (PID: {pid})")
+                    time.sleep(0.5)  # Kichik kutish
+                except Exception:
+                    pass
+
             if stopped_count > 0:
-                time.sleep(1)  # Jarayonlar to'xtash uchun kutish
-                
+                time.sleep(1)  # Jarayonlar to'xtash (COM4 bo'shash) uchun kutish
+
         except Exception as e:
             print(f"[OGOHLANTIRISH] Eski jarayonlarni to'xtatishda xato: {e}")
-    
+
     def verify_urit50_running(self):
         """URIT-50 to'g'ri ishlayaptimi tekshirish"""
         try:
-            # Python jarayonlarini tekshirish
-            result = subprocess.run(
-                ['tasklist', '/FI', 'IMAGENAME eq python.exe'],
-                capture_output=True,
-                text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW
-            )
-            
-            script_name = "COM4_Urit50"
-            if script_name in result.stdout:
-                # Jarayon mavjud
-                return True
-            return False
-        except:
+            return len(self._find_urit50_pids()) > 0
+        except Exception:
             return False
     
     def start_urit50_service(self):
@@ -10240,6 +10279,126 @@ class MonoblokApp:
     #  OneDrive jimgina ishdan chiqsa hech qanday xato chiqmaydi, natija esa
     #  bulutga chiqmay qoladi (bir necha bor soatlab sezilmagan).
     # ══════════════════════════════════════════════════════════════════════
+    # ══════════════════════════════════════════════════════════════════════
+    #  GEMOTOLOGIYA NATIJA NAZORATI (gemo_monitor.py)
+    #  12.09.2026: analizator ulangan, heartbeat kelgan, lekin natija bir kun
+    #  tushmagan — hech kim sezmagan. Endi 3 qoida + ulanish tekshiruvi.
+    # ══════════════════════════════════════════════════════════════════════
+    def start_gemo_monitor(self) -> bool:
+        if not GEMO_MONITOR_AVAILABLE:
+            print("[OGOHLANTIRISH] Gemo monitor moduli mavjud emas (gemo_monitor.py)")
+            return False
+        try:
+            if getattr(self, "gemo_watcher", None):
+                return True
+            self.gemo_watcher = gemo_monitor.GemoWatcher(
+                on_alert=lambda res: self.root.after(0, lambda r=res: self._gemo_alert(r)),
+                on_status=lambda res: self.root.after(0, lambda r=res: self._gemo_status_update(r)),
+            )
+            # Birinchi tekshiruv 2 daqiqadan keyin — listener ulanib olsin
+            return bool(self.gemo_watcher.start(first_delay_sec=120))
+        except Exception as e:
+            print(f"[XATO] Gemotologiya nazoratini yoqishda xato: {e}")
+            return False
+
+    def _gemo_status_update(self, res):
+        """Har tekshiruvdan keyin tugma rangi/matnini yangilash (UI oqimi)."""
+        try:
+            self._gemo_last = res
+            btn = getattr(self, "gemo_btn", None)
+            if not btn:
+                return
+            if res.get("level", "ok") == "ok":
+                btn.config(text="🩸 Qon ✓", bg="#DFF5DF", activebackground="#DFF5DF",
+                           fg="#005500")
+            else:
+                btn.config(text="🩸 Qon ✗", bg="#F8B4B4", activebackground="#F8B4B4",
+                           fg="#8B0000")
+        except Exception as e:
+            print(f"[GemoNazorat] Holat tugmasini yangilashda xato: {e}")
+
+    def _gemo_alert(self, res):
+        """Muammo topilganda ovoz + popup (UI oqimi)."""
+        try:
+            cfg = gemo_monitor.load_config()
+            if cfg.get("sound", True):
+                try:
+                    import critical_alert
+                    critical_alert.play_alert_sound()
+                except Exception:
+                    try:
+                        import winsound
+                        winsound.MessageBeep(-1)
+                    except Exception:
+                        pass
+            self.status_var.set("[OGOHLANTIRISH] " + res.get("summary", "Gemotologiya natija muammosi"))
+            if not cfg.get("popup", True):
+                return
+            body = (gemo_monitor.format_report(res) + "\n\n"
+                    "Ulanishni tekshiring: kabel / analizator LIS sozlamasi\n"
+                    "(Настройка → Связь → Автопередача). Kelmagan natijalarni\n"
+                    "analizatorda Обзор → Передать bilan qayta yuboring.")
+            messagebox.showwarning("⚠ GEMOTOLOGIYA — QON NATIJASI KELMAYAPTI",
+                                   body, parent=self.root)
+        except Exception as e:
+            print(f"[GemoNazorat] Ogohlantirishda xato: {e}")
+
+    def open_gemo_status(self):
+        """Gemotologiya nazorati oynasi — batafsil hisobot va qayta tekshirish."""
+        if not GEMO_MONITOR_AVAILABLE:
+            messagebox.showwarning("Gemotologiya", "gemo_monitor.py topilmadi.", parent=self.root)
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title("🩸 Gemotologiya — natija kelishi nazorati")
+        win.geometry("820x560")
+        win.transient(self.root)
+
+        head = ttk.Label(win, text="Tekshirilmoqda...", font=("Arial", 11, "bold"))
+        head.pack(anchor="w", padx=12, pady=(10, 4))
+
+        txt = scrolledtext.ScrolledText(win, font=("Consolas", 10), wrap=tk.WORD)
+        txt.pack(fill=tk.BOTH, expand=True, padx=12, pady=4)
+
+        btns = ttk.Frame(win)
+        btns.pack(fill=tk.X, padx=12, pady=10)
+
+        def _render(res):
+            head.config(text=res.get("summary", ""),
+                        foreground="#005500" if res.get("level") == "ok" else "#8B0000")
+            txt.config(state=tk.NORMAL)
+            txt.delete("1.0", tk.END)
+            txt.insert("1.0", gemo_monitor.format_report(res))
+            txt.config(state=tk.DISABLED)
+
+        def _refresh():
+            head.config(text="Tekshirilmoqda...", foreground="#333333")
+            def _work():
+                try:
+                    # morning=False: qo'lda tekshiruv ertalabki bir martalik belgini yemasin
+                    res = gemo_monitor.check(gemo_monitor.load_config(force=True), morning=False)
+                except Exception as e:
+                    res = {"level": "crit", "summary": f"Tekshirishda xato: {e}",
+                           "problems": [], "stats": {}}
+                win.after(0, lambda: _render(res))
+                self.root.after(0, lambda: self._gemo_status_update(res))
+            threading.Thread(target=_work, daemon=True).start()
+
+        def _open_hema():
+            try:
+                self.open_hematology_raw()
+            except Exception as e:
+                messagebox.showerror("Gemotologiya", str(e), parent=win)
+
+        ttk.Button(btns, text="🔄 Qayta tekshirish", command=_refresh).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btns, text="Gemotologiya oynasi", command=_open_hema).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btns, text="Yopish", command=win.destroy).pack(side=tk.RIGHT, padx=4)
+
+        last = getattr(self, "_gemo_last", None)
+        if last:
+            _render(last)
+        _refresh()
+
     def start_onedrive_monitor(self) -> bool:
         """OneDrive nazoratchisini fon oqimida ishga tushirish."""
         if not ONEDRIVE_MONITOR_AVAILABLE:
@@ -10713,7 +10872,18 @@ class MonoblokApp:
             font=("Arial", 9)
         )
         self.onedrive_btn.pack(side=tk.LEFT, padx=2)
-        
+
+        # Gemotologiya natija kelishi ko'rsatkichi — analizator natija yuboryaptimi?
+        self.gemo_btn = tk.Button(
+            left_buttons,
+            text="🩸 Qon …",
+            command=self.open_gemo_status,
+            width=10,
+            relief=tk.RAISED,
+            font=("Arial", 9)
+        )
+        self.gemo_btn.pack(side=tk.LEFT, padx=2)
+
         ttk.Button(
             left_buttons,
             text="➕ Tahlil Kiritish", 
@@ -21170,6 +21340,33 @@ Sana: {_sana_fmt}"""
         if not tests:
             return 0
 
+        # Natijani ko'rsatish uchun Sample ID (barkod yo'q bo'lsa ham ishlaydi)
+        display_id = sample_id if sample_id and not sample_id.startswith('NOBC_') else ''
+
+        # ── XAVFSIZLIK: BOSHQA bemorning natijasi biriktirilmasin ────────────
+        # 12.09.2026: analizator natija yubormay qolganda xodim gemotologiya
+        # ro'yxatidagi (kechagi) boshqa bemorning natijasini bugungi buyurtmaga
+        # qo'shib qo'ygan (6 yoshli qizga 19 yoshli yigitning qoni, 3 ta bemor).
+        # Sample ID mos kelmasa — qizil ogohlantirish, faqat ongli tasdiq bilan.
+        bd = self.current_bemor_data or {}
+        cur_sid = str(bd.get('sample_id') or '').strip()
+        alt_ids = {str(bd.get(k) or '').strip() for k in ('natija_kodi', 'kod_yollanma')} - {''}
+        if display_id and cur_sid and display_id != cur_sid and display_id not in alt_ids:
+            if not messagebox.askyesno(
+                    "⚠ BOSHQA BEMORNING NATIJASI!",
+                    f"Tanlangan natija — Sample ID: {display_id}\n"
+                    f"    Analizatorda: {patient_info.get('name', '?')}, "
+                    f"{patient_info.get('age', '?')} yosh, {patient_info.get('time', '')}\n\n"
+                    f"Hozirgi buyurtma — Sample ID: {cur_sid}\n"
+                    f"    Bemor: {bd.get('fish', '?')}\n\n"
+                    "Sample ID lar MOS EMAS — bu BOSHQA bemorning qon natijasi bo'lishi mumkin!\n"
+                    "Natija haqiqatan shu bemorniki ekaniga ishonchingiz komil bo'lmasa, YO'Q ni bosing.\n\n"
+                    "Baribir shu bemorga qo'shilsinmi?",
+                    icon="warning", default="no", parent=self.root):
+                self.status_var.set(
+                    f"[BEKOR] Sample ID mos emas ({display_id} ≠ {cur_sid}) — natija qo'shilmadi")
+                return 0
+
         # test_id → treeview item xaritasi
         item_map = {}
         for tr_item in self.tests_tree.get_children():
@@ -21186,9 +21383,6 @@ Sana: {_sana_fmt}"""
         # {nomi.upper(): test_dict}
         name_to_test = {t.get('nomi', '').strip().upper(): t
                         for t in self.current_tests if t.get('nomi')}
-
-        # Natijani ko'rsatish uchun Sample ID (barkod yo'q bo'lsa ham ishlaydi)
-        display_id = sample_id if sample_id and not sample_id.startswith('NOBC_') else ''
 
         # ── 1-BOSQICH: nima yozilishini REJALASHTIRAMIZ (hali yozmaymiz) ─────
         # Avval reja tuzamiz, chunki mavjud natija ustiga yozishdan oldin

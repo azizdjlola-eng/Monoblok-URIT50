@@ -330,6 +330,36 @@ def open_window(parent=None, on_import_callback=None):
     date_to_var = tk.StringVar(value=datetime.now().strftime("%d.%m.%Y"))
     ttk.Entry(center_control, textvariable=date_to_var, width=12).pack(side=tk.LEFT, padx=5)
 
+    # ── Qidiruv / filtr (tarix uchun: familiya — kirill/lotin farqsiz, yosh, jins) ──
+    filter_frame = ttk.Frame(main_frame)
+    filter_frame.pack(fill=tk.X, pady=(0, 4))
+    ttk.Label(filter_frame, text="🔎 Qidiruv (F.I.SH / Sample ID):").pack(side=tk.LEFT, padx=(5, 2))
+    search_var = tk.StringVar()
+    search_entry = ttk.Entry(filter_frame, textvariable=search_var, width=32)
+    search_entry.pack(side=tk.LEFT, padx=2)
+    ttk.Label(filter_frame, text="Jinsi:").pack(side=tk.LEFT, padx=(12, 2))
+    gender_var = tk.StringVar(value="Hammasi")
+    ttk.Combobox(filter_frame, textvariable=gender_var, values=("Hammasi", "Erkak", "Ayol"),
+                 width=9, state="readonly").pack(side=tk.LEFT, padx=2)
+    ttk.Label(filter_frame, text="Yosh:").pack(side=tk.LEFT, padx=(12, 2))
+    age_from_var = tk.StringVar()
+    age_to_var = tk.StringVar()
+    ttk.Entry(filter_frame, textvariable=age_from_var, width=5).pack(side=tk.LEFT)
+    ttk.Label(filter_frame, text="-").pack(side=tk.LEFT, padx=2)
+    ttk.Entry(filter_frame, textvariable=age_to_var, width=5).pack(side=tk.LEFT)
+    sort_state = [("Sana/Vaqt", True)]   # (ustun, teskari) — standart: eng yangisi birinchi
+
+    def _filters():
+        return {"text": search_var.get(), "gender": gender_var.get(),
+                "age_from": age_from_var.get().strip(), "age_to": age_to_var.get().strip()}
+
+    def _clear_filters():
+        search_var.set(""); gender_var.set("Hammasi"); age_from_var.set(""); age_to_var.set("")
+        _apply_filter()
+
+    ttk.Button(filter_frame, text="Tozalash", command=_clear_filters, width=9).pack(side=tk.LEFT, padx=(10, 2))
+    ttk.Label(filter_frame, text="(ustun sarlavhasini bosib saralang)", foreground="#777777").pack(side=tk.LEFT, padx=10)
+
     right_control = ttk.Frame(control_frame)
     right_control.pack(side=tk.RIGHT, padx=5)
     status_var = tk.StringVar(value="Tayyor")
@@ -349,8 +379,9 @@ def open_window(parent=None, on_import_callback=None):
     left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=5)
     left_panel.config(width=500)
 
-    patient_columns = ("Sana/Vaqt", "Sample ID", "F.I.SH", "Yoshi", "Jinsi", "Status")
-    patient_tree = ttk.Treeview(left_panel, columns=patient_columns, show="headings", height=30)
+    patient_columns = ("Sana/Vaqt", "Sample ID", "F.I.SH", "Yoshi", "Jinsi", "Status", "Key")
+    patient_tree = ttk.Treeview(left_panel, columns=patient_columns, show="headings", height=30,
+                                displaycolumns=patient_columns[:6])  # "Key" — yashirin kalit
     patient_tree.heading("Sana/Vaqt", text="Sana/Vaqt")
     patient_tree.column("Sana/Vaqt", width=130, anchor=tk.CENTER)
     patient_tree.heading("Sample ID", text="Sample ID")
@@ -368,6 +399,38 @@ def open_window(parent=None, on_import_callback=None):
     patient_tree.configure(yscrollcommand=patient_scrollbar.set)
     patient_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     patient_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+    def _apply_filter(*_):
+        """Fayllarni qayta o'qimasdan ro'yxatni filtr/saralash bo'yicha qayta chizish."""
+        results_tree.delete(*results_tree.get_children())
+        n = populate_patient_tree(patient_tree, patients_data, _filters(), sort_state[0])
+        total = len(patients_data)
+        status_var.set(f"Ko'rsatildi: {n} / {total} ta bemor" if n != total else f"Yuklandi: {total} ta bemor")
+        col, rev = sort_state[0]
+        for c in patient_columns[:6]:
+            mark = (" ▼" if rev else " ▲") if c == col else ""
+            patient_tree.heading(c, text=c + mark)
+
+    def _sort_by(col):
+        cur_col, cur_rev = sort_state[0]
+        if cur_col == col:
+            sort_state[0] = (col, not cur_rev)
+        else:
+            sort_state[0] = (col, col == "Sana/Vaqt")   # ism/yosh — o'sish, sana — kamayish
+        _apply_filter()
+
+    for _c in patient_columns[:6]:
+        patient_tree.heading(_c, command=lambda c=_c: _sort_by(c))
+
+    _search_after = [None]
+    def _on_search_change(*_):
+        if _search_after[0]:
+            window.after_cancel(_search_after[0])
+        _search_after[0] = window.after(300, _apply_filter)   # yozib bo'lguncha kutish
+    search_var.trace_add("write", _on_search_change)
+    gender_var.trace_add("write", _on_search_change)
+    age_from_var.trace_add("write", _on_search_change)
+    age_to_var.trace_add("write", _on_search_change)
 
     # ===== O'NG PANEL: NATIJALAR =====
     right_panel = ttk.LabelFrame(
@@ -483,12 +546,9 @@ def open_window(parent=None, on_import_callback=None):
         if not sel:
             current_sid[0] = None
             return
-        row_vals  = patient_tree.item(sel[0], "values")
-        if not row_vals or len(row_vals) < 2:
-            return
-        sample_id         = row_vals[1]
+        sample_id         = _row_key(patient_tree, sel[0])
         current_sid[0]    = sample_id
-        if sample_id not in patients_data:
+        if not sample_id or sample_id not in patients_data:
             return
 
         pinfo  = patients_data[sample_id]
@@ -592,7 +652,7 @@ def open_window(parent=None, on_import_callback=None):
             vals = patient_tree.item(item, "values")
             if not vals or len(vals) < 2:
                 continue
-            sid = vals[1]
+            sid = _row_key(patient_tree, item)
             pdata = patients_data.get(sid)
             if not pdata:
                 continue
@@ -650,18 +710,17 @@ def open_window(parent=None, on_import_callback=None):
                 sel_before = patient_tree.selection()
                 sel_sid = None
                 if sel_before:
-                    rv = patient_tree.item(sel_before[0], "values")
-                    sel_sid = rv[1] if rv and len(rv) > 1 else None
+                    sel_sid = _row_key(patient_tree, sel_before[0])
 
                 refresh_patient_list(patient_tree, results_tree, status_var,
-                                     date_from_var, date_to_var, patients_data)
+                                     date_from_var, date_to_var, patients_data,
+                                     _filters(), sort_state[0])
                 _scan_criticals(play=True)
 
                 # Avvalgi tanlovni tiklash
                 if sel_sid:
                     for item in patient_tree.get_children():
-                        rv = patient_tree.item(item, "values")
-                        if rv and len(rv) > 1 and rv[1] == sel_sid:
+                        if _row_key(patient_tree, item) == sel_sid:
                             patient_tree.selection_set(item)
                             patient_tree.see(item)
                             _show_results_local()
@@ -697,17 +756,15 @@ def open_window(parent=None, on_import_callback=None):
         if not sel:
             messagebox.showwarning("Diqqat", "Avval bemorni tanlang!")
             return
-        row_vals  = patient_tree.item(sel[0], "values")
-        if not row_vals or len(row_vals) < 2:
-            return
-        sample_id = row_vals[1]
-        if sample_id not in patients_data:
+        sample_id = _row_key(patient_tree, sel[0])
+        if not sample_id or sample_id not in patients_data:
             messagebox.showwarning("Diqqat", "Bemor ma'lumotlari topilmadi!")
             return
 
         # Qo'lda o'zgartirishlarni asl nusxaga qo'llash
         pinfo = copy.deepcopy(patients_data[sample_id])
         edits = edited_values.get(sample_id, {})
+        sample_id = pinfo.get('sample_id') or sample_id   # kalit emas, HAQIQIY sample ID
         for pk, nv in edits.items():
             if pk in pinfo['tests']:
                 pinfo['tests'][pk]['value'] = nv
@@ -753,11 +810,8 @@ def open_window(parent=None, on_import_callback=None):
         if not sel:
             messagebox.showwarning("Diqqat", "Avval bemorni tanlang!")
             return None, None
-        row_vals = patient_tree.item(sel[0], "values")
-        if not row_vals or len(row_vals) < 2:
-            return None, None
-        sample_id = row_vals[1]
-        if sample_id not in patients_data:
+        sample_id = _row_key(patient_tree, sel[0])
+        if not sample_id or sample_id not in patients_data:
             messagebox.showwarning("Diqqat", "Bemor ma'lumotlari topilmadi!")
             return None, None
         return sample_id, patients_data[sample_id]
@@ -877,6 +931,8 @@ def open_window(parent=None, on_import_callback=None):
 
             # patients_data ni yangilash
             old_sid = sample_id
+            if new_sid == (pinfo.get('sample_id') or ''):
+                new_sid = old_sid   # haqiqiy ID o'zgarmadi — kalitni ham o'zgartirmaymiz
             pinfo['name'] = new_name
             pinfo['age'] = new_age
 
@@ -1003,7 +1059,9 @@ def open_window(parent=None, on_import_callback=None):
     # 2) Yangilash
     def refresh_with_data():
         refresh_patient_list(patient_tree, results_tree, status_var,
-                             date_from_var, date_to_var, patients_data)
+                             date_from_var, date_to_var, patients_data,
+                             _filters(), sort_state[0])
+        _apply_filter()
         _scan_criticals(play=True)
     ttk.Button(left_control, text="🔄 Yangilash",
                command=refresh_with_data).pack(side=tk.LEFT, padx=5)
@@ -1046,15 +1104,209 @@ def open_window(parent=None, on_import_callback=None):
     ttk.Button(left_control, text="Barchasini Saqlash",
                command=save_all_to_db).pack(side=tk.LEFT, padx=5)
 
+    # 8) USB / CSV import — analizator LIS ga yubormay qo'yganda (yoki eski
+    #    natijalarni olish uchun) analizatorning o'zidan eksport qilingan CSV
+    #    ni dastur formatiga (HL7 TXT, to'g'ri oy papkasi) o'giradi
+    ttk.Separator(left_control, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
+    ttk.Button(left_control, text="📥 USB / CSV import",
+               command=lambda: open_csv_import_dialog(window, date_from_var, date_to_var,
+                                                      refresh_with_data)).pack(side=tk.LEFT, padx=5)
+
     # ── Event binding ─────────────────────────────────────────────────
     patient_tree.bind("<<TreeviewSelect>>", show_results_with_data)
 
     # Dastlabki yuklash — kritiklarni qizil belgilaymiz, lekin ochilishda ovoz/popup bermaymiz
     refresh_patient_list(patient_tree, results_tree, status_var,
-                         date_from_var, date_to_var, patients_data)
+                         date_from_var, date_to_var, patients_data,
+                         _filters(), sort_state[0])
+    _apply_filter()
     _scan_criticals(play=False)
     _auto_refresh_id[0] = window.after(5000, _auto_refresh_tick)
     return window
+
+def open_csv_import_dialog(parent, date_from_var=None, date_to_var=None, on_done=None):
+    """Analizator USB eksportini (CSV) import qilish oynasi.
+
+    Oqim: fayl(lar)ni tanlash → sana oralig'i → "Ko'rish" (reja: nima yangi,
+    nima allaqachon bor) → "Import" → TXT fayllar to'g'ri oy papkasiga yoziladi,
+    xohlasa bazaga ham saqlanadi → ro'yxat yangilanadi.
+    """
+    try:
+        import bc20s_csv_import as imp
+    except Exception as e:
+        messagebox.showerror("Import", f"bc20s_csv_import.py yuklanmadi:\n{e}", parent=parent)
+        return
+    from tkinter import filedialog
+
+    prefs = imp.load_prefs()
+
+    win = tk.Toplevel(parent)
+    win.title("📥 Analizator USB eksportini import qilish (BC-20S CSV)")
+    win.geometry("980x600")
+    win.transient(parent)
+
+    top = ttk.Frame(win, padding=8)
+    top.pack(fill=tk.X)
+
+    ttk.Label(top, text="CSV fayl(lar):").grid(row=0, column=0, sticky="w")
+    files_var = tk.StringVar(value="")
+    ttk.Entry(top, textvariable=files_var, width=90).grid(row=0, column=1, sticky="we", padx=4)
+    selected_files = []
+
+    def _pick():
+        init = prefs.get("last_dir") or "D:\\"
+        paths = filedialog.askopenfilenames(
+            parent=win, title="Analizator eksport CSV faylini tanlang",
+            initialdir=init if os.path.isdir(init) else None,
+            filetypes=[("Mindray CSV eksport", "*.csv"), ("Barcha fayllar", "*.*")])
+        if paths:
+            selected_files[:] = list(paths)
+            files_var.set("; ".join(os.path.basename(p) for p in paths))
+            imp.save_prefs({"last_dir": os.path.dirname(paths[0])})
+            _preview()
+
+    def _pick_folder():
+        init = prefs.get("last_dir") or "D:\\"
+        folder = filedialog.askdirectory(parent=win, title="USB papkasini tanlang (ichidagi barcha CSV)",
+                                         initialdir=init if os.path.isdir(init) else None)
+        if folder:
+            paths = sorted(glob.glob(os.path.join(folder, "**", "*.csv"), recursive=True))
+            if not paths:
+                messagebox.showwarning("Import", "Bu papkada CSV fayl topilmadi.", parent=win)
+                return
+            selected_files[:] = paths
+            files_var.set("; ".join(os.path.basename(p) for p in paths))
+            imp.save_prefs({"last_dir": folder})
+            _preview()
+
+    ttk.Button(top, text="Fayl…", command=_pick).grid(row=0, column=2, padx=2)
+    ttk.Button(top, text="Papka…", command=_pick_folder).grid(row=0, column=3, padx=2)
+
+    ttk.Label(top, text="Sana oralig'i:").grid(row=1, column=0, sticky="w", pady=(6, 0))
+    rng = ttk.Frame(top)
+    rng.grid(row=1, column=1, sticky="w", pady=(6, 0))
+    d_from = tk.StringVar(value=(date_from_var.get() if date_from_var else datetime.now().strftime("%d.%m.%Y")))
+    d_to = tk.StringVar(value=(date_to_var.get() if date_to_var else datetime.now().strftime("%d.%m.%Y")))
+    ttk.Entry(rng, textvariable=d_from, width=12).pack(side=tk.LEFT)
+    ttk.Label(rng, text=" - ").pack(side=tk.LEFT)
+    ttk.Entry(rng, textvariable=d_to, width=12).pack(side=tk.LEFT)
+
+    def _set_today():
+        d_from.set(datetime.now().strftime("%d.%m.%Y")); d_to.set(d_from.get()); _preview()
+
+    def _set_all():
+        d_from.set("01.01.2000"); d_to.set("31.12.2099"); _preview()
+
+    ttk.Button(rng, text="Bugun", command=_set_today, width=7).pack(side=tk.LEFT, padx=(8, 2))
+    ttk.Button(rng, text="Hammasi", command=_set_all, width=9).pack(side=tk.LEFT, padx=2)
+
+    # Standart: faqat TXT (bazaga YOZILMAYDI) — laborant "Natijani qo'shish" bilan o'zi biriktiradi
+    save_db_var = tk.BooleanVar(value=False)
+    overwrite_var = tk.BooleanVar(value=False)
+    ttk.Checkbutton(rng, text="Bazaga ham saqlash (odatda kerak emas)", variable=save_db_var).pack(side=tk.LEFT, padx=(16, 4))
+    ttk.Checkbutton(rng, text="Mavjudlarini ham qayta yozish",
+                    variable=overwrite_var, command=lambda: _preview()).pack(side=tk.LEFT, padx=4)
+    top.columnconfigure(1, weight=1)
+
+    cols = ("Sana/Vaqt", "Sample ID", "F.I.SH", "Yoshi", "Holat")
+    tree = ttk.Treeview(win, columns=cols, show="headings", height=18)
+    for c, w, a in (("Sana/Vaqt", 130, tk.CENTER), ("Sample ID", 130, tk.CENTER),
+                    ("F.I.SH", 240, tk.W), ("Yoshi", 60, tk.CENTER), ("Holat", 360, tk.W)):
+        tree.heading(c, text=c)
+        tree.column(c, width=w, anchor=a)
+    tree.tag_configure("yangi", foreground="#006600", font=("Arial", 9, "bold"))
+    tree.tag_configure("skip", foreground="#777777")
+    tree.tag_configure("xato", foreground="#a00000")
+    tree.tag_configure("done", background="#DFF5DF")
+    sb = ttk.Scrollbar(win, orient=tk.VERTICAL, command=tree.yview)
+    tree.configure(yscrollcommand=sb.set)
+    tree.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=8)
+    sb.place(relx=1.0, rely=0.3, relheight=0.55, anchor="ne")
+
+    bottom = ttk.Frame(win, padding=8)
+    bottom.pack(fill=tk.X)
+    info_var = tk.StringVar(value="Fayl tanlang.")
+    ttk.Label(bottom, textvariable=info_var).pack(side=tk.LEFT)
+
+    plan_holder = [[]]
+
+    def _parse_range():
+        try:
+            f = datetime.strptime(d_from.get().strip(), "%d.%m.%Y").date()
+            t = datetime.strptime(d_to.get().strip(), "%d.%m.%Y").date()
+            return f, t
+        except ValueError:
+            messagebox.showwarning("Sana", "Sana formati: DD.MM.YYYY", parent=win)
+            return None, None
+
+    def _fill(plan):
+        tree.delete(*tree.get_children())
+        n_new = 0
+        for r in plan:
+            act = r.get("action", "")
+            if act == "yangi":
+                n_new += 1
+            tag = "yangi" if act == "yangi" else ("xato" if act == "xato" else "skip")
+            if r.get("txt"):
+                tag = "done"
+            label = imp.ACTION_LABEL.get(act, act)
+            if r.get("txt"):
+                label = "✓ yozildi: " + os.path.basename(r["txt"]) + \
+                        ("  | bazaga saqlandi" if r.get("db") else
+                         ("  | bazada buyurtma topilmadi" if r.get("db") is False else ""))
+            if r.get("error"):
+                label += " — " + r["error"]
+            tree.insert("", tk.END, values=(
+                r["dt"].strftime("%d.%m.%Y %H:%M") if r.get("dt") else "—",
+                r.get("sample", ""), r.get("full_name", ""),
+                (r.get("age") or ("", ""))[0], label), tags=(tag,))
+        return n_new
+
+    def _preview():
+        if not selected_files:
+            return
+        f, t = _parse_range()
+        if not f:
+            return
+        try:
+            plan = imp.plan_import(selected_files, f, t, overwrite=overwrite_var.get())
+        except Exception as e:
+            messagebox.showerror("Import", f"CSV o'qishda xato:\n{e}", parent=win)
+            return
+        plan_holder[0] = plan
+        n_new = _fill(plan)
+        info_var.set(f"{len(plan)} ta qator o'qildi, {n_new} tasi import qilinadi.")
+
+    def _run():
+        plan = plan_holder[0]
+        new_rows = [r for r in plan if r.get("action") == "yangi"]
+        if not new_rows:
+            messagebox.showinfo("Import", "Import qilinadigan yangi natija yo'q.", parent=win)
+            return
+        if not messagebox.askyesno(
+                "Import", f"{len(new_rows)} ta natija TXT ga yoziladi"
+                + (" va bazaga saqlanadi" if save_db_var.get() else "") + ".\nDavom etamizmi?",
+                parent=win):
+            return
+        stats = imp.run_import(plan, save_db=save_db_var.get())
+        _fill(plan)
+        info_var.set(f"Yozildi: {stats['yozildi']}  |  bazaga: {stats['db']}  |  "
+                     f"buyurtma topilmadi: {stats['db_topilmadi']}  |  xato: {stats['xato']}")
+        if on_done:
+            try:
+                on_done()
+            except Exception as e:
+                print(f"[Import] yangilashda xato: {e}")
+        messagebox.showinfo("Import tugadi",
+                            f"TXT yozildi: {stats['yozildi']}\nBazaga saqlandi: {stats['db']}\n"
+                            f"Buyurtma topilmadi: {stats['db_topilmadi']}\nXato: {stats['xato']}",
+                            parent=win)
+
+    ttk.Button(bottom, text="Yopish", command=win.destroy).pack(side=tk.RIGHT, padx=4)
+    ttk.Button(bottom, text="📥 Import", command=_run).pack(side=tk.RIGHT, padx=4)
+    ttk.Button(bottom, text="🔍 Ko'rish", command=_preview).pack(side=tk.RIGHT, padx=4)
+    return win
+
 
 def get_current_month_folder():
     """Joriy oy papkasini aniqlash (YYYYMM formatida)"""
@@ -1074,18 +1326,29 @@ def load_raw_files(date_from=None, date_to=None):
         print(f"⚠️ BC-20S DAT papkasi topilmadi: {BC20S_DAT_BASE}")
         return files
     
-    # Joriy oy papkasini aniqlash
-    current_month = get_current_month_folder()
-    month_folder = os.path.join(BC20S_DAT_BASE, current_month)
-    
-    # Joriy oy papkasi mavjudligini tekshirish
-    if not os.path.exists(month_folder):
-        print(f"⚠️ Joriy oy papkasi topilmadi: {month_folder}")
+    # Oy papkalari: sana oralig'i qamrab olgan HAMMA oylar (ilgari faqat joriy
+    # oy o'qilardi — o'tgan oyga USB dan import qilingan natija ko'rinmasdi)
+    months = [get_current_month_folder()]
+    if date_from and date_to:
+        try:
+            fd = datetime.strptime(date_from, "%d.%m.%Y").date()
+            td = datetime.strptime(date_to, "%d.%m.%Y").date()
+            months = []
+            y, mo = fd.year, fd.month
+            while (y, mo) <= (td.year, td.month) and len(months) < 36:
+                months.append(f"{y:04d}{mo:02d}")
+                y, mo = (y + 1, 1) if mo == 12 else (y, mo + 1)
+        except Exception:
+            months = [get_current_month_folder()]
+
+    all_files = []
+    for ym in months:
+        month_folder = os.path.join(BC20S_DAT_BASE, ym)
+        if os.path.exists(month_folder):
+            all_files.extend(glob.glob(os.path.join(month_folder, "BC-20s_*.txt")))
+    if not all_files:
+        print(f"⚠️ Oy papkasida fayl topilmadi: {months}")
         return files
-    
-    # BC-20s_*.txt fayllarni topish
-    pattern = os.path.join(month_folder, "BC-20s_*.txt")
-    all_files = glob.glob(pattern)
     
     # Sana bo'yicha filtr
     if date_from and date_to:
@@ -1129,7 +1392,7 @@ def load_raw_files(date_from=None, date_to=None):
     
     files.sort(key=get_file_date, reverse=True)
     
-    return files[:500]  # Eng so'nggi 500 ta fayl
+    return files[:50000]  # Tarix (LIS gacha bo'lgan yillar) ham sig'sin
 
 def _decode_name(raw):
     """
@@ -1393,18 +1656,145 @@ def parse_hl7_file(file_path):
 
     return patients_dict
 
-def refresh_patient_list(patient_tree, results_tree, status_var, date_from_var, date_to_var, patients_data):
+# ══════════════════════════════════════════════════════════════════════
+#  QIDIRUV / SARALASH yordamchilari
+#  Tarix (LIS gacha bo'lgan 1.5 yil) import qilinganda ismlar KIRILL da,
+#  sample ID lar esa har kuni 1 dan qayta boshlangan (takrorlanadi).
+# ══════════════════════════════════════════════════════════════════════
+_CYR2LAT = {
+    'а':'a','б':'b','в':'v','г':'g','д':'d','е':'e','ё':'yo','ж':'j','з':'z','и':'i',
+    'й':'y','к':'k','л':'l','м':'m','н':'n','о':'o','п':'p','р':'r','с':'s','т':'t',
+    'у':'u','ф':'f','х':'x','ц':'ts','ч':'ch','ш':'sh','щ':'sh','ъ':'','ы':'i','ь':'',
+    'э':'e','ю':'yu','я':'ya','ў':'o','қ':'q','ғ':'g','ҳ':'h','ӯ':'o',
+}
+
+def normalize_name(s):
+    """Kirill/lotin, apostrof va bo'shliqdan mustaqil qidiruv kaliti.
+    'Абдуалимова Мунира' → 'abdualimovamunira', "O'ralbek" → 'oralbek'"""
+    out = []
+    for ch in (s or "").lower():
+        if ch in _CYR2LAT:
+            out.append(_CYR2LAT[ch])
+        elif ch.isalnum():
+            out.append(ch)
+        # apostrof (' ` ʼ ’ ‘), bo'shliq, nuqta — tashlab yuboriladi
+    t = "".join(out)
+    # lotin yozuvdagi x/h va sh/ch variantlari — bir xil qilib beramiz
+    return t.replace("kh", "x").replace("h", "x")
+
+
+def _row_key(tree, item):
+    """Treeview qatori → patients_data kaliti (7-yashirin ustun; bo'lmasa Sample ID)."""
+    vals = tree.item(item, "values")
+    if not vals:
+        return None
+    if len(vals) > 6 and vals[6]:
+        return vals[6]
+    return vals[1] if len(vals) > 1 else None
+
+
+def _time_key(pinfo):
+    try:
+        return datetime.strptime(pinfo.get('time', ''), "%d.%m.%Y %H:%M")
+    except Exception:
+        return datetime.min
+
+
+def _age_int(v):
+    try:
+        return int(float(str(v).strip()))
+    except Exception:
+        return -1
+
+
+def patient_matches(pinfo, filters):
+    """filters: {'text': str, 'gender': 'Hammasi'|'Erkak'|'Ayol', 'age_from': str, 'age_to': str}"""
+    if not filters:
+        return True
+    text = (filters.get('text') or "").strip()
+    if text:
+        q = normalize_name(text)
+        hay = normalize_name(pinfo.get('name', '')) + "|" + str(pinfo.get('sample_id', '')).lower()
+        if q not in hay and text.lower() not in str(pinfo.get('sample_id', '')).lower():
+            return False
+    g = filters.get('gender') or "Hammasi"
+    if g != "Hammasi":
+        pg = (pinfo.get('gender') or "").lower()
+        if g == "Erkak" and not (pg.startswith("e") or pg.startswith("m") or "муж" in pg):
+            return False
+        if g == "Ayol" and not (pg.startswith("a") or pg.startswith("f") or "жен" in pg):
+            return False
+    af, at = filters.get('age_from', ''), filters.get('age_to', '')
+    if af or at:
+        a = _age_int(pinfo.get('age', ''))
+        if a < 0:
+            return False
+        if af and a < _age_int(af):
+            return False
+        if at and a > _age_int(at):
+            return False
+    return True
+
+
+def populate_patient_tree(patient_tree, patients_data, filters=None, sort=None):
+    """patients_data → ro'yxat (filtr + saralash). sort = (ustun, teskari) yoki None (sana↓)."""
+    patient_tree.delete(*patient_tree.get_children())
+    items = [(k, p) for k, p in patients_data.items() if patient_matches(p, filters)]
+
+    col, rev = (sort or ("Sana/Vaqt", True))
+    if col == "Sana/Vaqt":
+        items.sort(key=lambda kp: _time_key(kp[1]), reverse=rev)
+    elif col == "Sample ID":
+        items.sort(key=lambda kp: str(kp[1].get('sample_id', '')), reverse=rev)
+    elif col == "F.I.SH":
+        items.sort(key=lambda kp: (normalize_name(kp[1].get('name', '')) or "￿", _time_key(kp[1])), reverse=rev)
+    elif col == "Yoshi":
+        items.sort(key=lambda kp: _age_int(kp[1].get('age', '')), reverse=rev)
+    elif col == "Jinsi":
+        items.sort(key=lambda kp: (kp[1].get('gender') or "", _time_key(kp[1])), reverse=rev)
+    elif col == "Status":
+        items.sort(key=lambda kp: (bool(kp[1].get('abnormal')), _time_key(kp[1])), reverse=rev)
+
+    for key, p in items:
+        patient_tree.insert("", tk.END, values=[
+            p.get('time', ''), p.get('sample_id', ''), p.get('name', ''),
+            p.get('age', ''), p.get('gender', ''),
+            "ABNORMAL" if p.get('abnormal') else "NORMAL",
+            key,
+        ])
+    return len(items)
+
+
+# Parse keshi: {path: (mtime, {key: pinfo})} — tarix (minglab fayl) yuklanganda
+# har yangilashda hammasini qayta o'qimaslik uchun
+_PARSE_CACHE = {}
+
+def _parse_cached(file_path):
+    try:
+        mt = os.path.getmtime(file_path)
+    except Exception:
+        return parse_hl7_file(file_path)
+    hit = _PARSE_CACHE.get(file_path)
+    if hit and hit[0] == mt:
+        return hit[1]
+    res = parse_hl7_file(file_path)
+    _PARSE_CACHE[file_path] = (mt, res)
+    return res
+
+
+def refresh_patient_list(patient_tree, results_tree, status_var, date_from_var, date_to_var, patients_data,
+                         filters=None, sort=None):
     """Bemorlar ro'yxatini yangilash - 1 bemor = 1 qator"""
     status_var.set("Yuklanmoqda...")
     patient_tree.delete(*patient_tree.get_children())
     results_tree.delete(*results_tree.get_children())
-    
+
     # Sana filtrlarni olish
     date_from = date_from_var.get().strip()
     date_to = date_to_var.get().strip()
-    
+
     files = load_raw_files(date_from if date_from else None, date_to if date_to else None)
-    
+
     if not files:
         status_var.set("Fayllar topilmadi")
         current_month = get_current_month_folder()
@@ -1416,50 +1806,37 @@ def refresh_patient_list(patient_tree, results_tree, status_var, date_from_var, 
             f"Asosiy papka: {BC20S_DAT_BASE}"
         )
         return
-    
+
     # patients_data ni tozalash
     patients_data.clear()
-    
+
     # Barcha fayllarni parse qilish
     for file_path in files:
-        file_patients = parse_hl7_file(file_path)
+        file_patients = _parse_cached(file_path)
         for sample_id, patient_info in file_patients.items():
-            # Agar bir xil sample_id bir necha marta kelsa, eng yangisini saqlaymiz
             if sample_id not in patients_data:
                 patients_data[sample_id] = patient_info
-            else:
-                # Vaqtni solishtirish - eng yangisini saqlash
-                try:
-                    old_time = datetime.strptime(patients_data[sample_id]['time'], "%d.%m.%Y %H:%M")
-                    new_time = datetime.strptime(patient_info['time'], "%d.%m.%Y %H:%M")
-                    if new_time > old_time:
-                        patients_data[sample_id] = patient_info
-                except:
+                continue
+            old = patients_data[sample_id]
+            old_day = (old.get('time') or '')[:10]
+            new_day = (patient_info.get('time') or '')[:10]
+            if old_day == new_day:
+                # Bir kunda bir sample qayta o'tkazilgan — eng yangisini saqlaymiz
+                if _time_key(patient_info) > _time_key(old):
                     patients_data[sample_id] = patient_info
-    
-    # TreeView ga qo'shish - har bir bemor uchun 1 qator (faqat bemor ma'lumotlari)
-    total_patients = 0
-    for sample_id in sorted(patients_data.keys(), reverse=True):  # Eng yangisi birinchi
-        patient_info = patients_data[sample_id]
-        
-        # Status: ABNORMAL yoki NORMAL
-        has_abnormal = patient_info.get('abnormal', False)
-        status = "ABNORMAL" if has_abnormal else "NORMAL"
-        
-        # Qator qiymatlari (faqat bemor ma'lumotlari)
-        row_values = [
-            patient_info.get('time', ''),
-            patient_info.get('sample_id', ''),
-            patient_info.get('name', ''),
-            patient_info.get('age', ''),
-            patient_info.get('gender', ''),
-            status
-        ]
-        
-        patient_tree.insert("", tk.END, values=row_values)
-        total_patients += 1
-    
-    status_var.set(f"Yuklandi: {total_patients} ta bemor ({len(files)} ta fayl)")
+            else:
+                # BOSHQA kundagi bir xil raqam (tarixda sample ID har kuni 1 dan
+                # boshlangan) — bu boshqa bemor, alohida kalit bilan saqlaymiz
+                alt = f"{sample_id}@{new_day}"
+                if alt not in patients_data or _time_key(patient_info) > _time_key(patients_data[alt]):
+                    patients_data[alt] = patient_info
+
+    total_patients = populate_patient_tree(patient_tree, patients_data, filters, sort)
+    n_all = len(patients_data)
+    if total_patients != n_all:
+        status_var.set(f"Ko'rsatildi: {total_patients} / {n_all} ta bemor ({len(files)} ta fayl)")
+    else:
+        status_var.set(f"Yuklandi: {total_patients} ta bemor ({len(files)} ta fayl)")
 
 def show_patient_results(patient_tree, results_tree, event, patients_data):
     """Tanlangan bemor natijalarini ko'rsatish"""
@@ -1470,12 +1847,8 @@ def show_patient_results(patient_tree, results_tree, event, patients_data):
         return
     
     item = selection[0]
-    values = patient_tree.item(item, 'values')
-    if not values or len(values) < 2:
-        return
-    
-    sample_id = values[1]
-    if sample_id not in patients_data:
+    sample_id = _row_key(patient_tree, item)
+    if not sample_id or sample_id not in patients_data:
         return
     
     patient_info = patients_data[sample_id]
@@ -1523,12 +1896,8 @@ def save_patient_to_db(patient_tree, status_var, patients_data):
         return
     
     item = selection[0]
-    values = patient_tree.item(item, 'values')
-    if not values or len(values) < 2:
-        return
-    
-    sample_id = values[1]
-    if sample_id not in patients_data:
+    sample_id = _row_key(patient_tree, item)
+    if not sample_id or sample_id not in patients_data:
         messagebox.showwarning("Diqqat", "Bemor ma'lumotlari topilmadi")
         return
     
