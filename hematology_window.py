@@ -156,6 +156,47 @@ MULTI_REF_NORMALS = {
     "PLR": [
         (0,   9999, "B",  50,   150),
     ],
+    # ── 5-DIFF (Genrui KT-6610/8000, Edan H60, Mindray BC-5150 ...) ──
+    # NEU = neytrofillar (3-diff GRAN bilan bir xil diapazon)
+    "NEU#": [
+        (0,   0,    "B",  6.0,  26.0),
+        (1,   1,    "B",  1.0,  8.5),
+        (2,   5,    "B",  1.5,  8.5),
+        (6,   9999, "B",  2.0,  7.0),
+    ],
+    "NEU%": [
+        (0,   0,    "B",  40,   80),
+        (1,   1,    "B",  15,   60),
+        (2,   5,    "B",  25,   65),
+        (6,   9999, "B",  50,   70),
+    ],
+    "MON#": [
+        (0,   9999, "B",  0.1,  1.0),
+    ],
+    "MON%": [
+        (0,   9999, "B",  3.0,  10.0),
+    ],
+    "EOS#": [
+        (0,   9999, "B",  0.02, 0.5),
+    ],
+    "EOS%": [
+        (0,   9999, "B",  0.5,  5.0),
+    ],
+    "BAS#": [
+        (0,   9999, "B",  0.0,  0.1),
+    ],
+    "BAS%": [
+        (0,   9999, "B",  0.0,  1.0),
+    ],
+    "PDW-SD": [
+        (0,   9999, "B",  9.0,  17.0),
+    ],
+    "P-LCR": [
+        (0,   9999, "B",  13.0, 43.0),
+    ],
+    "P-LCC": [
+        (0,   9999, "B",  30,   90),
+    ],
 }
 
 
@@ -243,54 +284,13 @@ BC20S_DAT_BASE = r"G:\DASTUR\URIT 50\BC-20s"
 
 # HL7 parametr nomlarini DB nomlariga moslashtirish
 # Analyzer → DB/Blanka nomlari
-HL7_TO_DB_NAME = {
-    'WBC':    'WBC',
-    'LYM#':   'Lymph#',
-    'LYM%':   'Lymph%',
-    'MID#':   'Mid#',
-    'MID%':   'Mid%',
-    'GRAN#':  'Gran#',
-    'GRAN%':  'Gran%',
-    'RBC':    'RBC',
-    'HGB':    'HGB',
-    'HCT':    'HCT',
-    'MCV':    'MCV',
-    'MCH':    'MCH',
-    'MCHC':   'MCHC',
-    'RDW-CV': 'RDW-CV',
-    'RDW-SD': 'RDW-SD',
-    'PLT':    'PLT',
-    'MPV':    'MPV',
-    'PDW':    'PDW',
-    'PCT':    'PCT',
-    'NLR':    'NLR',
-    'PLR':    'PLR',
-}
+# HL7/ASTM kaliti → DB tahlil nomi (3-diff + 5-diff). Yagona manba: gemo_protokol.DB_NAME_MAP
+import gemo_protokol as _gp
+HL7_TO_DB_NAME = dict(_gp.DB_NAME_MAP)
 
-# Klinik muhim ko'rsatkichlar (faqat bular olinadi)
-CLINICAL_PARAMETERS = {
-    'WBC': 'WBC',
-    'LYM#': 'LYM#',
-    'LYM%': 'LYM%',
-    'MID#': 'MID#',
-    'MID%': 'MID%',
-    'GRAN#': 'GRAN#',
-    'GRAN%': 'GRAN%',
-    'RBC': 'RBC',
-    'HGB': 'HGB',
-    'HCT': 'HCT',
-    'MCV': 'MCV',
-    'MCH': 'MCH',
-    'MCHC': 'MCHC',
-    'RDW-CV': 'RDW-CV',
-    'RDW-SD': 'RDW-SD',
-    'PLT': 'PLT',
-    'MPV': 'MPV',
-    'PDW': 'PDW',
-    'PCT': 'PCT',
-    'NLR': 'NLR',
-    'PLR': 'PLR'
-}
+# Klinik muhim ko'rsatkichlar — ko'rsatish tartibi (faqat bular olinadi)
+CLINICAL_PARAMETERS = {k: k for k in _gp.CANONICAL}
+
 
 def open_window(parent=None, on_import_callback=None):
     """Gematologiya oynasini ochish.
@@ -1457,9 +1457,10 @@ def _save_to_dict(patients_dict, patient):
 
 def parse_hl7_file(file_path):
     """
-    BC-20S TXT fayldan barcha bemorlarni parse qilish.
-    Fayl bir nechta MSH bloklardan iborat - har biri bir bemor.
-    Qaytaradi: {sample_id: {time, name, age, gender, tests, abnormal}}
+    Gemotologiya TXT fayldan barcha bemorlarni parse qilish.
+    Fayl bir nechta xabardan iborat bo'lishi mumkin (HL7: MSH| bloklar; ASTM: H| bloklar).
+    Parser gemo_protokol da — Mindray, Genrui, Edan, Dymind, Sysmex (ASTM) ... uchun umumiy.
+    Qaytaradi: {sample_id: {time, name, age, gender, tests, abnormal, file_path}}
     """
     patients_dict = {}
 
@@ -1478,183 +1479,25 @@ def parse_hl7_file(file_path):
     except Exception:
         fallback_time = datetime.now().strftime("%d.%m.%Y %H:%M")
 
-    # ===== MSH bloklarga bo'lish =====
-    # Har bir bemor MSH| bilan boshlanadi
-    # content ni MSH| pattern bo'yicha split qilamiz
-    # Birinchi element MSH| dan oldingi axlat bo'lishi mumkin
-    raw_blocks = re.split(r'(?=MSH\|)', content)
-
-    for block in raw_blocks:
-        block = block.strip()
-        if not block.startswith('MSH|'):
+    for block in _gp.split_messages(content):
+        try:
+            patient = _gp.parse_message(block)
+        except Exception as e:
+            print(f"⚠️ Parse xato ({os.path.basename(file_path)}): {e}")
             continue
-
-        # Blok ichidagi satrlarni ajratish
-        lines = [ln.strip() for ln in re.split(r'[\r\n]+', block) if ln.strip()]
-
-        patient = {
-            'time': fallback_time,
-            'sample_id': '',
-            'name': '',
-            'age': '',
-            'gender': '',
-            'tests': {},
-            'abnormal': False
-        }
-
-        for line in lines:
-            if not line or len(line) < 3:
-                continue
-            seg = line[:3]
-            f = line.split('|')
-
-            # --- MSH ---
-            if seg == 'MSH':
-                # MSH-7 = vaqt
-                if len(f) > 7 and f[7]:
-                    t = _parse_hl7_time(f[7], fallback_time)
-                    if t:
-                        patient['time'] = t
-
-            # --- PID ---
-            elif seg == 'PID':
-                # PID-5 = ism (Given^Family)
-                if len(f) > 5 and f[5].strip():
-                    raw_name = f[5].strip()
-                    parts = raw_name.split('^')
-                    given  = _decode_name(parts[0]) if len(parts) >= 1 else ''
-                    family = _decode_name(parts[1]) if len(parts) >= 2 else ''
-                    if given and family:
-                        patient['name'] = f"{family} {given}"
-                    elif given:
-                        patient['name'] = given
-                    elif family:
-                        patient['name'] = family
-
-                # PID-7 = tug'ilgan sana → yosh
-                if len(f) > 7 and f[7].strip():
-                    birth_str = f[7].strip()
-                    try:
-                        if len(birth_str) >= 8:
-                            by = int(birth_str[:4])
-                            bm = int(birth_str[4:6])
-                            bd = int(birth_str[6:8])
-                            birth_d = date(by, bm, bd)
-                            today = date.today()
-                            age = today.year - birth_d.year - (
-                                (today.month, today.day) < (birth_d.month, birth_d.day)
-                            )
-                            patient['age'] = str(age)
-                    except Exception:
-                        pass
-
-                # PID-8 = jins (M/F/Муж/Жен)
-                if len(f) > 8 and f[8].strip():
-                    g = f[8].strip().upper()
-                    try:
-                        g_fixed = g.encode('latin-1').decode('utf-8').upper()
-                    except Exception:
-                        g_fixed = g
-                    if g_fixed in ('M', 'МУЖ', 'ERKAK'):
-                        patient['gender'] = 'Erkak'
-                    elif g_fixed in ('F', 'Ж', 'ЖЕН', 'ЖЕНЩИНА', 'AYOL'):
-                        patient['gender'] = 'Ayol'
-
-            # --- OBR ---
-            elif seg == 'OBR':
-                # OBR-3 = Sample ID (asosiy manba)
-                if len(f) > 3 and f[3].strip():
-                    sid = f[3].split('^')[0].strip()
-                    if sid:
-                        patient['sample_id'] = sid
-
-                # OBR-7 = tahlil vaqti (aniqroq)
-                if len(f) > 7 and f[7].strip():
-                    t = _parse_hl7_time(f[7].strip(), patient['time'])
-                    if t:
-                        patient['time'] = t
-
-            # --- OBX ---
-            elif seg == 'OBX':
-                if len(f) < 6:
-                    continue
-
-                # OBX-3 = test kodi^nomi
-                test_code = ''
-                test_name = ''
-                if len(f) > 3 and f[3]:
-                    parts = f[3].split('^')
-                    test_code = parts[0].strip()
-                    test_name = parts[1].strip() if len(parts) >= 2 else test_code
-
-                # Yosh OBX dan olish (30525-0 = Age) — OBX-6 birligi (yr/mo/d)
-                # bilan birga, BUTUN YIL songa aylantirib olinadi (aks holda
-                # 1 yoshdan kichik bemor yoshi noto'g'ri talqin qilinadi).
-                if test_code == '30525-0' and len(f) > 5 and f[5].strip():
-                    if not patient['age']:
-                        _age_unit = f[6].strip() if len(f) > 6 else ''
-                        patient['age'] = _hl7_age_to_years(f[5].strip(), _age_unit)
-                    continue
-
-                # Jins OBX dan olish (01002 = Ref Group)
-                if test_code == '01002' and len(f) > 5 and f[5].strip():
-                    ref_group = f[5].strip().lower()
-                    try:
-                        ref_group = ref_group.encode('latin-1').decode('utf-8').lower()
-                    except Exception:
-                        pass
-                    if 'жен' in ref_group or 'ayol' in ref_group:
-                        patient['gender'] = 'Ayol'
-                    elif 'муж' in ref_group or 'erkak' in ref_group:
-                        patient['gender'] = 'Erkak'
-                    continue
-
-                # Histogram larni o'tkazib yuborish (15000-15200)
-                try:
-                    if test_code.isdigit() and 15000 <= int(test_code) <= 15200:
-                        continue
-                except Exception:
-                    pass
-
-                # Faqat klinik muhim ko'rsatkichlar
-                param_key = None
-                tc_up = test_code.upper()
-                tn_up = test_name.upper()
-                for key in CLINICAL_PARAMETERS:
-                    if tc_up == key.upper() or tn_up == key.upper():
-                        param_key = key
-                        break
-                if not param_key:
-                    continue
-
-                # Qiymat, birlik, norma
-                value = f[5].strip() if len(f) > 5 else ''
-                unit  = f[6].strip() if len(f) > 6 else ''
-                ref   = f[7].strip() if len(f) > 7 else ''
-                flag  = f[8].strip() if len(f) > 8 else ''
-
-                # Abnormal tekshirish: faqat H yoki L flaglar
-                is_abnormal = False
-                if flag:
-                    fu = flag.upper()
-                    if ('H' in fu or 'L' in fu) and fu != 'N':
-                        is_abnormal = True
-                        patient['abnormal'] = True
-
-                patient['tests'][param_key] = {
-                    'name': test_name if test_name else param_key,
-                    'value': value,
-                    'unit': unit,
-                    'ref': ref,
-                    'flag': flag,
-                    'abnormal': is_abnormal
-                }
-
-        # Blok tugadi — bemorni saqlash
+        if not patient.get('tests'):
+            continue
+        # Xabar ichida vaqt bo'lmasa — fayl vaqti
+        if not patient.get('time'):
+            patient['time'] = fallback_time
+        # Faqat klinik ko'rsatkichlar (CLINICAL_PARAMETERS tartibida) — gistogramma va h.k. tashlanadi
+        patient['tests'] = {k: v for k, v in patient['tests'].items() if k in CLINICAL_PARAMETERS}
+        patient.pop('_extra', None)
         patient['file_path'] = file_path  # Qaysi fayldan kelganini saqlash
         _save_to_dict(patients_dict, patient)
 
     return patients_dict
+
 
 # ══════════════════════════════════════════════════════════════════════
 #  QIDIRUV / SARALASH yordamchilari

@@ -1,27 +1,46 @@
 # -*- coding: utf-8 -*-
 """
-BK-280 HL7 Listener
-BK-280 analyzer dan kelgan HL7 xabarlarni qabul qiladi, parse qiladi va LIMS bazasiga saqlaydi.
+Bioximiya analizatori listener — UNIVERSAL (Biobase BK-280, Mindray BS, Zybio, Dirui, URIT,
+Rayto, Erba, Human, BioSystems, Roche ...). Modul nomi tarixiy (BK-280 bilan boshlangan),
+import API o'zgarmagan:
+    from bk280_listener import start_bk280_listener, stop_bk280_listener
+
+Sozlama: analizator_config.json → "bioximiya" (Tizim Sozlamalari → Bioximiya):
+  model, connection_type (tcp_server / tcp_client / serial), protocol (auto/hl7/astm),
+  port (natija), lis_port (shtrix-kod so'rovi; 0 = natija porti bilan bir xil), ack_style, query_type.
+
+Vazifalari:
+  * Natija (HL7 ORU^R01 / ASTM R) → RAW fayl (RAW_LOGS/YYYYMM/bk280_raw_*.txt) + hl7_inbox jadvali
+    + ACK + callback(order_id) (barcode bazadagi buyurtmaga mos kelsa).
+    Natijani bazaga YOZMAYDI — laborant biochemistry_window orqali tasdiqlab import qiladi
+    (analizator namuna raqami 22 ni 22-buyurtmaga xato biriktirish xavfi bor edi).
+  * SHTRIX-KOD so'rovi: QRY^Q02 → QCK + DSR^Q03 (Mindray/Biobase), ORM^O01 → ORR^O02 (URIT ...),
+    ASTM Q → H/P/O/L (Erba/Human/Roche). Tahlil kodlari = analizator kanal kodlari
+    (bio_protokol kod xaritasi).
+Transport va parser: gemo_protokol.Transport + bio_protokol.
 """
 
-import socket
 import os
 import re
-import pymysql
-from datetime import datetime
-from contextlib import closing
 import sys
-import io
+import json
+import time
 import threading
+import traceback
+from datetime import datetime
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+# Konsol UTF-8 (dastur "start /min" bilan ochilganda ham xato bermasin)
+try:
+    if hasattr(sys.stdout, "buffer") and \
+            (getattr(sys.stdout, "encoding", "") or "").lower().replace("-", "") != "utf8":
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+except Exception:
+    pass
 
-# Monoblok DB config import qilish
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from monoblok_db_config import DB_CONFIG
 
-# Sozlamalar analizator_config.json dan (Tizim Sozlamalari oynasi orqali)
 try:
     from monoblok_db_config import get_analyzer
     _bio_cfg = get_analyzer("bioximiya")
@@ -29,9 +48,15 @@ except Exception as _e:
     print(f"[OGOHLANTIRISH] bioximiya config yuklanmadi: {_e}")
     _bio_cfg = {}
 
-SERVER_IP = _bio_cfg.get("ip", "0.0.0.0")
-SERVER_PORT = int(_bio_cfg.get("port", 8087))
-ENCODING = _bio_cfg.get("encoding", "utf-8")
+import gemo_protokol as _gp
+import bio_protokol as _bp
+
+_bio_eff = _bp.effective_config(_bio_cfg)
+ANALYZER_MODEL = _bio_eff.get("model", _bp.DEFAULT_MODEL)
+ANALYZER_NAME = _bp.PROFILES.get(ANALYZER_MODEL, {}).get("name", ANALYZER_MODEL)
+SERVER_IP = _bio_eff.get("ip", "0.0.0.0")
+SERVER_PORT = int(_bio_eff.get("port", 8087))
+ENCODING = _bio_eff.get("encoding", "utf-8")
 
 # Frozen-aware yozish papkasi (mijozda G: bo'lmasligi mumkin)
 _BK_DATA = os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), "AzizMedLine", "BK280")
@@ -39,119 +64,67 @@ BASE_DIR = os.path.join(_BK_DATA, "RAW_LOGS")
 ERRORS_DIR = os.path.join(_BK_DATA, "ERRORS")
 os.makedirs(BASE_DIR, exist_ok=True)
 os.makedirs(ERRORS_DIR, exist_ok=True)
+_LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
 
-ACK = b'\x06'   # BK-280 kutadigan tasdiqlash bayti
+ACK = b'\x06'   # BK-280 natija portida kutadigan bir baytli tasdiq
+
+
+def _log(msg):
+    line = f"[BIO {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}"
+    try:
+        print(line, flush=True)
+    except Exception:
+        pass
+    try:
+        os.makedirs(_LOG_DIR, exist_ok=True)
+        with open(os.path.join(_LOG_DIR, f"bio_{datetime.now().strftime('%Y%m%d')}.log"),
+                  "a", encoding="utf-8", errors="replace") as fh:
+            fh.write(line + "\n")
+    except Exception:
+        pass
+
 
 def log_error(error_msg):
     """Xatolarni ERRORS papkasiga saqlash"""
     try:
         error_file = os.path.join(ERRORS_DIR, f"error_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
         with open(error_file, "w", encoding="utf-8") as f:
-            f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"{error_msg}\n")
-    except:
+            f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n{error_msg}\n")
+    except Exception:
         pass
+    _log(f"[XATO] {error_msg}")
+
 
 def db():
-    """Remote MySQL ulanishi (ASUS server 192.168.0.10)"""
-    try:
-        # pymysql uchun config tayyorlash
-        config = {
-            "host": DB_CONFIG["host"],
-            "user": DB_CONFIG["user"],
-            "password": DB_CONFIG["password"],
-            "database": DB_CONFIG["database"],
-            "port": DB_CONFIG["port"],
-            "charset": "utf8mb4",
-            "connect_timeout": 5  # 5 soniya timeout
-        }
-        return pymysql.connect(**config)
-    except pymysql.err.OperationalError as e:
-        error_msg = f"MySQL ulanmadi (192.168.0.10): {e}"
-        print(f"❌ {error_msg}")
-        log_error(error_msg)
-        raise
-    except Exception as e:
-        error_msg = f"Database ulanish xatosi: {e}"
-        print(f"❌ {error_msg}")
-        log_error(error_msg)
-        raise
+    import pymysql
+    return pymysql.connect(host=DB_CONFIG["host"], user=DB_CONFIG["user"], password=DB_CONFIG["password"],
+                           database=DB_CONFIG["database"], port=DB_CONFIG["port"],
+                           charset="utf8mb4", connect_timeout=5)
+
 
 def get_order_by_sample_id(sample_id):
-    """Sample ID orqali order topish"""
-    if not sample_id or not sample_id.strip():
-        return None
-    with closing(db()) as conn:
-        with closing(conn.cursor()) as c:
-            # Avval sample_id orqali qidirish
-            c.execute("SELECT id FROM orders WHERE sample_id=%s LIMIT 1", (sample_id.strip(),))
-            row = c.fetchone()
-            if row:
-                return row[0]
-            # Agar topilmasa, id sifatida tekshirish (agar sample_id son bo'lsa)
-            try:
-                order_id_int = int(sample_id.strip())
-                c.execute("SELECT id FROM orders WHERE id=%s LIMIT 1", (order_id_int,))
-                row = c.fetchone()
-                if row:
-                    return row[0]
-            except ValueError:
-                pass
-    return None
+    """Barcode (orders.sample_id / bemor kodlari) → order_id. orders.id bo'yicha QIDIRMAYDI."""
+    od = _bp.lookup_order(sample_id)
+    return od["patient"]["order_id"] if od else None
 
-def open_result(order_id):
-    """Result yaratish yoki mavjudini qaytarish"""
-    with closing(db()) as conn:
-        with closing(conn.cursor()) as c:
-            c.execute("INSERT IGNORE INTO results(order_id,status) VALUES(%s,'open')", (order_id,))
-            conn.commit()
-            c.execute("SELECT id FROM results WHERE order_id=%s", (order_id,))
-            row = c.fetchone()
-            return row[0] if row else None
-
-def upsert_result_item(result_id, test_name, value_text, unit=None, ref_text=None):
-    """Result item yaratish yoki yangilash"""
-    with closing(db()) as conn:
-        with closing(conn.cursor()) as c:
-            # Agar allaqachon mavjud bo'lsa, yangilash
-            c.execute("SELECT id FROM result_items WHERE result_id=%s AND tahlil_nomi=%s", 
-                     (result_id, test_name))
-            existing = c.fetchone()
-            if existing:
-                c.execute("""UPDATE result_items 
-                           SET qiymat=%s, birlik=%s, norma=%s
-                           WHERE id=%s""", 
-                         (value_text, unit, ref_text, existing[0]))
-            else:
-                c.execute("""INSERT INTO result_items(result_id, tahlil_nomi, qiymat, birlik, norma)
-                           VALUES(%s,%s,%s,%s,%s)""", 
-                         (result_id, test_name, value_text, unit, ref_text))
-            conn.commit()
 
 def save_raw(raw):
-    """Raw HL7 xabarni oylik papkaga saqlash: BASE_DIR/YYYYMM/bk280_raw_YYYYMMDD_HHMMSS.txt"""
+    """Raw xabarni oylik papkaga saqlash: BASE_DIR/YYYYMM/bk280_raw_YYYYMMDD_HHMMSS.txt
+    (biochemistry_window shu nom/papkadan o'qiydi — o'zgartirmang)"""
     dt = datetime.now()
     month_folder = os.path.join(BASE_DIR, dt.strftime("%Y%m"))
     os.makedirs(month_folder, exist_ok=True)
-    fname = dt.strftime("bk280_raw_%Y%m%d_%H%M%S.txt")
-    path = os.path.join(month_folder, fname)
+    path = os.path.join(month_folder, dt.strftime("bk280_raw_%Y%m%d_%H%M%S.txt"))
+    if os.path.exists(path):   # bir soniyada 2 ta natija
+        path = path.replace(".txt", f"_{dt.microsecond // 1000:03d}.txt")
     with open(path, "w", encoding="utf-8", errors="ignore") as f:
         f.write(raw)
-    print(f"📄 RAW saqlandi: {path}")
+    _log(f"RAW saqlandi: {path}")
+    return path
 
-def parse_and_save_hl7(raw_msg):
-    """
-    HL7 xabarni parse qilish va bazaga saqlash.
-    BK-280 format:
-    - OBR-3: Sample ID (asosiy)
-    - PID-5: Patient Name (FamilyName^GivenName)
-    - OBX: Test natijalari (OBX-3: kod^nom, OBX-5: qiymat, OBX-6: unit, OBX-7: ref range)
-    """
+
+def _save_inbox(raw_msg):
     try:
-        # 1) Raw xabarni logga saqlash
-        save_raw(raw_msg)
-        
-        # 2) HL7 xabarni log jadvaliga saqlash
         con = db()
         try:
             with con.cursor() as cur:
@@ -162,242 +135,246 @@ def parse_and_save_hl7(raw_msg):
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""")
                 cur.execute("INSERT INTO hl7_inbox(raw_text, created_at) VALUES(%s, NOW())", (raw_msg,))
                 con.commit()
-        except Exception as e:
-            print(f"⚠️ HL7 log saqlashda xato: {e}")
         finally:
             con.close()
-        
-        # 3) Sample ID ni topish (OBR-3)
-        # Format: OBR|18||18|BIOBASE^BK-280|...
-        # OBR-1: sequence, OBR-2: placer order (bo'sh bo'lishi mumkin), OBR-3: filler order (sample_id)
-        sample_id = None
-        
-        # Variant 1: OBR segmentini to'liq parse qilish
-        obr_match = re.search(r"OBR\|([^|]+)\|([^|]*)\|([^|]+)\|", raw_msg)
-        if obr_match:
-            # OBR-3 = filler order number (sample_id)
-            sample_id = obr_match.group(3).strip()
-        
-        # Variant 2: Agar OBR-3 bo'sh bo'lsa, OBR-2 ni tekshirish
-        if not sample_id or not sample_id:
-            obr_match2 = re.search(r"OBR\|[^|]+\|([^|]+)\|", raw_msg)
-            if obr_match2:
-                sample_id = obr_match2.group(1).strip()
-        
-        if not sample_id:
-            print("⚠️ Sample ID topilmadi (OBR-2 va OBR-3 bo'sh)")
-            print(f"   OBR segment: {raw_msg[raw_msg.find('OBR'):raw_msg.find('OBR')+100] if 'OBR' in raw_msg else 'topilmadi'}")
-            return False
-        
-        print(f"📋 Sample ID: {sample_id}")
-        
-        # 4) Order topish
-        order_id = get_order_by_sample_id(sample_id)
-        if not order_id:
-            print(f"⚠️ Sample ID {sample_id} uchun order topilmadi")
-            return False
-        
-        print(f"✅ Order topildi: order_id={order_id}")
-        
-        # 5) Result yaratish
-        result_id = open_result(order_id)
-        if not result_id:
-            print(f"⚠️ Result yaratib bo'lmadi order_id={order_id}")
-            return False
-        
-        # 6) OBX segmentlardan test natijalarini olish
-        # Format: OBX|0|NM|272|GLUKOZA|16.66|mmol/L|3.89~6.1|H|...
-        pattern = r"OBX\|\d+\|NM\|(\d+)\|(.*?)\|([\d\.]+)\|([^\|]*)\|([^\|]*)\|([^\|]*)"
-        matches = re.findall(pattern, raw_msg)
-        
-        saved_count = 0
-        for kod, nom, qiymat, unit, ref_range, flag in matches:
-            test_name = nom.strip() if nom.strip() else kod.strip()
-            value_text = qiymat.strip()
-            unit_text = unit.strip() if unit.strip() else None
-            ref_text = ref_range.strip() if ref_range.strip() else None
-            flag_text = flag.strip() if flag.strip() else None  # N=Normal, H=High, L=Low
-            
-            # Agar qiymat '*' bo'lsa, saqlashdan o'tkazamiz
-            if value_text and value_text != '*':
-                upsert_result_item(result_id, test_name, value_text, unit_text, ref_text, flag_text)
-                saved_count += 1
-                flag_mark = f" [{flag_text}]" if flag_text else ""
-                print(f"  ✓ {test_name}: {value_text} {unit_text or ''}{flag_mark}")
-        
-        print(f"✅ Sample ID {sample_id} uchun {saved_count} ta natija saqlandi (order_id={order_id}, result_id={result_id})")
-        
-        # Avtomatik blanka yaratish (agar natijalar bo'lsa)
-        if saved_count > 0:
-            try:
-                from bk280_blanka_auto import save_blanka_to_file
-                blanka_path = save_blanka_to_file(order_id)
-                if blanka_path:
-                    print(f"✅ Blanka avtomatik yaratildi: {blanka_path}")
-            except Exception as e:
-                print(f"⚠️ Blanka yaratishda xato (e'tiborsiz): {e}")
-        
-        return True
-        
     except Exception as e:
-        print(f"❌ HL7 parse va saqlash xatosi: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+        _log(f"[OGOHLANTIRISH] hl7_inbox saqlanmadi: {e}")
 
-# Global variable for server socket (to stop listener)
-_bk280_server_socket = None
-_bk280_running = False
 
-def start_bk280_listener(host=None, port=None, order_update_callback=None):
-    """
-    BK-280 HL7 Listener ni thread da ishga tushirish
-    Returns: Thread object yoki None
-    """
-    global _bk280_server_socket, _bk280_running
-    
-    if _bk280_running:
-        print("[OGOHLANTIRISH] BK-280 listener allaqachon ishlamoqda")
-        return None
-    
-    server_host = host or SERVER_IP
-    server_port = port or SERVER_PORT
-    
-    def listener_thread():
-        global _bk280_server_socket, _bk280_running
-        
+# ─────────────────────────── XABARLARNI QAYTA ISHLASH ─────────────
+_running = False
+_threads = []
+_transports = []
+_callback = None
+_last_result_time = None
+_cfg_live = dict(_bio_eff)
+
+
+def _ack_bytes(kind_msh: dict, kind="R01") -> list:
+    style = _cfg_live.get("ack_style", "hl7")
+    out = []
+    if style in ("byte", "both"):
+        out.append(ACK)
+    if style in ("hl7", "both"):
+        out.append(_bp.wrap_mllp(_bp.build_hl7_ack(kind_msh, kind), ENCODING))
+    return out
+
+
+def _handle_result(message: str, send, fmt: str):
+    global _last_result_time
+    _last_result_time = datetime.now()
+    model = _cfg_live.get("model", _bp.DEFAULT_MODEL)
+    res = _bp.parse_message(message, model)
+    # ACK
+    try:
+        if fmt == "hl7":
+            for b in _ack_bytes(res.get("msh", {})):
+                send(b)
+    except Exception as e:
+        _log(f"[XATO] ACK yuborishda: {e}")
+    _log(f"◄ Natija: sample={res.get('sample_id') or '-'} (№{res.get('sample_no') or '-'}) "
+         f"| {res.get('name') or '?'} | {len(res.get('tests', {}))} ta test | {fmt}")
+    if res.get("unknown"):
+        _log(f"  Noma'lum kodlar (Tahlil kodlari oynasida bog'lang): {res['unknown']}")
+    save_raw(message)
+    _save_inbox(message)
+    # Callback — faqat barcode bazadagi buyurtmaga mos kelsa
+    sid = res.get("sample_id", "")
+    if sid and _callback:
         try:
-            _bk280_server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            _bk280_server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            _bk280_server_socket.bind((server_host, server_port))
-            _bk280_server_socket.listen(5)
-            _bk280_running = True
-
-            print("=" * 60)
-            print(f"🔵 BK-280 HL7 Listener")
-            print(f"📍 Port: {server_host}:{server_port}")
-            print(f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            print("=" * 60)
-            print(f"✅ Server ishga tushdi. Xabarlarni kutmoqda...\n")
-
-            while _bk280_running:
-                try:
-                    _bk280_server_socket.settimeout(1.0)  # 1 soniya timeout (tekshirish uchun)
-                    conn, addr = _bk280_server_socket.accept()
-                    print(f"\n🔵 Ulandi: {addr}")
-
-                    # Analyzer ulanishni ochiq ushlab turadi → biz ham ushlab turamiz
-                    full_data = b""
-
-                    while _bk280_running:
-                        try:
-                            chunk = conn.recv(4096)
-
-                            if not chunk:
-                                print("⚠ Ulanish yopildi (bo'sh paket).")
-                                break
-
-                            full_data += chunk
-
-                            # Paket oxiri \x1c\x0d (FS+CR) bilan tugaydi
-                            if b"\x1c\x0d" in full_data:
-                                # ACK qaytariladi
-                                conn.sendall(ACK)
-                                print("🔶 BK-280 ga ACK yuborildi.")
-
-                                # Matnni decode qilish
-                                text = full_data.decode(ENCODING, errors="ignore")
-                                print("📥 HL7 xabar qabul qilindi:")
-                                print(text[:200], " ..." if len(text) > 200 else "")
-                                
-                                # Parse qilish va bazaga saqlash
-                                success = parse_and_save_hl7(text)
-                                
-                                # Callback chaqirish (agar order_id topilsa)
-                                if success and order_update_callback:
-                                    try:
-                                        # Sample ID ni topish va order_id ni olish
-                                        obr_match = re.search(r"OBR\|([^|]+)\|([^|]*)\|([^|]+)\|", text)
-                                        if obr_match:
-                                            sample_id = obr_match.group(3).strip()
-                                            if sample_id:
-                                                order_id = get_order_by_sample_id(sample_id)
-                                                if order_id:
-                                                    order_update_callback(order_id)
-                                    except Exception as e:
-                                        print(f"⚠️ Callback chaqirishda xato: {e}")
-                                
-                                full_data = b""  # Yana xabar bo'lsa qayta yig'ish uchun bo'shatiladi
-
-                        except socket.timeout:
-                            continue  # Timeout - tekshirish uchun, davom etamiz
-                        except ConnectionResetError:
-                            print("❌ BK-280 ulanishni uzdi (10054).")
-                            break
-                        except Exception as e:
-                            print(f"❌ Xato: {e}")
-                            import traceback
-                            traceback.print_exc()
-                            break
-
-                    conn.close()
-                    print("🔁 Keyingi ulanishni kutamiz...\n")
-                    
-                except socket.timeout:
-                    continue  # Timeout - tekshirish uchun, davom etamiz
-                except OSError as e:
-                    if _bk280_running:
-                        print(f"❌ Socket xatosi: {e}")
-                    break
-                except Exception as e:
-                    if _bk280_running:
-                        print(f"❌ Xato: {e}")
-                        import traceback
-                        traceback.print_exc()
-                    break
-            
+            order_id = get_order_by_sample_id(sid)
+            if order_id:
+                _callback(order_id)
         except Exception as e:
-            print(f"❌ BK-280 listener thread xatosi: {e}")
-            import traceback
-            traceback.print_exc()
-        finally:
-            _bk280_running = False
-            if _bk280_server_socket:
-                try:
-                    _bk280_server_socket.close()
-                except:
-                    pass
-                _bk280_server_socket = None
-            print("🔴 BK-280 listener to'xtatildi")
-    
-    thread = threading.Thread(target=listener_thread, daemon=True)
-    thread.start()
-    return thread
+            _log(f"[OGOHLANTIRISH] callback: {e}")
+
+
+def _handle_query_hl7_qry(message: str, send):
+    q = _bp.parse_qry(message)
+    sid = q.get("sample_id", "")
+    model = _cfg_live.get("model", _bp.DEFAULT_MODEL)
+    _log(f"◄ QRY^Q02 (shtrix-kod): {sid or '-'}")
+    od = _bp.lookup_order(sid) if sid else None
+    send(_bp.wrap_mllp(_bp.build_qck(q, bool(od)), ENCODING))
+    if not od:
+        _log("  -> bemor topilmadi: QCK NF")
+        return
+    time.sleep(0.1)
+    items = _bp.worklist_items(od, model)
+    send(_bp.wrap_mllp(_bp.build_dsr(q, od, model), ENCODING))
+    _log(f"  -> DSR^Q03: {od['patient'].get('fish')} | tahlillar: {[a for a, *_ in items]}")
+
+
+def _handle_query_hl7_orm(message: str, send):
+    sid = _bp.orm_sample_id(message)
+    model = _cfg_live.get("model", _bp.DEFAULT_MODEL)
+    msh = _bp.parse_qry(message).get("msh", {})
+    _log(f"◄ ORM^O01 (shtrix-kod): {sid or '-'}")
+    od = _bp.lookup_order(sid) if sid else None
+    send(_bp.wrap_mllp(_bp.build_orr(msh, od, sid, model), ENCODING))
+    _log(f"  -> ORR^O02: {'topildi ' + str(od['patient'].get('fish')) if od else 'topilmadi (AR)'}")
+
+
+def _handle_query_astm(message: str, send):
+    sid = _gp.astm_query_sample_id(message)
+    model = _cfg_live.get("model", _bp.DEFAULT_MODEL)
+    _log(f"◄ ASTM Q (shtrix-kod): {sid or '-'}")
+    od = _bp.lookup_order(sid) if sid else None
+    send(b"\x05")
+    send(_gp.astm_frames(_bp.build_astm_worklist(sid, od, model)))
+    send(b"\x04")
+    _log(f"  -> ASTM worklist: {'topildi ' + str(od['patient'].get('fish')) if od else 'topilmadi'}")
+
+
+def _handle_message(message: str, send):
+    kind = _bp.message_kind(message)
+    if kind == "oru":
+        _handle_result(message, send, "hl7")
+    elif kind == "astm_result":
+        _handle_result(message, send, "astm")
+    elif kind == "qry":
+        _handle_query_hl7_qry(message, send)
+    elif kind == "orm":
+        _handle_query_hl7_orm(message, send)
+    elif kind == "astm_query":
+        _handle_query_astm(message, send)
+    elif kind == "ack":
+        _log("◄ ACK (analizator tasdiqladi)")
+    else:
+        _log(f"  Noma'lum xabar: {message[:80]!r}")
+        try:
+            msh = _bp.parse_qry(message).get("msh", {})
+            if msh:
+                send(_bp.wrap_mllp(_bp.build_hl7_ack(msh, "R01", "AR", "Unsupported message type", "200"), ENCODING))
+        except Exception:
+            pass
+
+
+def parse_and_save_hl7(raw_msg):
+    """Moslik uchun (eski nom): RAW + inbox saqlaydi, natijani qaytaradi."""
+    res = _bp.parse_message(raw_msg, _cfg_live.get("model", _bp.DEFAULT_MODEL))
+    save_raw(raw_msg)
+    _save_inbox(raw_msg)
+    return res
+
+
+# ─────────────────────────── PUBLIC API ───────────────────────
+def _run_transport(cfg: dict, label: str):
+    tr = _gp.Transport(cfg, log=_log)
+    _transports.append(tr)
+    _log(f"{ANALYZER_NAME} [{label}] — {tr.describe()}")
+
+    def handler(message, send):
+        try:
+            _handle_message(message, send)
+        except Exception as e:
+            log_error(f"handler: {e}\n{traceback.format_exc()}")
+    try:
+        tr.run(handler, lambda: _running)
+    finally:
+        tr.close()
+
+
+def start_bk280_listener(host=None, port=None, order_update_callback=None, cfg=None):
+    """
+    Bioximiya listener (background thread). Natija porti + (agar farq qilsa) LIS so'rov porti.
+    Returns: birinchi Thread yoki None
+    """
+    global _running, _callback, _cfg_live, ANALYZER_NAME, _threads, _transports
+    if _running:
+        _log("Allaqachon ishlayapti")
+        return _threads[0] if _threads else None
+
+    full = dict(cfg) if cfg else dict(_bio_cfg)
+    if host:
+        full["ip"] = host
+    if port:
+        full["port"] = int(port)
+    eff = _bp.effective_config(full)
+    _cfg_live = eff
+    ANALYZER_NAME = _bp.PROFILES.get(eff.get("model", _bp.DEFAULT_MODEL), {}).get("name", eff.get("model"))
+    _callback = order_update_callback
+    _running = True
+    _threads = []
+    _transports = []
+
+    t = threading.Thread(target=_run_transport, args=(eff, "natija"), daemon=True, name="bio-listener")
+    t.start()
+    _threads.append(t)
+
+    lis_port = int(eff.get("lis_port") or 0)
+    if eff.get("connection_type") == "tcp_server" and lis_port and lis_port != int(eff.get("port", 0)):
+        cfg2 = dict(eff)
+        cfg2["port"] = lis_port
+        cfg2["ack_style"] = "hl7"   # so'rov portida to'liq HL7 javoblar
+        t2 = threading.Thread(target=_run_transport, args=(cfg2, "shtrix-kod"), daemon=True, name="bio-lis")
+        t2.start()
+        _threads.append(t2)
+    return t
+
+
+def push_worklist(sample_id: str, style: str = "dsr"):
+    """SINOV: so'ramaydigan analizatorga (BK-280 V1) bemor ma'lumotini o'zimiz yuboramiz —
+    analizator bizga ochiq ulangan natija porti orqali. style: 'dsr' (DSR^Q03) | 'orm' (ORM^O01).
+    Qaytaradi (ok, xabar). Analizator javobi (ACK/boshqa) logda ko'rinadi."""
+    sid = (sample_id or "").strip()
+    if not sid:
+        return False, "shtrix-kod bo'sh"
+    tr = next((t for t in _transports if t.connected), None)
+    if tr is None:
+        return False, "Analizator hozir ulanmagan (natija porti) — yuborib bo'lmaydi"
+    od = _bp.lookup_order(sid)
+    if not od:
+        return False, f"{sid} bazada topilmadi (orders.sample_id)"
+    model = _cfg_live.get("model", _bp.DEFAULT_MODEL)
+    items = _bp.worklist_items(od, model)
+    if style == "orm":
+        msg = _bp.build_orm_new_order(od, sid, model, app="BIOBASE", fac="BK-280")
+    else:
+        q = {"sample_id": sid, "query_id": "1", "qrd": "", "qrf": "",
+             "msh": {"app": "BIOBASE", "fac": "BK-280", "ctrl": datetime.now().strftime("%H%M%S")}}
+        msg = _bp.build_dsr(q, od, model)
+    try:
+        tr.send(_bp.wrap_mllp(msg, ENCODING))
+    except Exception as e:
+        return False, f"yuborishda xato: {e}"
+    _log(f"► PUSH {style.upper()} yuborildi: {sid} | {od['patient'].get('fish')} | tahlillar: {[a for a, *_ in items]}")
+    return True, (f"Yuborildi ({style.upper()}): {od['patient'].get('fish')}, "
+                  f"tahlillar: {', '.join(n for _, n, *_ in items)}\n"
+                  "Analizator ekranida «Заказ образца» / bemor ro'yxatini tekshiring. "
+                  "Analizator javobi logs/bio_*.log da.")
+
 
 def stop_bk280_listener():
-    """BK-280 listener ni to'xtatish"""
-    global _bk280_server_socket, _bk280_running
-    
-    _bk280_running = False
-    if _bk280_server_socket:
+    global _running
+    _running = False
+    for tr in list(_transports):
         try:
-            _bk280_server_socket.close()
-        except:
+            tr.close()
+        except Exception:
             pass
-        _bk280_server_socket = None
+    _log("Bioximiya listener to'xtatilish so'rovi")
+
+
+def is_running() -> bool:
+    return _running and any(t.is_alive() for t in _threads)
+
+
+def get_status() -> dict:
+    return {"running": is_running(), "analyzer": ANALYZER_NAME,
+            "connected": any(tr.connected for tr in _transports),
+            "last_result": _last_result_time,
+            "transports": [tr.describe() for tr in _transports]}
+
 
 def main():
-    """Standalone ishga tushirish (test uchun)"""
-    import threading
-    thread = start_bk280_listener()
-    if thread:
-        try:
-            thread.join()
-        except KeyboardInterrupt:
-            print("\n\n⚠️ To'xtatilmoqda...")
-            stop_bk280_listener()
+    t = start_bk280_listener()
+    try:
+        while t and t.is_alive():
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        stop_bk280_listener()
 
 
 if __name__ == "__main__":
-    import threading
     main()

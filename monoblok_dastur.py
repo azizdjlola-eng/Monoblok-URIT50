@@ -2381,18 +2381,35 @@ def create_nechiporenko_table_in_doc(doc, result_json, order_info):
                       ["#", "Shaklli elementlar", "Natija", "Norma (Ayol)", "Norma (Erkak)"],
                       [1.0, 8.0, 3.0, 3.5, 3.5])
 
+    # Jins bo'yicha chegara: ayol → 3-ustun (norma_a), erkak → 4-ustun (norma_e)
+    _jins_l = ((order_info or {}).get('jins') or '').strip().lower()
+    _is_erkak = _jins_l in ('erkak', 'e', 'm', 'male') or 'erkak' in _jins_l
+
     rows_data = [
-        ("Leykotsitlar",   "leykot",      "4000 gacha", "2000 gacha"),
-        ("Eritrotsitlar",  "eritr",        "1000 gacha", "1000 gacha"),
-        ("Silindirlar",    "silindirlar",  "20 gacha",   "20 gacha"),
+        ("Leykotsitlar",   "leykot",      "4000 gacha", "2000 gacha", 4000, 2000),
+        ("Eritrotsitlar",  "eritr",        "1000 gacha", "1000 gacha", 1000, 1000),
+        ("Silindirlar",    "silindirlar",  "20 gacha",   "20 gacha",   20,   20),
     ]
-    for i, (ko_rsatkich, kalit, norma_a, norma_e) in enumerate(rows_data, 1):
+    for i, (ko_rsatkich, kalit, norma_a, norma_e, lim_a, lim_e) in enumerate(rows_data, 1):
+        natija = data.get(kalit, '')
+        limit = lim_e if _is_erkak else lim_a
+        color = None
+        try:
+            if str(natija).strip() != '' and float(str(natija).replace(',', '.').replace(' ', '')) > limit:
+                color = RGBColor(0xFF, 0x00, 0x00)   # normadan yuqori → qizil
+        except (ValueError, TypeError):
+            pass
         row = table.add_row()
         _cell_write(row.cells[0], str(i))
         _cell_write(row.cells[1], ko_rsatkich, align=WD_ALIGN_PARAGRAPH.LEFT)
-        _cell_write(row.cells[2], data.get(kalit, ''), bold=True)
-        _cell_write(row.cells[3], norma_a)
-        _cell_write(row.cells[4], norma_e)
+        p = row.cells[2].paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(p, 0, 0, line_spacing=1)
+        _add_run_tnr(p, str(natija) if natija not in (None, '') else '', 11,
+                     bold=True, color_rgb=color)
+        # Bemor jinsiga mos norma ustuni qalin
+        _cell_write(row.cells[3], norma_a, bold=not _is_erkak)
+        _cell_write(row.cells[4], norma_e, bold=_is_erkak)
     doc.add_paragraph()
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3244,12 +3261,23 @@ def _create_blood_group_table(doc, raw_value):
         _add_run_tnr(p_soz, soz, 11, bold=True)
 
 # Umumiy qon tahlili (BC-20S) — Ko'rsatkich, Qisqa nom, Birlik, Norma, Natija (jami 19 sm)
+# Umumiy qon tahlili blankasi qatorlari. 3-diff (Mid/Gran) va 5-diff (Neu/Mon/Eos/Bas)
+# analizatorlar uchun umumiy: CBC_HEMA_OPTIONAL_ROWS dagi kodlar faqat natijada bo'lsa chiqadi
+# (Mindray BC-20S 3-diff → Mid/Gran; Genrui KT-6610 / Edan H60 5-diff → Neu/Mon/Eos/Bas).
 CBC_HEMA_ROWS = [
     ("Leykotsitlar soni", "WBC", "10⁹/L", "4.0 – 9.0"),
+    ("Neytrofillar soni", "Neu#", "10⁹/L", "2.0 – 7.0"),
     ("Limfotsitlar soni", "Lymph#", "10⁹/L", "0.8 – 4.0"),
+    ("Monotsitlar soni", "Mon#", "10⁹/L", "0.1 – 1.0"),
+    ("Eozinofillar soni", "Eos#", "10⁹/L", "0.02 – 0.5"),
+    ("Bazofillar soni", "Bas#", "10⁹/L", "0 – 0.1"),
     ("Monotsit + Eozinofil + Bazofil soni", "Mid#", "10⁹/L", "0.1 – 1.5"),
     ("Neytrofillar soni", "Gran#", "10⁹/L", "2.0 – 7.0"),
+    ("Neytrofillar ulushi", "Neu%", "%", "50 – 70"),
     ("Limfotsitlar ulushi", "Lymph%", "%", "20 – 40"),
+    ("Monotsitlar ulushi", "Mon%", "%", "3 – 10"),
+    ("Eozinofillar ulushi", "Eos%", "%", "0.5 – 5"),
+    ("Bazofillar ulushi", "Bas%", "%", "0 – 1"),
     ("Monotsit + Eozinofil + Bazofil ulushi", "Mid%", "%", "3 – 15"),
     ("Neytrofillar ulushi", "Gran%", "%", "40 – 70"),
     ("Eritrotsitlar soni", "RBC", "10¹²/L", "3.8 – 5.5"),
@@ -3267,6 +3295,13 @@ CBC_HEMA_ROWS = [
     ("Neytrofil / Limfotsit nisbati", "NLR", "—", "1 – 3"),
     ("Trombotsit / Limfotsit nisbati", "PLR", "—", "100 – 300"),
 ]
+# Faqat natijada mavjud bo'lsa chiqadigan qatorlar (analizator turiga qarab)
+CBC_HEMA_OPTIONAL_ROWS = {"Neu#", "Neu%", "Mon#", "Mon%", "Eos#", "Eos%", "Bas#", "Bas%",
+                          "Mid#", "Mid%", "Gran#", "Gran%"}
+# Mid/Gran (3-diff) qatorlari: 5-diff natija bo'lsa ham, natijasi bo'lmasa ham ko'rsatilmaydi;
+# 3-diff natijada (5-diff kalitlar yo'q) — eski blanka ko'rinishi saqlanadi ("-" bilan ham)
+CBC_HEMA_3DIFF_ROWS = {"Mid#", "Mid%", "Gran#", "Gran%"}
+CBC_HEMA_5DIFF_KEYS = {"Neu#", "Neu%", "Mon#", "Mon%", "Eos#", "Eos%", "Bas#", "Bas%"}
 
 def _parse_norma_to_min_max(norma_str):
     """Norma matnidan (masalan '4.0 – 9.0') min, max olish. 'manfiy' -> 0, 0."""
@@ -3329,6 +3364,20 @@ def _get_value_color_for_norma(val_str, norma_str, is_yassi_epitiliy=False):
         return RGBColor(0x00, 0x00, 0xFF)  # ko'k
     return None  # qora
 
+def _hema_analyzer_label() -> str:
+    """Blanka uchun gemotologiya analizatori nomi (sozlamadan). Standart: Mindray BC-20S."""
+    try:
+        cfg = get_analyzer("gemotologiya")
+        model = cfg.get("model") or "mindray_bc20s"
+        import gemo_protokol as _gp
+        name = _gp.PROFILES.get(model, {}).get("name", "")
+        # "Mindray BC-20s / BC-30s / ... (HL7, ...)" → birinchi variant, qavssiz
+        short = name.split("(")[0].split("/")[0].strip()
+        return short or "Mindray BC-20S"
+    except Exception:
+        return "Mindray BC-20S"
+
+
 def create_hematology_cbc_table_in_doc(doc: Document, result_data, order_info: dict):
     """Umumiy qon tahlili (BC-20S) jadvali — Ko'rsatkich, Qisqa nom, Birlik, Norma, Natija.
     Multi-ref norma: yosh va jinsga qarab norma aniqlanadi.
@@ -3358,7 +3407,8 @@ def create_hematology_cbc_table_in_doc(doc: Document, result_data, order_info: d
     _add_run_tnr(heading, "UMUMIY QON TAHLILI", 14, bold=True,
                  color_rgb=_group_title_rgb())
     sample_no = rd.get('sid') or rd.get('sno') or order_info.get('sample_id', '') or ''
-    meta = f"Avtomatik gematologik analizator: Mindray BC-20S namuna sample № {sample_no}".strip()
+    _hema_model = rd.get('analyzer') or _hema_analyzer_label()
+    meta = f"Avtomatik gematologik analizator: {_hema_model} namuna sample № {sample_no}".strip()
     if meta:
         p_meta = doc.add_paragraph()
         p_meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -3376,11 +3426,19 @@ def create_hematology_cbc_table_in_doc(doc: Document, result_data, order_info: d
         ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_para_spacing(ph, 0, 0, line_spacing=1)
         _add_run_tnr(ph, hdr, 11, bold=True)
-    KOD_ALIAS = {'Lymph#': 'LYM#', 'Lymph%': 'LYM%', 'Mid#': 'MID#', 'Mid%': 'MID%', 'Gran#': 'GRAN#', 'Gran%': 'GRAN%'}
+    KOD_ALIAS = {'Lymph#': 'LYM#', 'Lymph%': 'LYM%', 'Mid#': 'MID#', 'Mid%': 'MID%', 'Gran#': 'GRAN#', 'Gran%': 'GRAN%',
+                 'Neu#': 'NEU#', 'Neu%': 'NEU%', 'Mon#': 'MON#', 'Mon%': 'MON%',
+                 'Eos#': 'EOS#', 'Eos%': 'EOS%', 'Bas#': 'BAS#', 'Bas%': 'BAS%'}
+    _has_5diff = any((vals.get(k) or vals.get(KOD_ALIAS.get(k, ''))) for k in CBC_HEMA_5DIFF_KEYS)
     for koorsatkich, kod, birlik, default_norma in CBC_HEMA_ROWS:
         natija = vals.get(kod) or vals.get(KOD_ALIAS.get(kod, ''))
         if natija is None:
             natija = ''
+        # Analizator turiga mos qatorlar: 5-diff qatorlar faqat natija bo'lsa;
+        # 3-diff (Mid/Gran) qatorlar 5-diff natijada yashiriladi
+        if kod in CBC_HEMA_OPTIONAL_ROWS and not str(natija).strip():
+            if kod in CBC_HEMA_5DIFF_KEYS or (kod in CBC_HEMA_3DIFF_ROWS and _has_5diff):
+                continue
         natija_str = str(natija).strip() if natija else '-'
 
         # Multi-ref norma: yosh va jinsga qarab norma aniqlash
@@ -10039,7 +10097,8 @@ class MonoblokApp:
         
         # Bir nechta mumkin bo'lgan fayl nomlarini tekshirish
         possible_names = [
-            "COM4_Urit50_to_Blank_fixed  cursor.py",  # Asosiy fayl (ikkita bo'sh joy)
+            "urit50_service.py",                       # Asosiy xizmat (EXE ham shuni ishlatadi)
+            "COM4_Urit50_to_Blank_fixed  cursor.py",  # Eski nom (endi urit50_service ga yo'naltiradi)
             "COM4_Urit50_to_Blank_fixed cursor.py",   # Bitta bo'sh joy
             "COM4_Urit50_to_Blank_fixed_cursor.py",   # Bo'sh joy yo'q
         ]
@@ -10193,11 +10252,13 @@ class MonoblokApp:
             bio_host = bio_cfg.get("ip", "0.0.0.0")
             bio_port = int(bio_cfg.get("port", 8087))
 
-            self.bk280_listener_thread = start_bk280_listener(host=bio_host, port=bio_port, order_update_callback=on_bk280_result)
+            # To'liq sozlama (model, ulanish turi, protokol, LIS porti) — universal listener
+            self.bk280_listener_thread = start_bk280_listener(order_update_callback=on_bk280_result, cfg=bio_cfg)
             if self.bk280_listener_thread:
-                self.status_var.set(f"[OK] BK-280 listener ishga tushdi (Port: {bio_port})")
-                print(f"[OK] BK-280 HL7 Listener ishga tushdi: {bio_host}:{bio_port}")
-                print(f"   Analizator IP: {bio_host}, Port: {bio_port}, Protocol: HL7")
+                self.status_var.set(f"[OK] Bioximiya listener ishga tushdi ({bio_cfg.get('model', 'biobase_bk')})")
+                print(f"[OK] Bioximiya listener ishga tushdi: {bio_cfg.get('model', 'biobase_bk')} "
+                      f"{bio_cfg.get('connection_type', 'tcp_server')} {bio_host}:{bio_port} "
+                      f"(LIS port: {bio_cfg.get('lis_port', 0) or 'bir xil'})")
                 return True
             else:
                 print("[OGOHLANTIRISH] BK-280 listener ishga tushmadi")
@@ -10209,7 +10270,15 @@ class MonoblokApp:
             return False
 
     def start_bk280_lis_server(self):
-        """BK-280 LIS Query Server ni ishga tushirish (barcode scan → bemor ma'lumotlari)"""
+        """Shtrix-kod so'rovi (QRY/ORM/ASTM Q) endi universal bioximiya listener ichida
+        (bk280_listener → lis_port). Alohida server kerak emas — moslik uchun qoldirilgan."""
+        try:
+            from bk280_listener import is_running as _bio_running
+            if _bio_running():
+                print("[OK] Shtrix-kod so'rovi: universal bioximiya listener ichida (lis_port)")
+                return True
+        except Exception:
+            pass
         if not BK280_LIS_AVAILABLE:
             print("[OGOHLANTIRISH] BK-280 LIS server mavjud emas")
             return False
@@ -10248,20 +10317,20 @@ class MonoblokApp:
                 except Exception as ex:
                     print(f"[OGOHLANTIRISH] BC-20S callback xatosi: {ex}")
 
-            # Sozlamalardan IP/port olish (analizator_config.json)
+            # Sozlamalardan to'liq konfiguratsiya (model, ulanish turi, protokol, IP/port/COM)
             gema_cfg = get_analyzer("gemotologiya")
             if not gema_cfg.get("enabled", True):
-                print("[INFO] BC-20S (gemotologiya) sozlamalarda o'chirilgan — ishga tushirilmadi")
+                print("[INFO] Gemotologiya analizatori sozlamalarda o'chirilgan — ishga tushirilmadi")
                 return False
-            gema_ip = gema_cfg.get("ip", "192.168.0.2")
-            gema_port = int(gema_cfg.get("port", 5100))
 
             self.bc20s_listener = start_bc20s_listener(
-                analyzer_ip=gema_ip, port=gema_port,
-                result_callback=on_bc20s_result
+                result_callback=on_bc20s_result, cfg=gema_cfg
             )
             if self.bc20s_listener:
-                print(f"[OK] BC-20S client ishga tushdi: -> {gema_ip}:{gema_port}")
+                _ct = gema_cfg.get("connection_type", "tcp_client")
+                _where = (gema_cfg.get("com_port", "COM1") if _ct == "serial"
+                          else f"{gema_cfg.get('ip', '')}:{gema_cfg.get('port', 5100)}")
+                print(f"[OK] Gemotologiya listener ishga tushdi: {gema_cfg.get('model', 'mindray_bc20s')} {_ct} {_where}")
                 return True
             else:
                 print("[OGOHLANTIRISH] BC-20S client ishga tushmadi")
@@ -10282,7 +10351,12 @@ class MonoblokApp:
     # ══════════════════════════════════════════════════════════════════════
     #  GEMOTOLOGIYA NATIJA NAZORATI (gemo_monitor.py)
     #  12.09.2026: analizator ulangan, heartbeat kelgan, lekin natija bir kun
-    #  tushmagan — hech kim sezmagan. Endi 3 qoida + ulanish tekshiruvi.
+    #  tushmagan — hech kim sezmagan. Endi 4 qoida + ulanish tekshiruvi.
+    #  16.09.2026: signal to'g'ri chiqdi (probirka esdan chiqqan), lekin sabab
+    #  matni yolg'on edi va bir bemor kun bo'yi qayta-qayta signal berdi.
+    #  Endi: aniq sabab (namuna o'tkazilmagan / analizator yubormayapti /
+    #  ulanish), popup har muammo uchun eng ko'pi 2 marta, "bugun signal
+    #  bermasin" belgisi (gemo_monitor.snooze_order).
     # ══════════════════════════════════════════════════════════════════════
     def start_gemo_monitor(self) -> bool:
         if not GEMO_MONITOR_AVAILABLE:
@@ -10334,11 +10408,12 @@ class MonoblokApp:
             self.status_var.set("[OGOHLANTIRISH] " + res.get("summary", "Gemotologiya natija muammosi"))
             if not cfg.get("popup", True):
                 return
-            body = (gemo_monitor.format_report(res) + "\n\n"
-                    "Ulanishni tekshiring: kabel / analizator LIS sozlamasi\n"
-                    "(Настройка → Связь → Автопередача). Kelmagan natijalarni\n"
-                    "analizatorda Обзор → Передать bilan qayta yuboring.")
-            messagebox.showwarning("⚠ GEMOTOLOGIYA — QON NATIJASI KELMAYAPTI",
+            # Faqat muammo + aniq harakat (to'liq ro'yxat holat oynasida).
+            # Har qatorda sabab bor — umumiy "Автопередача" nasihati yo'q.
+            body = (gemo_monitor.format_report(res, full=False) + "\n\n"
+                    "Bemor keyin topshirsa yoki tekshirib bo'lsangiz — 🩸 Qon tugmasi → "
+                    "\"Bugun signal bermasin\" deb belgilang, shunda qayta signal bermaydi.")
+            messagebox.showwarning("⚠ GEMOTOLOGIYA — QON NATIJASI",
                                    body, parent=self.root)
         except Exception as e:
             print(f"[GemoNazorat] Ogohlantirishda xato: {e}")
@@ -10351,7 +10426,7 @@ class MonoblokApp:
 
         win = tk.Toplevel(self.root)
         win.title("🩸 Gemotologiya — natija kelishi nazorati")
-        win.geometry("820x560")
+        win.geometry("900x600")
         win.transient(self.root)
 
         head = ttk.Label(win, text="Tekshirilmoqda...", font=("Arial", 11, "bold"))
@@ -10389,6 +10464,62 @@ class MonoblokApp:
                 self.open_hematology_raw()
             except Exception as e:
                 messagebox.showerror("Gemotologiya", str(e), parent=win)
+
+        # ── "Bugun signal bermasin" — muammoli bemorni bugun signaldan chiqarish ──
+        # (hamshira sababini biladi: abetdan keyin keladi, qon olinmadi va h.k.)
+        snz = ttk.Frame(win)
+        snz.pack(fill=tk.X, padx=12, pady=(0, 4))
+        ttk.Label(snz, text="Bemor:").pack(side=tk.LEFT)
+        snz_var = tk.StringVar()
+        snz_cb = ttk.Combobox(snz, textvariable=snz_var, state="readonly", width=44)
+        snz_cb.pack(side=tk.LEFT, padx=4)
+        ttk.Label(snz, text="Sabab:").pack(side=tk.LEFT, padx=(8, 0))
+        note_var = tk.StringVar(value="keyin topshiradi")
+        note_cb = ttk.Combobox(snz, textvariable=note_var, width=22,
+                               values=["keyin topshiradi", "abetdan keyin", "ertaga keladi",
+                                       "qon olinmadi", "tekshirildi"])
+        note_cb.pack(side=tk.LEFT, padx=4)
+        snz_map = {}
+
+        def _fill_snooze(res):
+            snz_map.clear()
+            items = []
+            st = res.get("stats", {}) or {}
+            for d in st.get("missing_details") or []:
+                if d.get("snoozed"):
+                    continue
+                snz_map[d["who"]] = d["id"]
+                items.append(d["who"])
+            for r in st.get("orphans") or []:
+                if r.get("snoozed"):
+                    continue
+                label = f"{r['fish']} (№{r['sample_id'] or r['id']}) — egasiz natija"
+                snz_map[label] = r["id"]
+                items.append(label)
+            snz_cb["values"] = items
+            snz_var.set(items[0] if items else "")
+
+        def _snooze():
+            oid = snz_map.get(snz_var.get())
+            if not oid:
+                messagebox.showinfo("Gemotologiya", "Muammoli bemor tanlanmagan.", parent=win)
+                return
+            gemo_monitor.snooze_order(oid, note_var.get().strip())
+            _refresh()
+
+        def _unsnooze_all():
+            for oid in list(gemo_monitor.get_snoozed().keys()):
+                gemo_monitor.unsnooze_order(oid)
+            _refresh()
+
+        ttk.Button(snz, text="⏳ Bugun signal bermasin", command=_snooze).pack(side=tk.LEFT, padx=4)
+        ttk.Button(snz, text="Belgilarni bekor qilish", command=_unsnooze_all).pack(side=tk.LEFT, padx=4)
+
+        _render_base = _render
+
+        def _render(res):
+            _render_base(res)
+            _fill_snooze(res)
 
         ttk.Button(btns, text="🔄 Qayta tekshirish", command=_refresh).pack(side=tk.LEFT, padx=4)
         ttk.Button(btns, text="Gemotologiya oynasi", command=_open_hema).pack(side=tk.LEFT, padx=4)
@@ -19436,12 +19567,13 @@ Sana: {_sana_fmt}"""
         kodga tegmasdan o'zgartirish (IP, port, COM, parol va h.k.).
         Sozlamalar analizator_config.json ga saqlanadi."""
         import socket as _socket_mod
+        import datetime as _dt
 
         cfg = load_config()
 
         dialog = tk.Toplevel(self.root)
         dialog.title("⚙ Tizim Sozlamalari — Ulanish va Baza")
-        dialog.geometry("640x600")
+        dialog.geometry("700x800")
         dialog.transient(self.root)
         try:
             dialog.grab_set()
@@ -19460,7 +19592,7 @@ Sana: {_sana_fmt}"""
             v = tk.StringVar(value=str(value if value is not None else cfg.get(section, {}).get(key, "")))
             if options is not None:
                 state = "readonly" if readonly else "normal"
-                w = ttk.Combobox(parent, textvariable=v, values=options, width=width - 3, state=state)
+                w = ttk.Combobox(parent, textvariable=v, values=options, width=max(4, width - 3), state=state)
             else:
                 w = ttk.Entry(parent, textvariable=v, width=width, show=show)
             w.grid(row=r, column=1, sticky=tk.W, padx=8, pady=6)
@@ -19534,107 +19666,595 @@ Sana: {_sana_fmt}"""
                   text="Boshqa kompyuterdagi bazaga ulanish: o'sha kompyuter IP sini Host maydoniga yozing.",
                   foreground="#666", wraplength=560).grid(row=7, column=0, columnspan=2, sticky=tk.W, padx=8)
 
-        # ───────────────────────── SIYDIK (URIT-50, Serial) ─────────────
+        # ───────────────── SIYDIK (universal: URIT-50 / Dirui / Mindray UA / HL7 / ASTM) ─────
+        # Model va ulanish turi sozlamadan — mijozda boshqa analizator bo'lsa kod o'zgarmaydi.
+        # Profillar (standart port/baud/protokol, ko'rsatma): siydik_protokol.PROFILES
+        try:
+            import siydik_protokol as _spk
+            _S_PROFILES = _spk.PROFILES
+        except Exception as _spe:
+            print(f"[OGOHLANTIRISH] siydik_protokol yuklanmadi: {_spe}")
+            _S_PROFILES = {"urit50": {"name": "URIT-50", "connection_type": "serial",
+                                      "protocol": "text", "baudrate": 9600, "hint": ""}}
+        _s_key_by_name = {v["name"]: k for k, v in _S_PROFILES.items()}
+        _s_name_by_key = {k: v["name"] for k, v in _S_PROFILES.items()}
+
         tab_s = ttk.Frame(nb)
-        nb.add(tab_s, text="🟡 Siydik (URIT-50)")
+        nb.add(tab_s, text="🟡 Siydik")
         add_enabled(tab_s, 0, "siydik")
-        add_row(tab_s, 1, "Ulanish turi:", "siydik", "connection_type",
-                options=["serial"], readonly=True)
-        add_row(tab_s, 2, "COM port:", "siydik", "com_port",
+
+        # Model (ko'rinadigan nom) ↔ kalit (saqlanadi)
+        _cur_model = (cfg.get("siydik", {}).get("model") or "urit50")
+        _model_key_var = tk.StringVar(value=_cur_model)
+        vars_map[("siydik", "model")] = _model_key_var
+        _model_name_var = tk.StringVar(value=_s_name_by_key.get(_cur_model, _cur_model))
+        ttk.Label(tab_s, text="Analizator modeli:").grid(row=1, column=0, sticky=tk.W, padx=8, pady=6)
+        _model_combo = ttk.Combobox(tab_s, textvariable=_model_name_var, width=44, state="readonly",
+                                    values=list(_s_key_by_name.keys()))
+        _model_combo.grid(row=1, column=1, sticky=tk.W, padx=8, pady=6)
+
+        add_row(tab_s, 2, "Ulanish turi:", "siydik", "connection_type",
+                options=["serial", "tcp_server", "tcp_client"], readonly=True)
+        add_row(tab_s, 3, "Protokol (format):", "siydik", "protocol",
+                value=cfg.get("siydik", {}).get("protocol") or "auto",
+                options=["auto", "text", "hl7", "astm"], readonly=True)
+
+        # ── Serial maydonlari ──
+        _s_serial = ttk.LabelFrame(tab_s, text="COM port (serial)")
+        _s_serial.grid(row=4, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=4)
+        add_row(_s_serial, 0, "COM port:", "siydik", "com_port",
                 options=["COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8"])
-        add_row(tab_s, 3, "Baudrate:", "siydik", "baudrate", options=BAUD_OPTS)
-        add_row(tab_s, 4, "Bayt o'lchami:", "siydik", "bytesize",
+        add_row(_s_serial, 1, "Baudrate:", "siydik", "baudrate", options=BAUD_OPTS)
+        add_row(_s_serial, 2, "Bayt o'lchami:", "siydik", "bytesize",
                 options=["5", "6", "7", "8"], readonly=True)
-        add_row(tab_s, 5, "Parity (juftlik):", "siydik", "parity",
+        add_row(_s_serial, 3, "Parity (juftlik):", "siydik", "parity",
                 options=["N", "E", "O"], readonly=True)
-        add_row(tab_s, 6, "Stop bits:", "siydik", "stopbits",
+        add_row(_s_serial, 4, "Stop bits:", "siydik", "stopbits",
                 options=["1", "2"], readonly=True)
-        add_row(tab_s, 7, "Timeout (sek):", "siydik", "timeout")
-        add_row(tab_s, 8, "Kodirovka:", "siydik", "encoding", options=ENC_OPTS)
+        add_row(_s_serial, 5, "Timeout (sek):", "siydik", "timeout")
 
-        def test_serial():
-            port = vars_map[("siydik", "com_port")].get().strip()
-            if serial is None:
-                messagebox.showwarning("Siydik", "pyserial moduli o'rnatilmagan.", parent=dialog)
+        # ── TCP maydonlari ──
+        _s_tcp = ttk.LabelFrame(tab_s, text="Tarmoq (TCP) — HL7 / ASTM analizatorlar")
+        _s_tcp.grid(row=5, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=4)
+        add_row(_s_tcp, 0, "IP:", "siydik", "ip",
+                value=cfg.get("siydik", {}).get("ip") or "0.0.0.0",
+                options=["0.0.0.0", "127.0.0.1"])
+        add_row(_s_tcp, 1, "Port:", "siydik", "port",
+                value=cfg.get("siydik", {}).get("port") or 5200)
+        add_row(_s_tcp, 2, "Qayta ulanish (sek):", "siydik", "reconnect_interval",
+                value=cfg.get("siydik", {}).get("reconnect_interval") or 5)
+        ttk.Label(_s_tcp, text="tcp_server: analizator bizga ulanadi (IP=0.0.0.0, port=tinglash). "
+                               "tcp_client: biz analizatorga ulanamiz (IP=analizator IP).",
+                  foreground="#666", wraplength=560).grid(row=3, column=0, columnspan=2,
+                                                          sticky=tk.W, padx=8, pady=(0, 4))
+
+        add_row(tab_s, 6, "Kodirovka:", "siydik", "encoding", options=ENC_OPTS)
+        _s_hint = ttk.Label(tab_s, text="", foreground="#1f6fb2", wraplength=580, justify=tk.LEFT)
+        _s_hint.grid(row=7, column=0, columnspan=2, sticky=tk.W, padx=8, pady=(2, 4))
+
+        def _s_apply_profile(*_):
+            """Model tanlanganda profil standartlarini maydonlarga qo'yadi."""
+            key = _s_key_by_name.get(_model_name_var.get(), _cur_model)
+            _model_key_var.set(key)
+            prof = _S_PROFILES.get(key, {})
+            if prof.get("connection_type"):
+                vars_map[("siydik", "connection_type")].set(prof["connection_type"])
+            if prof.get("protocol"):
+                vars_map[("siydik", "protocol")].set(prof["protocol"])
+            for k in ("baudrate", "bytesize", "parity", "stopbits", "port"):
+                if prof.get(k) is not None:
+                    vars_map[("siydik", k)].set(str(prof[k]))
+            _s_hint.config(text="ℹ " + (prof.get("hint") or ""))
+            _s_toggle_frames()
+
+        def _s_toggle_frames(*_):
+            ct = vars_map[("siydik", "connection_type")].get()
+            for child in _s_serial.winfo_children():
+                try:
+                    child.configure(state=("normal" if ct == "serial" else "disabled"))
+                except Exception:
+                    pass
+            for child in _s_tcp.winfo_children():
+                try:
+                    child.configure(state=("normal" if ct != "serial" else "disabled"))
+                except Exception:
+                    pass
+
+        _model_combo.bind("<<ComboboxSelected>>", _s_apply_profile)
+        vars_map[("siydik", "connection_type")].trace_add("write", _s_toggle_frames)
+        _s_hint.config(text="ℹ " + (_S_PROFILES.get(_cur_model, {}).get("hint") or ""))
+        _s_toggle_frames()
+
+        def test_siydik():
+            ct = vars_map[("siydik", "connection_type")].get()
+            if ct == "serial":
+                port = vars_map[("siydik", "com_port")].get().strip()
+                if serial is None:
+                    messagebox.showwarning("Siydik", "pyserial moduli o'rnatilmagan.", parent=dialog)
+                    return
+                try:
+                    ser = serial.Serial(port=port,
+                                        baudrate=int(vars_map[("siydik", "baudrate")].get() or 9600),
+                                        timeout=1)
+                    ser.close()
+                    messagebox.showinfo("Siydik", f"[OK] {port} porti ochildi (analizator ulangan).",
+                                        parent=dialog)
+                except Exception as e:
+                    messagebox.showerror("Siydik", f"[XATO] {port} portni ochib bo'lmadi:\n{e}",
+                                         parent=dialog)
                 return
+            ip = vars_map[("siydik", "ip")].get().strip()
+            port = int(vars_map[("siydik", "port")].get().strip() or 0)
             try:
-                ser = serial.Serial(port=port,
-                                    baudrate=int(vars_map[("siydik", "baudrate")].get() or 9600),
-                                    timeout=1)
-                ser.close()
-                messagebox.showinfo("Siydik", f"[OK] {port} porti ochildi (analizator ulangan).",
-                                    parent=dialog)
+                s = _socket_mod.socket(_socket_mod.AF_INET, _socket_mod.SOCK_STREAM)
+                s.settimeout(3)
+                if ct == "tcp_client":
+                    s.connect((ip, port)); s.close()
+                    messagebox.showinfo("Siydik", f"[OK] {ip}:{port} ga ulanildi!", parent=dialog)
+                else:
+                    res = s.connect_ex(("127.0.0.1", port)); s.close()
+                    if res == 0:
+                        messagebox.showinfo("Siydik", f"[OK] Port {port} tinglanyapti (server ishlayapti).",
+                                            parent=dialog)
+                    else:
+                        messagebox.showwarning("Siydik", f"[INFO] Port {port} hozir tinglanmayapti.\n"
+                                               "Sozlamani saqlab, dasturni qayta ishga tushiring.",
+                                               parent=dialog)
             except Exception as e:
-                messagebox.showerror("Siydik", f"[XATO] {port} portni ochib bo'lmadi:\n{e}",
-                                     parent=dialog)
+                messagebox.showerror("Siydik", f"[XATO] {ip}:{port}:\n{e}", parent=dialog)
 
-        ttk.Button(tab_s, text="Portni tekshirish", command=test_serial).grid(
-            row=9, column=0, columnspan=2, pady=12)
+        ttk.Button(tab_s, text="Ulanishni tekshirish", command=test_siydik).grid(
+            row=8, column=0, columnspan=2, pady=8)
 
-        # ───────────────────── GEMOTOLOGIYA (BC-20S, TCP client) ─────────
+
+        # ───────────── GEMOTOLOGIYA (universal: Mindray / Genrui / Edan / Dymind / Sysmex ...) ─────
+        # Profillar (standart ulanish turi/port/protokol, analizatorda nima sozlash): gemo_protokol.PROFILES
+        try:
+            import gemo_protokol as _gpk
+            _G_PROFILES = _gpk.PROFILES
+        except Exception as _gpe:
+            print(f"[OGOHLANTIRISH] gemo_protokol yuklanmadi: {_gpe}")
+            _G_PROFILES = {"mindray_bc20s": {"name": "Mindray BC-20S", "connection_type": "tcp_client",
+                                             "protocol": "hl7", "port": 5100, "hint": ""}}
+        _g_key_by_name = {v["name"]: k for k, v in _G_PROFILES.items()}
+        _g_name_by_key = {k: v["name"] for k, v in _G_PROFILES.items()}
+
         tab_g = ttk.Frame(nb)
-        nb.add(tab_g, text="🔵 Gemotologiya (BC-20S)")
+        nb.add(tab_g, text="🔵 Gemotologiya")
         add_enabled(tab_g, 0, "gemotologiya")
-        add_row(tab_g, 1, "Ulanish turi:", "gemotologiya", "connection_type",
-                options=["tcp_client"], readonly=True)
-        add_row(tab_g, 2, "Analizator IP:", "gemotologiya", "ip")
-        add_row(tab_g, 3, "Port:", "gemotologiya", "port")
-        add_row(tab_g, 4, "Qayta ulanish (sek):", "gemotologiya", "reconnect_interval")
-        add_row(tab_g, 5, "Kodirovka:", "gemotologiya", "encoding", options=ENC_OPTS)
-        ttk.Label(tab_g, text="(Dastur analizatorga mijoz (client) sifatida ulanadi)",
-                  foreground="#666").grid(row=6, column=0, columnspan=2, sticky=tk.W, padx=8)
 
-        def test_tcp_client():
+        _g_cur_model = (cfg.get("gemotologiya", {}).get("model") or "mindray_bc20s")
+        _g_model_key_var = tk.StringVar(value=_g_cur_model)
+        vars_map[("gemotologiya", "model")] = _g_model_key_var
+        _g_model_name_var = tk.StringVar(value=_g_name_by_key.get(_g_cur_model, _g_cur_model))
+        ttk.Label(tab_g, text="Analizator modeli:").grid(row=1, column=0, sticky=tk.W, padx=8, pady=6)
+        _g_model_combo = ttk.Combobox(tab_g, textvariable=_g_model_name_var, width=52, state="readonly",
+                                      values=list(_g_key_by_name.keys()))
+        _g_model_combo.grid(row=1, column=1, sticky=tk.W, padx=8, pady=6)
+
+        add_row(tab_g, 2, "Ulanish turi:", "gemotologiya", "connection_type",
+                options=["tcp_client", "tcp_server", "serial"], readonly=True)
+        add_row(tab_g, 3, "Protokol (format):", "gemotologiya", "protocol",
+                value=cfg.get("gemotologiya", {}).get("protocol") or "auto",
+                options=["auto", "hl7", "astm"], readonly=True)
+        _g_wl = tk.BooleanVar(value=bool(cfg.get("gemotologiya", {}).get("worklist", True)))
+        ttk.Checkbutton(tab_g, text="Worklist: analizator barcode so'raganda bemor ismini yuborish (ORM→ORR / ASTM Q)",
+                        variable=_g_wl).grid(row=4, column=0, columnspan=2, sticky=tk.W, padx=8, pady=2)
+        vars_map[("gemotologiya", "worklist")] = _g_wl
+
+        _g_tcp = ttk.LabelFrame(tab_g, text="Tarmoq (TCP)")
+        _g_tcp.grid(row=5, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=4)
+        add_row(_g_tcp, 0, "IP:", "gemotologiya", "ip", options=["192.168.0.2", "0.0.0.0", "127.0.0.1"])
+        add_row(_g_tcp, 1, "Port:", "gemotologiya", "port")
+        add_row(_g_tcp, 2, "Qayta ulanish (sek):", "gemotologiya", "reconnect_interval")
+        ttk.Label(_g_tcp, text="tcp_client: dastur analizatorga ulanadi (IP = analizator IP; Mindray BC-20s/30s/5000). "
+                               "tcp_server: analizator dasturga ulanadi (IP = 0.0.0.0; Genrui, Dymind, Edan, Zybio ...).",
+                  foreground="#666", wraplength=560).grid(row=3, column=0, columnspan=2, sticky=tk.W, padx=8, pady=(0, 4))
+
+        _g_serial = ttk.LabelFrame(tab_g, text="COM port (serial) — BC-3000Plus, URIT-3000Plus, Sysmex, Human, Abacus")
+        _g_serial.grid(row=6, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=4)
+        add_row(_g_serial, 0, "COM port:", "gemotologiya", "com_port",
+                value=cfg.get("gemotologiya", {}).get("com_port") or "COM1",
+                options=["COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8"])
+        add_row(_g_serial, 1, "Baudrate:", "gemotologiya", "baudrate",
+                value=cfg.get("gemotologiya", {}).get("baudrate") or 9600, options=BAUD_OPTS)
+        add_row(_g_serial, 2, "Bayt o'lchami:", "gemotologiya", "bytesize",
+                value=cfg.get("gemotologiya", {}).get("bytesize") or 8, options=["7", "8"], readonly=True, width=6)
+        add_row(_g_serial, 3, "Parity (juftlik):", "gemotologiya", "parity",
+                value=cfg.get("gemotologiya", {}).get("parity") or "N", options=["N", "E", "O"], readonly=True, width=6)
+        add_row(_g_serial, 4, "Stop bits:", "gemotologiya", "stopbits",
+                value=cfg.get("gemotologiya", {}).get("stopbits") or 1, options=["1", "2"], readonly=True, width=6)
+
+        add_row(tab_g, 7, "Kodirovka:", "gemotologiya", "encoding", options=ENC_OPTS)
+        _g_hint = ttk.Label(tab_g, text="", foreground="#1f6fb2", wraplength=600, justify=tk.LEFT)
+        _g_hint.grid(row=8, column=0, columnspan=2, sticky=tk.W, padx=8, pady=(2, 4))
+
+        def _g_toggle_frames(*_):
+            ct = vars_map[("gemotologiya", "connection_type")].get()
+            for child in _g_serial.winfo_children():
+                try:
+                    child.configure(state=("normal" if ct == "serial" else "disabled"))
+                except Exception:
+                    pass
+            for child in _g_tcp.winfo_children():
+                try:
+                    child.configure(state=("normal" if ct != "serial" else "disabled"))
+                except Exception:
+                    pass
+
+        def _g_apply_profile(*_):
+            key = _g_key_by_name.get(_g_model_name_var.get(), _g_cur_model)
+            _g_model_key_var.set(key)
+            prof = _G_PROFILES.get(key, {})
+            if prof.get("connection_type"):
+                vars_map[("gemotologiya", "connection_type")].set(prof["connection_type"])
+                # tcp_server → tinglash IP 0.0.0.0; tcp_client → analizator IP (foydalanuvchi yozadi)
+                if prof["connection_type"] == "tcp_server":
+                    vars_map[("gemotologiya", "ip")].set("0.0.0.0")
+                elif prof["connection_type"] == "tcp_client" and vars_map[("gemotologiya", "ip")].get().strip() in ("", "0.0.0.0"):
+                    vars_map[("gemotologiya", "ip")].set("192.168.0.2")
+            if prof.get("protocol"):
+                vars_map[("gemotologiya", "protocol")].set(prof["protocol"])
+            for k in ("baudrate", "bytesize", "parity", "stopbits", "port"):
+                if prof.get(k) is not None:
+                    vars_map[("gemotologiya", k)].set(str(prof[k]))
+            if "worklist" in prof:
+                _g_wl.set(bool(prof["worklist"]))
+            _g_hint.config(text="ℹ " + (prof.get("hint") or ""))
+            _g_toggle_frames()
+
+        _g_model_combo.bind("<<ComboboxSelected>>", _g_apply_profile)
+        vars_map[("gemotologiya", "connection_type")].trace_add("write", _g_toggle_frames)
+        _g_hint.config(text="ℹ " + (_G_PROFILES.get(_g_cur_model, {}).get("hint") or ""))
+        _g_toggle_frames()
+
+        def test_gemo():
+            ct = vars_map[("gemotologiya", "connection_type")].get()
+            if ct == "serial":
+                port = vars_map[("gemotologiya", "com_port")].get().strip()
+                if serial is None:
+                    messagebox.showwarning("Gemotologiya", "pyserial moduli o'rnatilmagan.", parent=dialog)
+                    return
+                try:
+                    ser = serial.Serial(port=port, baudrate=int(vars_map[("gemotologiya", "baudrate")].get() or 9600), timeout=1)
+                    ser.close()
+                    messagebox.showinfo("Gemotologiya", f"[OK] {port} porti ochildi.", parent=dialog)
+                except Exception as e:
+                    messagebox.showerror("Gemotologiya", f"[XATO] {port} portni ochib bo'lmadi:\n{e}", parent=dialog)
+                return
             ip = vars_map[("gemotologiya", "ip")].get().strip()
             port = int(vars_map[("gemotologiya", "port")].get().strip() or 0)
             try:
                 s = _socket_mod.socket(_socket_mod.AF_INET, _socket_mod.SOCK_STREAM)
                 s.settimeout(3)
-                s.connect((ip, port))
-                s.close()
-                messagebox.showinfo("Gemotologiya", f"[OK] {ip}:{port} ga ulanildi!", parent=dialog)
+                if ct == "tcp_client":
+                    s.connect((ip, port)); s.close()
+                    messagebox.showinfo("Gemotologiya", f"[OK] {ip}:{port} ga ulanildi!", parent=dialog)
+                else:
+                    res = s.connect_ex(("127.0.0.1", port)); s.close()
+                    if res == 0:
+                        messagebox.showinfo("Gemotologiya", f"[OK] Port {port} tinglanyapti (server ishlayapti).", parent=dialog)
+                    else:
+                        messagebox.showwarning("Gemotologiya", f"[INFO] Port {port} hozir tinglanmayapti.\n"
+                                               "Sozlamani saqlab, dasturni qayta ishga tushiring.", parent=dialog)
             except Exception as e:
-                messagebox.showerror("Gemotologiya",
-                                     f"[XATO] {ip}:{port} ga ulanib bo'lmadi:\n{e}", parent=dialog)
+                messagebox.showerror("Gemotologiya", f"[XATO] {ip}:{port}:\n{e}", parent=dialog)
 
-        ttk.Button(tab_g, text="Ulanishni tekshirish", command=test_tcp_client).grid(
-            row=7, column=0, columnspan=2, pady=12)
+        ttk.Button(tab_g, text="Ulanishni tekshirish", command=test_gemo).grid(
+            row=9, column=0, columnspan=2, pady=8)
 
-        # ───────────────────── BIOXIMIYA (BK-280, TCP server) ────────────
+
+        # ───────────── BIOXIMIYA (universal: Biobase BK / Mindray BS / Zybio / Erba / Human ...) ────
+        # Profillar (ulanish turi/port/protokol/so'rov turi, analizatorda nima sozlash): bio_protokol.PROFILES
+        try:
+            import bio_protokol as _bpk
+            _B_PROFILES = _bpk.PROFILES
+        except Exception as _bpe:
+            print(f"[OGOHLANTIRISH] bio_protokol yuklanmadi: {_bpe}")
+            _bpk = None
+            _B_PROFILES = {"biobase_bk": {"name": "Biobase BK-280", "connection_type": "tcp_server",
+                                          "protocol": "hl7", "port": 8087, "lis_port": 8088, "hint": ""}}
+        _b_key_by_name = {v["name"]: k for k, v in _B_PROFILES.items()}
+        _b_name_by_key = {k: v["name"] for k, v in _B_PROFILES.items()}
+
         tab_b = ttk.Frame(nb)
-        nb.add(tab_b, text="🟢 Bioximiya (BK-280)")
+        nb.add(tab_b, text="🟢 Bioximiya")
         add_enabled(tab_b, 0, "bioximiya")
-        add_row(tab_b, 1, "Ulanish turi:", "bioximiya", "connection_type",
-                options=["tcp_server"], readonly=True)
-        add_row(tab_b, 2, "Tinglash IP:", "bioximiya", "ip",
-                options=["0.0.0.0", "127.0.0.1"])
-        add_row(tab_b, 3, "Port (HL7 natija):", "bioximiya", "port")
-        add_row(tab_b, 4, "LIS port (barcode):", "bioximiya", "lis_port")
-        add_row(tab_b, 5, "Kodirovka:", "bioximiya", "encoding", options=ENC_OPTS)
-        ttk.Label(tab_b, text="(Analizator dasturga ulanadi. 0.0.0.0 = barcha tarmoq kartalari)",
-                  foreground="#666").grid(row=6, column=0, columnspan=2, sticky=tk.W, padx=8)
 
-        def test_tcp_server():
+        _b_cur_model = (cfg.get("bioximiya", {}).get("model") or "biobase_bk")
+        _b_model_key_var = tk.StringVar(value=_b_cur_model)
+        vars_map[("bioximiya", "model")] = _b_model_key_var
+        _b_model_name_var = tk.StringVar(value=_b_name_by_key.get(_b_cur_model, _b_cur_model))
+        ttk.Label(tab_b, text="Analizator modeli:").grid(row=1, column=0, sticky=tk.W, padx=8, pady=6)
+        _b_model_combo = ttk.Combobox(tab_b, textvariable=_b_model_name_var, width=52, state="readonly",
+                                      values=list(_b_key_by_name.keys()))
+        _b_model_combo.grid(row=1, column=1, sticky=tk.W, padx=8, pady=6)
+
+        add_row(tab_b, 2, "Ulanish turi:", "bioximiya", "connection_type",
+                options=["tcp_server", "tcp_client", "serial"], readonly=True)
+        add_row(tab_b, 3, "Protokol (format):", "bioximiya", "protocol",
+                value=cfg.get("bioximiya", {}).get("protocol") or "auto",
+                options=["auto", "hl7", "astm"], readonly=True)
+        add_row(tab_b, 4, "ACK turi (natijaga javob):", "bioximiya", "ack_style",
+                value=cfg.get("bioximiya", {}).get("ack_style") or "byte",
+                options=["byte", "hl7", "both"], readonly=True)
+
+        _b_tcp = ttk.LabelFrame(tab_b, text="Tarmoq (TCP)")
+        _b_tcp.grid(row=5, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=4)
+        add_row(_b_tcp, 0, "IP:", "bioximiya", "ip", options=["0.0.0.0", "127.0.0.1"])
+        add_row(_b_tcp, 1, "Port (natija):", "bioximiya", "port")
+        add_row(_b_tcp, 2, "Shtrix-kod so'rov porti (0 = bir xil):", "bioximiya", "lis_port")
+        ttk.Label(_b_tcp, text="tcp_server: analizator dasturga ulanadi (IP = 0.0.0.0). Biobase BK: natija 8087 + so'rov 8088; "
+                               "Mindray BS / Zybio / Erba: bitta port (so'rov porti = 0).",
+                  foreground="#666", wraplength=560).grid(row=3, column=0, columnspan=2, sticky=tk.W, padx=8, pady=(0, 4))
+
+        _b_serial = ttk.LabelFrame(tab_b, text="COM port (serial) — ASTM analizatorlar (Roche c111, Human, Erba RS-232)")
+        _b_serial.grid(row=6, column=0, columnspan=2, sticky=tk.EW, padx=8, pady=4)
+        add_row(_b_serial, 0, "COM port:", "bioximiya", "com_port",
+                value=cfg.get("bioximiya", {}).get("com_port") or "COM1",
+                options=["COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8"])
+        add_row(_b_serial, 1, "Baudrate:", "bioximiya", "baudrate",
+                value=cfg.get("bioximiya", {}).get("baudrate") or 9600, options=BAUD_OPTS)
+        add_row(_b_serial, 2, "Bayt o'lchami:", "bioximiya", "bytesize",
+                value=cfg.get("bioximiya", {}).get("bytesize") or 8, options=["7", "8"], readonly=True, width=6)
+        add_row(_b_serial, 3, "Parity (juftlik):", "bioximiya", "parity",
+                value=cfg.get("bioximiya", {}).get("parity") or "N", options=["N", "E", "O"], readonly=True, width=6)
+        add_row(_b_serial, 4, "Stop bits:", "bioximiya", "stopbits",
+                value=cfg.get("bioximiya", {}).get("stopbits") or 1, options=["1", "2"], readonly=True, width=6)
+
+        add_row(tab_b, 7, "Kodirovka:", "bioximiya", "encoding", options=ENC_OPTS)
+        _b_hint = ttk.Label(tab_b, text="", foreground="#1f6fb2", wraplength=600, justify=tk.LEFT)
+        _b_hint.grid(row=8, column=0, columnspan=2, sticky=tk.W, padx=8, pady=(2, 4))
+
+        def _b_toggle_frames(*_):
+            ct = vars_map[("bioximiya", "connection_type")].get()
+            for child in _b_serial.winfo_children():
+                try:
+                    child.configure(state=("normal" if ct == "serial" else "disabled"))
+                except Exception:
+                    pass
+            for child in _b_tcp.winfo_children():
+                try:
+                    child.configure(state=("normal" if ct != "serial" else "disabled"))
+                except Exception:
+                    pass
+
+        def _b_apply_profile(*_):
+            key = _b_key_by_name.get(_b_model_name_var.get(), _b_cur_model)
+            _b_model_key_var.set(key)
+            prof = _B_PROFILES.get(key, {})
+            if prof.get("connection_type"):
+                vars_map[("bioximiya", "connection_type")].set(prof["connection_type"])
+            for k in ("protocol", "ack_style", "baudrate", "bytesize", "parity", "stopbits", "port", "lis_port"):
+                if prof.get(k) is not None:
+                    vars_map[("bioximiya", k)].set(str(prof[k]))
+            _b_hint.config(text="ℹ " + (prof.get("hint") or ""))
+            _b_toggle_frames()
+
+        _b_model_combo.bind("<<ComboboxSelected>>", _b_apply_profile)
+        vars_map[("bioximiya", "connection_type")].trace_add("write", _b_toggle_frames)
+        _b_hint.config(text="ℹ " + (_B_PROFILES.get(_b_cur_model, {}).get("hint") or ""))
+        _b_toggle_frames()
+
+        def test_bio():
+            ct = vars_map[("bioximiya", "connection_type")].get()
+            if ct == "serial":
+                port = vars_map[("bioximiya", "com_port")].get().strip()
+                if serial is None:
+                    messagebox.showwarning("Bioximiya", "pyserial moduli o'rnatilmagan.", parent=dialog)
+                    return
+                try:
+                    ser = serial.Serial(port=port, baudrate=int(vars_map[("bioximiya", "baudrate")].get() or 9600), timeout=1)
+                    ser.close()
+                    messagebox.showinfo("Bioximiya", f"[OK] {port} porti ochildi.", parent=dialog)
+                except Exception as e:
+                    messagebox.showerror("Bioximiya", f"[XATO] {port} portni ochib bo'lmadi:\n{e}", parent=dialog)
+                return
+            ip = vars_map[("bioximiya", "ip")].get().strip()
             port = int(vars_map[("bioximiya", "port")].get().strip() or 0)
             try:
                 s = _socket_mod.socket(_socket_mod.AF_INET, _socket_mod.SOCK_STREAM)
-                s.settimeout(2)
-                res = s.connect_ex(("127.0.0.1", port))
-                s.close()
-                if res == 0:
-                    messagebox.showinfo("Bioximiya",
-                                        f"[OK] Port {port} tinglanyapti (server ishlayapti).",
-                                        parent=dialog)
+                s.settimeout(3)
+                if ct == "tcp_client":
+                    s.connect((ip, port)); s.close()
+                    messagebox.showinfo("Bioximiya", f"[OK] {ip}:{port} ga ulanildi!", parent=dialog)
                 else:
-                    messagebox.showwarning("Bioximiya",
-                                           f"[INFO] Port {port} hozir tinglanmayapti.\n"
-                                           "Sozlamani saqlab, dasturni qayta ishga tushiring.",
-                                           parent=dialog)
+                    res = s.connect_ex(("127.0.0.1", port)); s.close()
+                    if res == 0:
+                        messagebox.showinfo("Bioximiya", f"[OK] Port {port} tinglanyapti (server ishlayapti).", parent=dialog)
+                    else:
+                        messagebox.showwarning("Bioximiya", f"[INFO] Port {port} hozir tinglanmayapti.\n"
+                                               "Sozlamani saqlab, dasturni qayta ishga tushiring.", parent=dialog)
             except Exception as e:
-                messagebox.showerror("Bioximiya", f"[XATO] {e}", parent=dialog)
+                messagebox.showerror("Bioximiya", f"[XATO] {ip}:{port}:\n{e}", parent=dialog)
 
-        ttk.Button(tab_b, text="Port holatini tekshirish", command=test_tcp_server).grid(
-            row=7, column=0, columnspan=2, pady=12)
+        def open_bio_code_map():
+            """Tahlil kodlari xaritasi: analizator kodi/nomi ↔ LIMS tahlili (kanonik LIS kodi).
+            Shtrix-kod worklisti va natija import shu xaritaga tayanadi."""
+            if _bpk is None:
+                messagebox.showwarning("Bioximiya", "bio_protokol moduli topilmadi.", parent=dialog)
+                return
+            model = _b_model_key_var.get() or "biobase_bk"
+            cmap = _bpk.load_code_map()
+            mm = dict(cmap.get(model, {}))
+            unknown = _bpk.load_unknown_codes().get(model, {})
+
+            win = tk.Toplevel(dialog)
+            win.title(f"Tahlil kodlari — {_b_name_by_key.get(model, model)}")
+            win.geometry("820x560")
+            win.transient(dialog)
+            ttk.Label(win, text="Analizator kodi (kanal / test ID) va nomi → LIMS tahlili. "
+                                "Shtrix-kod so'rovida analizatorga aynan shu kodlar yuboriladi; natijada shu kodlar taniladi.\n"
+                                "Biobase BK-280 uchun xarita shart emas (kodlar standart). Boshqa analizatorda: "
+                                "'Noma'lum kodlar' — analizatordan kelgan, hali bog'lanmagan kodlar.",
+                      wraplength=790, justify=tk.LEFT).pack(anchor=tk.W, padx=10, pady=(10, 4))
+
+            cols = ("kod", "nom", "lims")
+            tree = ttk.Treeview(win, columns=cols, show="headings", height=14)
+            tree.heading("kod", text="Analizator kodi"); tree.column("kod", width=140)
+            tree.heading("nom", text="Analizator nomi"); tree.column("nom", width=220)
+            tree.heading("lims", text="LIMS tahlili (kanonik kod)"); tree.column("lims", width=400)
+            tree.pack(fill=tk.BOTH, expand=True, padx=10, pady=4)
+            tree.tag_configure("unknown", background="#fff3cd")
+
+            canon_opts = [f"{c} — {v[0]}" for c, v in _bpk.CANONICAL_TESTS.items()]
+            canon_by_label = {f"{c} — {v[0]}": c for c, v in _bpk.CANONICAL_TESTS.items()}
+
+            def _label(canon):
+                nm = _bpk.canonical_name(canon) if canon else ""
+                return f"{canon} — {nm}" if canon else ""
+
+            names_seen = {}
+            for code, canon in mm.items():
+                names_seen[code] = unknown.get(code, {}).get("name", "")
+                tree.insert("", tk.END, values=(code, names_seen[code], _label(canon)))
+            for code, info in unknown.items():
+                if code in mm:
+                    continue
+                guess = _bpk.guess_canonical(code, info.get("name", "")) or ""
+                tree.insert("", tk.END, values=(code, info.get("name", ""), _label(guess)), tags=("unknown",))
+
+            edit = ttk.Frame(win); edit.pack(fill=tk.X, padx=10, pady=4)
+            v_code = tk.StringVar(); v_name = tk.StringVar(); v_lims = tk.StringVar()
+            ttk.Label(edit, text="Kod:").grid(row=0, column=0, padx=4)
+            ttk.Entry(edit, textvariable=v_code, width=14).grid(row=0, column=1, padx=4)
+            ttk.Label(edit, text="Nomi:").grid(row=0, column=2, padx=4)
+            ttk.Entry(edit, textvariable=v_name, width=22).grid(row=0, column=3, padx=4)
+            ttk.Label(edit, text="LIMS:").grid(row=0, column=4, padx=4)
+            ttk.Combobox(edit, textvariable=v_lims, values=canon_opts, width=36, state="readonly").grid(row=0, column=5, padx=4)
+
+            def _on_select(_e=None):
+                sel = tree.selection()
+                if sel:
+                    k, n, l = tree.item(sel[0])["values"]
+                    v_code.set(k); v_name.set(n); v_lims.set(l)
+            tree.bind("<<TreeviewSelect>>", _on_select)
+
+            def _apply_row():
+                code = v_code.get().strip()
+                if not code:
+                    return
+                lab = v_lims.get()
+                for it in tree.get_children():
+                    if str(tree.item(it)["values"][0]) == code:
+                        tree.item(it, values=(code, v_name.get().strip(), lab), tags=())
+                        break
+                else:
+                    tree.insert("", tk.END, values=(code, v_name.get().strip(), lab))
+
+            def _delete_row():
+                for it in tree.selection():
+                    tree.delete(it)
+
+            def _auto_guess():
+                n = 0
+                for it in tree.get_children():
+                    k, nm, l = tree.item(it)["values"]
+                    if not l:
+                        g = _bpk.guess_canonical(str(k), str(nm))
+                        if g:
+                            tree.item(it, values=(k, nm, _label(g))); n += 1
+                messagebox.showinfo("Tahlil kodlari", f"{n} ta kod avtomatik bog'landi (tekshirib chiqing).", parent=win)
+
+            def _save_map():
+                new_m = {}
+                for it in tree.get_children():
+                    k, nm, l = tree.item(it)["values"]
+                    canon = canon_by_label.get(str(l), "")
+                    if not canon and str(l):
+                        canon = str(l).split(" — ")[0].strip()
+                    if str(k).strip() and canon:
+                        new_m[str(k).strip()] = canon
+                cmap[model] = new_m
+                if _bpk.save_code_map(cmap):
+                    messagebox.showinfo("Tahlil kodlari", f"Saqlandi: {len(new_m)} ta bog'lanish.\n"
+                                        "Listener keyingi so'rovdan boshlab yangi xaritani ishlatadi.", parent=win)
+                    win.destroy()
+                else:
+                    messagebox.showerror("Tahlil kodlari", "Saqlab bo'lmadi.", parent=win)
+
+            btns = ttk.Frame(win); btns.pack(fill=tk.X, padx=10, pady=8)
+            ttk.Button(btns, text="Qo'shish / Yangilash", command=_apply_row).pack(side=tk.LEFT, padx=4)
+            ttk.Button(btns, text="O'chirish", command=_delete_row).pack(side=tk.LEFT, padx=4)
+            ttk.Button(btns, text="Avtomatik taxmin (nom bo'yicha)", command=_auto_guess).pack(side=tk.LEFT, padx=4)
+            ttk.Button(btns, text="💾 Saqlash", command=_save_map).pack(side=tk.RIGHT, padx=4)
+
+        def test_bio_query():
+            """LIS tomonini sinash: o'zimizning listenerga QRY^Q02 yuborib, javobni ko'rsatamiz.
+            Bu ishlasa — dastur tomoni tayyor; analizator so'rov yubormayotgan bo'ladi."""
+            from tkinter import simpledialog as _sd
+            import re as _re
+            barcode = _sd.askstring("Shtrix-kod so'rovini sinash",
+                                    "Buyurtma shtrix-kodi (sample_id), masalan 260918118097:",
+                                    parent=dialog)
+            if not barcode:
+                return
+            barcode = barcode.strip()
+            lis_port = (int(vars_map[("bioximiya", "lis_port")].get().strip() or 0)
+                        or int(vars_map[("bioximiya", "port")].get().strip() or 0))
+            ts = _dt.datetime.now().strftime("%Y%m%d%H%M%S")
+            CR, SB, EB = chr(13), chr(11), chr(28)
+            qry = (SB + "MSH|^~" + chr(92) + "&|SINOV|LIMS|||" + ts + "||QRY^Q02|1|P|2.3.1|||||ASCII|||" + CR
+                   + "QRD|" + ts + "|R|D|1|||RD|" + barcode + "|OTH|||T|" + CR + "QRF|SINOV|" + CR + EB + CR).encode()
+            _host = vars_map[("bioximiya", "ip")].get().strip()
+            if _host in ("", "0.0.0.0"):
+                _host = "127.0.0.1"
+            try:
+                s = _socket_mod.create_connection((_host, lis_port), timeout=5)
+                s.sendall(qry)
+                s.settimeout(5)
+                buf = b""
+                while b"DSC|" not in buf and b"QAK|SR|NF" not in buf:
+                    d = s.recv(65536)
+                    if not d:
+                        break
+                    buf += d
+                s.close()
+            except Exception as e:
+                messagebox.showerror("Sinov", f"Listener ({lis_port}-port) javob bermadi:\n{e}\n\n"
+                                     "Sozlamani saqlab, dasturni qayta ishga tushiring.", parent=dialog)
+                return
+            txt = buf.decode("utf-8", "replace")
+            if "QAK|SR|NF" in txt:
+                messagebox.showwarning("Sinov", f"Shtrix-kod {barcode} bazada TOPILMADI (orders.sample_id).",
+                                       parent=dialog)
+                return
+            name = _re.search(r"DSP\|3\|\|([^|]*)\|", txt)
+            tests = _re.findall(r"DSP\|\d+\|\|([^|^]+)\^([^|^]*)\^", txt)
+            tests = [f"{c} {n}" for c, n in tests]
+            messagebox.showinfo(
+                "Sinov — LIS tomoni ISHLAYAPTI",
+                f"Bemor: {name.group(1) if name else '?'}\n"
+                f"Tahlillar ({len(tests)}): " + ", ".join(tests) + "\n\n"
+                "Dastur to'g'ri javob qaytardi. Analizatorda hali ishlamasa — analizator "
+                "LIS sozlamasida so'rov (двунаправленная связь / запрос по штрих-коду) yoqilmagan "
+                "yoki LIS IP/port noto'g'ri.", parent=dialog)
+
+
+        def push_bio_worklist():
+            """SINOV: so'ramaydigan analizatorga (BK-280 V1) bemor ma'lumotini o'zimiz yuborish."""
+            from tkinter import simpledialog as _sd
+            barcode = _sd.askstring("Analizatorga yuborish (push sinovi)",
+                                    "Buyurtma shtrix-kodi (sample_id):", parent=dialog)
+            if not barcode:
+                return
+            style = "dsr" if messagebox.askyesno(
+                "Xabar turi", "DSR^Q03 (Mindray/Biobase uslubi) yuborilsinmi?\n\n"
+                "HA — DSR^Q03\nYO'Q — ORM^O01 (yangi buyurtma)", parent=dialog) else "orm"
+            try:
+                from bk280_listener import push_worklist as _push
+                ok, msg = _push(barcode.strip(), style)
+            except Exception as e:
+                ok, msg = False, str(e)
+            (messagebox.showinfo if ok else messagebox.showwarning)("Push sinovi", msg, parent=dialog)
+
+        _b_btns = ttk.Frame(tab_b)
+        _b_btns.grid(row=9, column=0, columnspan=2, pady=8)
+        ttk.Button(_b_btns, text="📤 Analizatorga yuborish (sinov)", command=push_bio_worklist).pack(side=tk.LEFT, padx=6)
+        ttk.Button(_b_btns, text="Ulanishni tekshirish", command=test_bio).pack(side=tk.LEFT, padx=6)
+        ttk.Button(_b_btns, text="🧬 Tahlil kodlari", command=open_bio_code_map).pack(side=tk.LEFT, padx=6)
+        ttk.Button(_b_btns, text="🧪 Shtrix-kod so'rovini sinash", command=test_bio_query).pack(side=tk.LEFT, padx=6)
+
 
         # ───────────────────────── PRINTER (avto-pechat) ─────────────────
         tab_p = ttk.Frame(nb)
@@ -21438,7 +22058,8 @@ Sana: {_sana_fmt}"""
             # hal qiladi.
             if is_cbc and all_vals:
                 cbc_data = {'result': display_id, 'type': 'hematology_cbc',
-                            'source': 'BC-20S', 'sid': sample_id,
+                            'source': 'BC-20S', 'sid': sample_id,   # 'source' — tarixiy manba tegi (gemo_monitor)
+                            'analyzer': _hema_analyzer_label(),
                             'patient_age': patient_info.get('age', ''),
                             'patient_gender': patient_info.get('gender', ''),
                             **all_vals}

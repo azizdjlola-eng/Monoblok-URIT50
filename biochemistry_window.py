@@ -33,6 +33,8 @@ try:
 except ImportError:
     DB_AVAILABLE = False
 
+import bio_protokol as _bp   # universal parser (HL7/ASTM) + kod xaritasi
+
 def db_conn():
     if not DB_AVAILABLE:
         return None
@@ -1014,10 +1016,10 @@ def _extract_test_date(dt_str):
 
 def parse_hl7_file(file_path):
     """
-    BK-280 RAW fayldan parse qilish.
-
-    OBR field[2] = Barcode (12 xonali) → sample_id.
-    12 xonali bo'lmasa sample_id = '', filename fallback ishlatilmaydi.
+    Bioximiya RAW fayldan parse qilish (HL7 ORU^R01 yoki ASTM — bio_protokol).
+    Analizator kodlari kanonik LIS kodlariga (BK-280 raqamlari) keltiriladi — shuning
+    uchun boshqa brend (Mindray BS, Erba ...) natijalari ham shu oynada bir xil ko'rinadi.
+    sample_id = shtrix-kod (OBR-2/OBR-3/PID-3 dan barcode ko'rinishidagi); bo'lmasa ''.
     """
     result = {}
     try:
@@ -1033,98 +1035,69 @@ def parse_hl7_file(file_path):
         f"{m.group(3)}.{m.group(2)}.{m.group(1)} {m.group(4)}:{m.group(5)}"
         if m else datetime.now().strftime("%d.%m.%Y %H:%M")
     )
+    test_date = f"{m.group(1)}{m.group(2)}{m.group(3)}" if m else datetime.now().strftime("%Y%m%d")
 
-    sample_id = ''
-    name = ''
-    test_time = fallback_time
-    test_date = ''
-    tests = {}
-    has_ab = False
-    obr_seq = ''
-
-    for line in re.split(r'[\r\n]+', content):
-        line = line.strip()
-        if not line or len(line) < 3:
-            continue
-        seg = line[:3]
-        f = line.split('|')
-
-        if seg == 'MSH':
-            if len(f) > 6 and f[6].strip():
-                raw = f[6].strip()
-                test_date = test_date or _extract_test_date(raw)
-                t = _fmt_time(raw, fallback_time)
-                if t:
-                    test_time = t
-
-        elif seg == 'PID':
-            for idx in [4, 5]:
-                if len(f) > idx and f[idx].strip() and not f[idx].strip().isdigit():
-                    name = f[idx].strip()
-                    break
-
-        elif seg == 'OBR':
-            obr_seq = f[1].strip() if len(f) > 1 and f[1].strip() else ''
-            if len(f) > 2 and f[2].strip():
-                cand = f[2].strip()
-                if cand and not cand.upper().startswith('BIOBASE'):
-                    sample_id = cand if (len(cand) == 12 and cand.isdigit()) else ''
-            if len(f) > 6 and f[6].strip():
-                raw = f[6].strip()
-                test_date = test_date or _extract_test_date(raw)
-                t = _fmt_time(raw, test_time)
-                if t:
-                    test_time = t
-
-        elif seg == 'OBX':
-            if len(f) < 5:
-                continue
-            lis_code = f[3].strip() if len(f) > 3 else ''
-            aname = f[4].strip() if len(f) > 4 else ''
-            value = f[5].strip() if len(f) > 5 else ''
-            unit = f[6].strip() if len(f) > 6 else ''
-            ref = f[7].strip() if len(f) > 7 else ''
-            flag = f[8].strip() if len(f) > 8 else ''
-            if not value:
-                continue
-
-            display = get_db_name(lis_code, aname)
-            tahlil_id = LIS_TO_TAHLIL_ID.get(lis_code)  # LIMS DB tahlil ID (LIS nomer kabi)
-            is_ab = bool(flag) and flag.upper() not in ('N',) and (
-                'H' in flag.upper() or 'L' in flag.upper())
-            if is_ab:
-                has_ab = True
-
-            ref_clean = ref.replace('~', ' - ')
-            tests[lis_code or aname] = {
-                'lis_code': lis_code,
-                'tahlil_id': tahlil_id,  # None bo'lsa — LIS_TO_TAHLIL_ID da yo'q
-                'analyzer_name': aname,
-                'name': display,
-                'value': _fmt_val(value, ref_clean),
-                'unit': unit,
-                'ref': ref_clean,
-                'flag': flag,
-                'abnormal': is_ab,
-            }
-
-    if not tests:
+    try:
+        _model = (_bio_cfg_cached() or {}).get('model') or _bp.DEFAULT_MODEL
+        parsed = _bp.parse_message(content, _model)
+    except Exception as e:
+        print(f"⚠️ Parse xato ({fname}): {e}")
         return result
 
-    normalized_name = name.replace('^', ' ').strip().upper() if name else 'NONAME'
-    if not test_date:
-        test_date = datetime.now().strftime("%Y%m%d")
+    raw_tests = parsed.get('tests', {})
+    if not raw_tests:
+        return result
 
+    tests = {}
+    has_ab = False
+    for lis_code, td in raw_tests.items():
+        aname = td.get('analyzer_name', '') or ''
+        display = get_db_name(lis_code, aname)
+        tahlil_id = LIS_TO_TAHLIL_ID.get(lis_code)  # LIMS DB tahlil ID (LIS nomer kabi)
+        is_ab = bool(td.get('abnormal'))
+        if is_ab:
+            has_ab = True
+        ref_clean = td.get('ref', '')
+        tests[lis_code] = {
+            'lis_code': lis_code,
+            'tahlil_id': tahlil_id,  # None bo'lsa — LIS_TO_TAHLIL_ID da yo'q
+            'analyzer_name': aname,
+            'name': display,
+            'value': _fmt_val(td.get('value', ''), ref_clean),
+            'unit': td.get('unit', ''),
+            'ref': ref_clean,
+            'flag': td.get('flag', ''),
+            'abnormal': is_ab,
+        }
+
+    sample_id = parsed.get('sample_id', '') or ''
+    name = parsed.get('name', '') or ''
+    # Analizator vaqti (sana.oy.yil soat:daqiqa) — bo'lmasa fayl vaqti
+    test_time = parsed.get('time') or fallback_time
+    normalized_name = name.replace('^', ' ').strip().upper() if name else 'NONAME'
     key = sample_id if sample_id else f"{test_date}|{normalized_name}"
     result[key] = {
         'time': test_time,
         'sample_id': sample_id,
         'name': name,
-        'obr_seq': obr_seq,
+        'obr_seq': parsed.get('sample_no', ''),
         'tests': tests,
         'abnormal': has_ab,
     }
     return result
+
+
+_BIO_CFG_CACHE = {}
+def _bio_cfg_cached():
+    """analizator_config.json → bioximiya (bir marta o'qiladi)."""
+    if not _BIO_CFG_CACHE:
+        try:
+            from monoblok_db_config import get_analyzer
+            _BIO_CFG_CACHE.update(get_analyzer("bioximiya") or {})
+        except Exception:
+            _BIO_CFG_CACHE.update({"model": _bp.DEFAULT_MODEL})
+    return _BIO_CFG_CACHE
+
 
 
 def refresh_patient_list(ptree, rtree, status_var,

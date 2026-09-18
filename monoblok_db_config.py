@@ -64,11 +64,15 @@ DEFAULT_CONFIG = {
         "port": 3306,
     },
 
-    # Siydik analizatori — URIT-50 (Serial / COM port)
+    # Siydik analizatori — universal (URIT-50, Dirui H, Mindray UA, HL7/ASTM ...).
+    # Model va protokol ro'yxati: siydik_protokol.PROFILES. Mijozda boshqa analizator
+    # bo'lsa faqat shu bo'lim o'zgaradi (Tizim Sozlamalari → Siydik).
     "siydik": {
         "enabled": True,
         "name": "URIT-50 (Siydik)",
-        "connection_type": "serial",   # serial
+        "model": "urit50",             # siydik_protokol.PROFILES kaliti
+        "protocol": "auto",            # auto | text | hl7 | astm
+        "connection_type": "serial",   # serial | tcp_server | tcp_client
         "com_port": "COM4",
         "baudrate": 9600,
         "bytesize": 8,                 # 5,6,7,8
@@ -76,28 +80,54 @@ DEFAULT_CONFIG = {
         "stopbits": 1,                 # 1, 2
         "timeout": 1,                  # soniya
         "encoding": "utf-8",
+        "ip": "0.0.0.0",               # tcp_server: tinglash IP; tcp_client: analizator IP
+        "port": 5200,                  # TCP port (HL7/ASTM analizatorlar uchun)
+        "reconnect_interval": 5,       # tcp_client: qayta ulanish (sek)
+        "idle_timeout": 3,             # ETX kelmasa — shuncha soniya jimlikdan keyin blok yopiladi
     },
 
-    # Gemotologiya analizatori — BC-20S (TCP CLIENT — dastur analizatorga ulanadi)
+    # Gemotologiya analizatori — universal (Mindray, Genrui, Edan, Dymind, Zybio, URIT,
+    # Dirui, Biobase, Erba, Cyan, Human, Sysmex, Diatron ...). Profillar: gemo_protokol.PROFILES.
+    # Standart: Mindray BC-20S — analizator TCP SERVER (port 5100), dastur mijoz sifatida ulanadi.
     "gemotologiya": {
         "enabled": True,
         "name": "BC-20S (Gemotologiya)",
-        "connection_type": "tcp_client",   # tcp_client
-        "ip": "192.168.0.2",
+        "model": "mindray_bc20s",          # gemo_protokol.PROFILES kaliti
+        "protocol": "auto",                # auto | hl7 | astm
+        "connection_type": "tcp_client",   # tcp_client | tcp_server | serial
+        "ip": "192.168.0.2",               # tcp_client: analizator IP; tcp_server: tinglash IP (0.0.0.0)
         "port": 5100,
         "reconnect_interval": 5,           # uzilganda qayta ulanish (sek)
         "encoding": "utf-8",
+        "worklist": True,                  # ORM^O01 / ASTM Q so'roviga bemor ismini qaytarish
+        "com_port": "COM1",                # serial uchun
+        "baudrate": 9600,
+        "bytesize": 8,
+        "parity": "N",
+        "stopbits": 1,
+        "timeout": 1,
     },
 
-    # Bioximiya analizatori — BK-280 (TCP SERVER — analizator dasturga ulanadi)
+    # Bioximiya analizatori — universal (Biobase BK, Mindray BS, Zybio, Dirui, URIT, Rayto,
+    # Erba, Human, BioSystems, Roche ...). Profillar: bio_protokol.PROFILES.
+    # Standart: Biobase BK-280 — analizator dasturga ulanadi (natija 8087, shtrix-kod so'rovi 8088).
     "bioximiya": {
         "enabled": True,
         "name": "BK-280 (Bioximiya)",
-        "connection_type": "tcp_server",   # tcp_server
+        "model": "biobase_bk",             # bio_protokol.PROFILES kaliti
+        "protocol": "auto",                # auto | hl7 | astm
+        "connection_type": "tcp_server",   # tcp_server | tcp_client | serial
         "ip": "0.0.0.0",                   # 0.0.0.0 = barcha tarmoq interfeyslari
-        "port": 8087,                      # HL7 natijalar porti
-        "lis_port": 8088,                  # LIS so'rov (barcode -> bemor) porti
+        "port": 8087,                      # natijalar porti
+        "lis_port": 8088,                  # shtrix-kod so'rovi porti (0 = natija porti bilan bir xil)
+        "ack_style": "byte",               # byte (0x06, BK-280) | hl7 (ACK^R01) | both
         "encoding": "utf-8",
+        "com_port": "COM1",                # serial uchun
+        "baudrate": 9600,
+        "bytesize": 8,
+        "parity": "N",
+        "stopbits": 1,
+        "timeout": 1,
     },
 
     # Pechat (chop etish) sozlamalari

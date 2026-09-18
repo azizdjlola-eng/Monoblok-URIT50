@@ -17,6 +17,8 @@ try:
 except ImportError:
     DB_AVAILABLE = False
 
+import siydik_protokol as _sp   # universal RAW parser (URIT/Dirui/UA/HL7/ASTM)
+
 URIT_RAW_PATH = r"G:\DASTUR\URIT 50\Urit\RAW_LOGS"
 URIT_PREFS_FILE = r"G:\DASTUR\URIT 50\urit_prefs.json"
 
@@ -686,6 +688,9 @@ def load_raw_files(date_from=None, date_to=None):
 
 
 def parse_result(file_path):
+    """RAW faylni (URIT-50 matni, Dirui/Mindray UA matni, HL7 yoki ASTM) o'qiydi.
+    Format avtomatik aniqlanadi — siydik_protokol.parse_block. Kodlar kanonik
+    (LEU, KET, ..., ACR) — bu oynaning ANALYTES ro'yxati bilan bir xil."""
     result_dict = {}
     try:
         with open(file_path,'r',encoding='utf-8',errors='ignore') as f:
@@ -698,73 +703,48 @@ def parse_result(file_path):
         else:
             time_str = datetime.fromtimestamp(os.path.getmtime(file_path)).strftime("%d.%m.%Y %H:%M:%S")
 
-        lines     = [ln.strip("\r") for ln in content.splitlines()]
-        sample_no = ''; date_time = ''; sample_id = ''
-
-        for line in lines:
-            lc = line.strip()
-            if not lc: continue
-            if lc.startswith('NO.'):
-                m2 = re.search(r'NO\.(\d+)', lc)
-                if m2: sample_no = m2.group(1)
-            if lc.startswith('ID:'):
-                sample_id = lc.replace('ID:','').strip()
-            if 'DATE' in lc or 'TIME' in lc:
-                m3 = re.search(r'(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})', lc)
-                if m3:
-                    dp,tp = m3.groups(); pt = dp.split('-')
-                    if len(pt)==3: date_time = f"{pt[2]}.{pt[1]}.{pt[0]} {tp}"
+        parsed = _sp.parse_block(content)
+        sample_no = parsed.get('NO') or ''
+        sample_id = parsed.get('ID') or ''
+        # Vaqt: fayl nomidagi qabul vaqti ishonchli (URIT soati 2000-01-01 bo'lishi mumkin);
+        # analizator vaqti faqat fayl nomida vaqt bo'lmasa ishlatiladi
+        date_time = ''
+        if not m and parsed.get('DATE') and parsed.get('TIME'):
+            dp = re.split(r'[-./]', parsed['DATE'])
+            if len(dp) == 3 and len(dp[0]) == 4:
+                date_time = f"{dp[2]}.{dp[1]}.{dp[0]} {parsed['TIME']}"
+            elif len(dp) == 3:
+                date_time = f"{dp[0]}.{dp[1]}.{dp[2]} {parsed['TIME']}"
 
         final_no = sample_no or sample_id or ''
-        # final_no bo'sh bo'lsa ham faylni o'tkazib yubormaymiz — fname_key kalit bo'ladi
-
         # Fayl nomi — unikal kalit (sample_no qayta-qayta 000001 dan boshlanishi mumkin)
         fname_key = re.sub(r'\.txt$', '', os.path.basename(file_path))
 
         result_dict[fname_key] = {
             'time': date_time or time_str,
             'sample_no': final_no,    # ko'rsatish uchun (000031 kabi)
-            'sample_id': sample_id, 'patient_name': '', 'abnormal_params': [],
+            'sample_id': sample_id, 'patient_name': parsed.get('PATIENT_NAME', '') or '',
+            'abnormal_params': [],
             'strip_type': 14,  # after parsing analytes, will be recalculated below
             'file_path': file_path
         }
+        starred = set(parsed.get('ABNORMAL') or [])
         for code in ANALYTES:
-            result_dict[fname_key][code] = ''
-
-        for i,line in enumerate(lines):
-            starred = '*' in line
-            line_ns = line.replace('*','')
-            for analyte in ANALYTES:
-                if re.search(r'\b'+re.escape(analyte)+r'\b', line_ns, re.IGNORECASE):
-                    parts = re.split(r'\b'+re.escape(analyte)+r'\b',
-                                     line_ns, maxsplit=1, flags=re.IGNORECASE)
-                    if len(parts)<2: continue
-                    raw_after = parts[1]
-                    after = raw_after.strip(' :-\t')
-                    j = i+1
-                    while j<len(lines) and not any(
-                        re.search(r'\b'+re.escape(a)+r'\b',lines[j],re.IGNORECASE)
-                        for a in ANALYTES
-                    ):
-                        after += ' '+lines[j].replace('*','').strip(); j+=1
-                    after = after.replace('CELL/uL','CELL/µL').strip()
-                    # NIT (va boshqa) uchun manfiy natija: '-' belgisini saqlash
-                    if not after and '-' in raw_after:
-                        after = '-'
-                    result_dict[fname_key][analyte] = after
-                    # Patologiya aniqlash: faqat * (analizator belgisi) yoki + (musbat natija)
-                    # '<' va '>' belgilar detection limit bo'lib, patologiya emas
-                    is_ab = (starred or '+' in after) \
-                            and 'Normal' not in after and 'normal' not in after
-                    if is_ab and analyte not in result_dict[fname_key]['abnormal_params']:
-                        result_dict[fname_key]['abnormal_params'].append(analyte)
-                    break
+            # Oyna 'PH' ishlatadi, parser 'pH' qaytaradi
+            val = parsed.get(code) or parsed.get('pH' if code == 'PH' else code) or ''
+            result_dict[fname_key][code] = val
+            # Patologiya aniqlash: faqat * (analizator belgisi) yoki + (musbat natija)
+            # '<' va '>' belgilar detection limit bo'lib, patologiya emas
+            is_ab = ((code in starred) or (code == 'PH' and 'pH' in starred) or '+' in val) \
+                    and 'Normal' not in val and 'normal' not in val
+            if is_ab and val and code not in result_dict[fname_key]['abnormal_params']:
+                result_dict[fname_key]['abnormal_params'].append(code)
         # Strip turini analiz qilingan qiymatlar asosida aniqlash
-        if fname_key in result_dict:
-            result_dict[fname_key]['strip_type'] = detect_strip_type(result_dict[fname_key])
+        result_dict[fname_key]['strip_type'] = detect_strip_type(result_dict[fname_key])
     except Exception as e:
         print(f"⚠️ Parse xato: {file_path} — {e}")
     return result_dict
+
 
 
 def refresh_samples(patient_tree, status_var, date_from_var, date_to_var, all_samples):
