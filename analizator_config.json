@@ -9,6 +9,8 @@
   "siydik": {
     "enabled": true,
     "name": "URIT-50 (Siydik)",
+    "model": "urit50",
+    "protocol": "auto",
     "connection_type": "serial",
     "com_port": "COM4",
     "baudrate": 9600,
@@ -16,25 +18,47 @@
     "parity": "N",
     "stopbits": 1,
     "timeout": 1.0,
-    "encoding": "utf-8"
+    "encoding": "utf-8",
+    "ip": "0.0.0.0",
+    "port": 5200,
+    "reconnect_interval": 5,
+    "idle_timeout": 3
   },
   "gemotologiya": {
     "enabled": true,
     "name": "BC-20S (Gemotologiya)",
+    "model": "mindray_bc20s",
+    "protocol": "auto",
     "connection_type": "tcp_client",
     "ip": "192.168.0.2",
     "port": 5100,
     "reconnect_interval": 5,
-    "encoding": "utf-8"
+    "encoding": "utf-8",
+    "worklist": true,
+    "com_port": "COM1",
+    "baudrate": 9600,
+    "bytesize": 8,
+    "parity": "N",
+    "stopbits": 1,
+    "timeout": 1
   },
   "bioximiya": {
     "enabled": true,
     "name": "BK-280 (Bioximiya)",
+    "model": "biobase_bk",
+    "protocol": "hl7",
     "connection_type": "tcp_server",
     "ip": "192.168.0.100",
     "port": 8087,
     "lis_port": 8088,
-    "encoding": "utf-8"
+    "ack_style": "byte",
+    "encoding": "utf-8",
+    "com_port": "COM1",
+    "baudrate": 9600,
+    "bytesize": 8,
+    "parity": "N",
+    "stopbits": 1,
+    "timeout": 1
   },
   "printer": {
     "blanka_printer": "EPSON L8050 Series (копия 1)"
