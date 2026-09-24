@@ -379,6 +379,21 @@ def save_blanka_config(config: dict = None):
     refresh_blanka_colors()
 
 
+def _blanka_ruscha_qoshish(doc):
+    """Blanka Sozlamalarida "ruscha ham" belgisi qo'yilgan bo'lsa — tayyor
+    blankaga ruscha tarjima qatorlarini qo'shadi (blanka_ruscha.py).
+    Belgi o'chiq bo'lsa hech narsa qilmaydi (blanka faqat o'zbekcha).
+    Xatolik blankani saqlashga to'sqinlik qilmaydi."""
+    try:
+        if not load_blanka_config().get('blanka_ruscha', False):
+            return doc
+        from blanka_ruscha import ruscha_qoshish
+        ruscha_qoshish(doc)
+    except Exception as e:
+        print(f"[RUSCHA] Ruscha tarjima qo'shilmadi: {e}")
+    return doc
+
+
 def get_blanka_printer():
     """Natija blankasi AVTO-pechati uchun ishlatiladigan printer nomini qaytaradi.
 
@@ -6703,6 +6718,7 @@ def create_blanks_for_order(order_id: int, test_results: dict = None, file_exist
                 response = file_exists_callback(full_path)
                 if not response:
                     return [full_path]
+        _blanka_ruscha_qoshish(unified_doc)
         unified_doc.save(full_path)
         if os.path.exists(full_path):
             return [full_path]
@@ -7758,6 +7774,7 @@ def generate_unified_blank(order_id):
         # (telefonsiz; vrach/UZI xulosalaridan farqlash uchun " - LAB natija #id")
         output_filename = build_natija_filename(order_info, order_id)
         output_path = os.path.join(save_dir, output_filename)
+        _blanka_ruscha_qoshish(doc)
         doc.save(output_path)
         return output_path
     except Exception as e:
@@ -20790,6 +20807,20 @@ Sana: {_sana_fmt}"""
         # 7. SAQLASH YO'LLARI (Word / PDF) — DOIM ko'rinadi
         #    (har kompyuterda yo'l boshqacha bo'lishi mumkin)
         # ══════════════════════════════════════════════════════════════
+        # ══════════════════════════════════════════════════════════════
+        # 6.5. BLANKA TILI — ruscha tarjima (ixtiyoriy, standart: o'chiq)
+        # ══════════════════════════════════════════════════════════════
+        til_lf = ttk.LabelFrame(main_frame, text="🌐 Blanka tili", padding="8")
+        til_lf.pack(fill=tk.X, pady=(0, 8))
+        ruscha_var = tk.BooleanVar(value=bool(config.get('blanka_ruscha', False)))
+        ttk.Checkbutton(til_lf, text="Blankada ruscha tarjima ham chiqsin (o'zbekcha + ruscha)",
+                        variable=ruscha_var).pack(anchor=tk.W)
+        ttk.Label(til_lf,
+                  text="• Belgi qo'yilsa: sarlavhalar va tahlil nomlari ostida kichik ruscha qator chiqadi\n"
+                       "  (vrach/UZI blankasidagi kabi). Kerak bo'lganda yoqing.\n"
+                       "• Belgi olib tashlansa: blanka odatdagidek FAQAT o'zbekcha chiqadi.",
+                  foreground="#555", justify=tk.LEFT).pack(anchor=tk.W, pady=(4, 0))
+
         from tkinter import filedialog as _fd
 
         save_lf = ttk.LabelFrame(main_frame, text="📁 Saqlash yo'llari (Word / PDF)", padding="8")
@@ -20856,6 +20887,7 @@ Sana: {_sana_fmt}"""
                 "chap_panel": chap_var.get(),
                 "ong_panel": ong_var.get(),
                 "qr_link_template": qr_link_var.get().strip(),
+                "blanka_ruscha": bool(ruscha_var.get()),
             }
             for key, var in kl_fields.items():
                 new_config[key] = var.get().strip()
