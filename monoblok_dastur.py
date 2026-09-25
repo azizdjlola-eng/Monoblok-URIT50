@@ -20196,6 +20196,87 @@ Sana: {_sana_fmt}"""
             ttk.Button(btns, text="Avtomatik taxmin (nom bo'yicha)", command=_auto_guess).pack(side=tk.LEFT, padx=4)
             ttk.Button(btns, text="💾 Saqlash", command=_save_map).pack(side=tk.RIGHT, padx=4)
 
+        def open_bio_worklist_channels():
+            """Qaysi bioximik tahlil LIS so'roviga (DSR worklist) qo'shilsin.
+
+            Analizatorda reagenti yo'q tahlilni yuborish mumkin emas: BK-280
+            dasturi notanish kanalni qabul qila olmay yiqiladi (24.09.2026 —
+            Natriy). K/Mg/Na hozir yarim avtomatda o'lchanadi, keyinchalik
+            avtomatga o'tkazilishi mumkin — shuning uchun ro'yxat sozlamada."""
+            if _bpk is None:
+                messagebox.showwarning("Bioximiya", "bio_protokol moduli topilmadi.", parent=dialog)
+                return
+            bio = cfg.get("bioximiya", {}) or {}
+            saved = bio.get("worklist_channels")
+            if saved:
+                enabled = {str(c) for c in saved}
+            else:
+                enabled = set(_bpk.SUPPORTED_CHANNELS) | {str(c) for c in (bio.get("extra_channels") or [])}
+
+            win = tk.Toplevel(dialog)
+            win.title("Worklist tahlillari — LIS so'roviga nima yuborilsin")
+            win.geometry("620x620")
+            win.transient(dialog)
+            ttk.Label(win, text="Belgilangan tahlillar shtrix-kod so'roviga javoban analizatorga "
+                                "YUBORILADI (ekranda avtomat tanlanadi).\n"
+                                "Belgisi olib tashlangan tahlil yuborilmaydi — uni analizatorda "
+                                "qo'lda tanlaysiz yoki yarim avtomatda o'lchaysiz.\n\n"
+                                "DIQQAT: analizatorda reagenti/kanali yo'q tahlilni belgilamang — "
+                                "uning dasturi bunday so'rovni qabul qila olmaydi.",
+                      wraplength=590, justify=tk.LEFT).pack(anchor=tk.W, padx=10, pady=(10, 6))
+
+            outer = ttk.Frame(win); outer.pack(fill=tk.BOTH, expand=True, padx=10)
+            cv = tk.Canvas(outer, highlightthickness=0)
+            sb = ttk.Scrollbar(outer, orient=tk.VERTICAL, command=cv.yview)
+            box = ttk.Frame(cv)
+            box.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
+            cv.create_window((0, 0), window=box, anchor="nw")
+            cv.configure(yscrollcommand=sb.set)
+            cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+            chk_vars = {}
+            for r, code in enumerate(sorted(_bpk.CANONICAL_TESTS, key=int)):
+                nm = _bpk.canonical_name(code)
+                an = _bpk.CHANNEL_NAME.get(code, "")
+                v = tk.BooleanVar(value=(code in enabled))
+                chk_vars[code] = v
+                ttk.Checkbutton(box, variable=v,
+                                text=f"{code}  —  {nm}" + (f"   (analizatorda: {an})" if an else "")
+                                ).grid(row=r, column=0, sticky=tk.W, padx=4, pady=1)
+
+            def _set_all(val):
+                for v in chk_vars.values():
+                    v.set(val)
+
+            def _reset_default():
+                for c, v in chk_vars.items():
+                    v.set(c in _bpk.SUPPORTED_CHANNELS)
+
+            def _save_channels():
+                chosen = sorted([c for c, v in chk_vars.items() if v.get()], key=int)
+                if not chosen:
+                    messagebox.showwarning("Worklist tahlillari",
+                                           "Kamida bitta tahlil belgilanishi kerak.", parent=win)
+                    return
+                cfg.setdefault("bioximiya", {})["worklist_channels"] = chosen
+                if save_config(cfg):
+                    messagebox.showinfo(
+                        "Worklist tahlillari",
+                        f"Saqlandi: {len(chosen)} ta tahlil LIS so'roviga qo'shiladi.\n"
+                        "Listener keyingi so'rovdan boshlab shu ro'yxatni ishlatadi.",
+                        parent=win)
+                    win.destroy()
+                else:
+                    messagebox.showerror("Worklist tahlillari", "Saqlab bo'lmadi.", parent=win)
+
+            b = ttk.Frame(win); b.pack(fill=tk.X, padx=10, pady=8)
+            ttk.Button(b, text="Hammasi", command=lambda: _set_all(True)).pack(side=tk.LEFT, padx=3)
+            ttk.Button(b, text="Hech biri", command=lambda: _set_all(False)).pack(side=tk.LEFT, padx=3)
+            ttk.Button(b, text="Standart (analizator ishlatganlari)",
+                       command=_reset_default).pack(side=tk.LEFT, padx=3)
+            ttk.Button(b, text="\U0001F4BE Saqlash", command=_save_channels).pack(side=tk.RIGHT, padx=3)
+
         def test_bio_query():
             """LIS tomonini sinash: o'zimizning listenerga QRY^Q02 yuborib, javobni ko'rsatamiz.
             Bu ishlasa — dastur tomoni tayyor; analizator so'rov yubormayotgan bo'ladi."""
@@ -20270,6 +20351,7 @@ Sana: {_sana_fmt}"""
         ttk.Button(_b_btns, text="📤 Analizatorga yuborish (sinov)", command=push_bio_worklist).pack(side=tk.LEFT, padx=6)
         ttk.Button(_b_btns, text="Ulanishni tekshirish", command=test_bio).pack(side=tk.LEFT, padx=6)
         ttk.Button(_b_btns, text="🧬 Tahlil kodlari", command=open_bio_code_map).pack(side=tk.LEFT, padx=6)
+        ttk.Button(_b_btns, text="☑ Worklist tahlillari", command=open_bio_worklist_channels).pack(side=tk.LEFT, padx=6)
         ttk.Button(_b_btns, text="🧪 Shtrix-kod so'rovini sinash", command=test_bio_query).pack(side=tk.LEFT, padx=6)
 
 

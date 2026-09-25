@@ -81,6 +81,93 @@ for _code, (_nm, _tid, _aliases) in CANONICAL_TESTS.items():
         _ALIAS_INDEX[_a.upper().replace(" ", "").replace("-", "").replace("'", "")] = _code
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+#  KANAL BIRLIGI VA NORMASI — analizatorga worklist (DSR) qaytarishda shart
+# ─────────────────────────────────────────────────────────────────────────────
+# 24.09.2026: DSR da tahlil qatorini "236^ALT^^" ko'rinishida (birlik va norma
+# BO'SH) yuborganimizda analizator dasturi yiqildi:
+#     System.FormatException ... Convert.ToInt32(String)
+#       at CRYSTAL.sample.frmSampleInput...  at CRYSTAL.Listrans...
+# Bemor ma'lumoti (ism/yosh) saqlanib qolar, TAHLILLAR esa tushmasdi.
+# Quyidagi qiymatlar analizatorning O'Z natija xabarlaridan olingan
+# (hl7_inbox, 12 000 dan ortiq xabar) — ya'ni u o'zi yuboradigan matnlar,
+# demak o'zi albatta o'qiy oladi. Normalar analizator reagent sozlamasidan.
+CHANNEL_UNIT_REF = {
+    "233": ("g/L", "35~55"),          "235": ("U/L", "1~115"),
+    "236": ("U/L", "0~41"),           "237": ("U/L", "13~53"),
+    "245": ("IU/ml", "0~150"),        "246": ("U/L", "0~40"),
+    "252": ("mmol/L", "2.05~2.54"),   "253": ("U/L", "3930~12600"),
+    "254": ("mmol/L", "2.34~5.2"),    "267": ("umol/L", "6.6~28.3"),
+    "272": ("mmol/L", "3.89~6.1"),    "277": ("mmol/L", "0.77~2.25"),
+    "284": ("mmol/L", "3.5~5.5"),     "287": ("U/L", "135~225"),
+    "289": ("mmol/L", "0~4.13"),      "296": ("mg/dL", "1.7~2.4"),
+    "297": ("mmol/L", "135~155"),     "305": ("IU/ml", "0~14"),
+    "308": ("mmol/L", "0.7~1.7"),     "310": ("umol/L", "140~480"),
+    "313": ("mmol/L", "1.7~8.3"),     "317": ("g/L", "60~88"),
+    "319": ("U/L", "6~71"),           "320": ("umol/L", "2~20.5"),
+    "321": ("umol/L", "0~6.8"),       "322": ("mg/L", "0~5"),
+    "323": ("umol/L", "44~115"),      "230": ("U", "0~4"),
+    "275": ("%", "4~6"),
+}
+# Xaritada yo'q kanal uchun ham BO'SH yubormaymiz (analizator yiqiladi)
+CHANNEL_UNIT_REF_DEFAULT = ("U/L", "0~100")
+
+# Worklistda tahlil nomi ham analizatorning O'ZI ishlatadigan nom bo'lsin
+# (bizning "Umumiy bilirubin" emas — analizator ekranida "UM BILR-N").
+CHANNEL_NAME = {
+    "233": "ALBUMIN",   "235": "ALP",         "236": "ALT",        "237": "A-PANKRIAT",
+    "245": "ASO",       "246": "AST",         "252": "CA",         "253": "CHE",
+    "254": "XOLESTERIN", "267": "TEMIR",      "272": "GLUKOZA",    "277": "HDL-C",
+    "284": "KALIY",     "287": "LDG",         "289": "LDL-C",      "296": "MAGNIY",
+    "297": "NATRIY",    "305": "R FAKTOR",    "308": "TG",         "310": "MOCH KIS-A",
+    "313": "MOCHEVINA", "317": "OQSIL",       "319": "gamma-GT",   "320": "UM BILR-N",
+    "321": "BOG BILR-N", "322": "CRB",        "323": "KREATININ",  "230": "TIMOL",
+    "275": "HBA1C",
+}
+
+
+# Analizator HAQIQATDA o'lchaydigan kanallar (o'z natija xabarlarida ko'rilgan).
+# 24.09.2026: worklistda NATRIY (297) yuborilgach analizator dasturi yiqildi —
+# bu kanal uning tahlil jadvalida yo'q (reagenti yo'q, 7 oyda bironta natija
+# yubormagan). Notanish kod → ichki qidiruv bo'sh qaytaradi → Convert.ToInt32("")
+# → FormatException → dastur yopiladi. Shuning uchun worklistga FAQAT analizator
+# taniydigan kodlar ketadi; qolganlari qo'lda kiritiladi.
+# Yangi reagent qo'shilsa: analizator_config.json → bioximiya.extra_channels
+# ga kodni qo'shing (yoki worklist_all_codes: true bilan filtrni o'chiring).
+SUPPORTED_CHANNELS = {
+    "233", "235", "236", "237", "245", "246", "252", "253", "254", "267",
+    "272", "277", "284", "287", "289", "296", "305", "308", "310", "313",
+    "317", "319", "320", "321", "322", "323",
+}
+
+
+def worklist_channels() -> set:
+    """LIS so'roviga qo'shiladigan kanallar ro'yxati.
+
+    Laborant "Tizim Sozlamalari → Bioximiya → Worklist tahlillari" oynasida
+    belgilaydi (analizator_config.json → bioximiya.worklist_channels). K/Mg/Na
+    kabi hozircha yarim avtomatda o'lchanadigan tahlillar shu yerdan o'chiriladi,
+    keyin avtomatga o'tkazilsa — qayta belgilanadi, kodga tegilmaydi.
+    Sozlanmagan bo'lsa — analizator tarixda ishlatgan kanallar (SUPPORTED_CHANNELS)."""
+    chosen = _tune("worklist_channels", None)
+    if chosen:
+        return {str(c) for c in chosen}
+    extra = _tune("extra_channels", []) or []
+    return set(SUPPORTED_CHANNELS) | {str(x) for x in extra}
+
+
+def is_supported_channel(code: str) -> bool:
+    if _tune("worklist_all_codes", False):
+        return True
+    return str(code) in worklist_channels()
+
+
+def channel_unit_ref(code: str):
+    """Kanal kodi → (birlik, norma oralig'i). Hech qachon bo'sh qaytarmaydi."""
+    u, r = CHANNEL_UNIT_REF.get(str(code), CHANNEL_UNIT_REF_DEFAULT)
+    return (u or CHANNEL_UNIT_REF_DEFAULT[0], r or CHANNEL_UNIT_REF_DEFAULT[1])
+
+
 def canonical_name(code: str) -> str:
     return CANONICAL_TESTS.get(str(code), ("", None, []))[0] or f"Kod:{code}"
 
@@ -493,6 +580,10 @@ def split_messages(content: str) -> list:
 # ─────────────────────────────────────────────────────────────────────────────
 #  WORKLIST (shtrix-kod) — bazadan bemor + buyurtma tahlillari
 # ─────────────────────────────────────────────────────────────────────────────
+class LookupUnavailable(Exception):
+    """Bazaga ulanib bo'lmadi — bemor bor-yo'qligi NOMA'LUM ("topilmadi" EMAS)."""
+
+
 def lookup_order(sample_id: str):
     """{'patient': {...}, 'tests': [{'test_id','nomi','birlik','norma'}]} yoki None.
     Faqat orders.sample_id (yoki bemor natija_kodi/kod_yollanma) bo'yicha — orders.id bo'yicha EMAS
@@ -523,14 +614,19 @@ def lookup_order(sample_id: str):
         cur.close(); conn.close()
         return {"patient": patient, "tests": tests}
     except Exception as e:
+        # MUHIM: bu YERDA None qaytarish "bemor yo'q" degani EMAS — baza yotgan
+        # bo'lishi mumkin. Chaqiruvchi NF (topilmadi) deb javob bersa, analizator
+        # ekranida "namuna ro'yxatda yo'q" chiqadi va operator barkodni ayblaydi.
+        # 24.09.2026: MySQL qayta ishga tushgandan keyin aynan shunday bo'ldi
+        # (260924118342 — bazada bor edi, lekin NF javobi ketdi).
         print(f"[bio_protokol] lookup_order xato: {e}")
-        return None
+        raise LookupUnavailable(str(e))
 
 
-def worklist_items(order_data: dict, model: str, code_map: dict = None) -> list:
+def worklist_items(order_data: dict, model: str, code_map: dict = None, skipped_out: list = None) -> list:
     """Buyurtma tahlillari → [(analizator_kodi, nom, birlik, norma)] — faqat bioximiya, kanal kodi bilan."""
     cm = code_map if code_map is not None else load_code_map()
-    seen, out = set(), []
+    seen, out, skipped = set(), [], []
     for t in (order_data or {}).get("tests", []):
         tid = t.get("test_id")
         for canon in worklist_codes_for_tahlil(tid, t.get("nomi", "")):
@@ -538,7 +634,16 @@ def worklist_items(order_data: dict, model: str, code_map: dict = None) -> list:
                 if acode in seen:
                     continue
                 seen.add(acode)
-                out.append((acode, canonical_name(canon), "", ""))
+                if not is_supported_channel(acode):
+                    skipped.append(f"{acode}({canonical_name(canon)})")
+                    continue
+                unit, ref = channel_unit_ref(acode)
+                nm = CHANNEL_NAME.get(str(acode)) or canonical_name(canon)
+                out.append((acode, nm, unit, ref))
+    if skipped_out is not None:
+        skipped_out.extend(skipped)
+    if skipped:
+        print(f"[bio_protokol] Worklistdan chiqarildi (analizator taniydigan kanal emas): {skipped}")
     return out
 
 
@@ -552,10 +657,63 @@ def _hl7_ts(dt) -> str:
         return ""
 
 
+# Analizator MSH-18 da ASCII e'lon qiladi va o'z ekranida lotin harflarini kutadi.
+# "Ro'ziyeva", "Ğafurov" yoki kirill ism yuborilsa — ekranda buziladi yoki xabar
+# rad etiladi. Shuning uchun DSR/ORR ga ismni ASCII ga o'tkazib yuboramiz.
+_TRANSLIT = {
+    "ʻ": "'", "ʼ": "'", "‘": "'", "’": "'", "`": "'", "´": "'",
+    "ğ": "g", "Ğ": "G", "ş": "s", "Ş": "S", "ç": "c", "Ç": "C", "ö": "o", "Ö": "O",
+    "ü": "u", "Ü": "U", "ı": "i", "İ": "I", "ñ": "n", "Ñ": "N",
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "yo", "ж": "j",
+    "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m", "н": "n", "о": "o",
+    "п": "p", "р": "r", "с": "s", "т": "t", "у": "u", "ф": "f", "х": "x", "ц": "ts",
+    "ч": "ch", "ш": "sh", "щ": "sh", "ъ": "", "ы": "i", "ь": "", "э": "e", "ю": "yu",
+    "я": "ya", "қ": "q", "ғ": "g", "ҳ": "h", "ў": "o", "ъ": "",
+}
+
+
+def to_ascii(s: str) -> str:
+    """Ism/matnni analizator tushunadigan ASCII ko'rinishga keltirish."""
+    s = (s or "").strip()
+    if not s:
+        return ""
+    out = []
+    for ch in s:
+        low = ch.lower()
+        if low in _TRANSLIT:
+            rep = _TRANSLIT[low]
+            out.append(rep.upper() if ch.isupper() and rep else rep)
+        elif ord(ch) < 128:
+            out.append(ch)
+        else:
+            import unicodedata
+            dec = unicodedata.normalize("NFKD", ch)
+            out.append("".join(c for c in dec if ord(c) < 128))
+    return "".join(out).strip()
+
+
+def analyzer_text(s: str) -> str:
+    """Analizatorga yuboriladigan matn: ASCII + tinish belgilarisiz.
+
+    `O'ralov Muso` dagi apostrof ularning dasturida (SQL/parser) muammo
+    qilishi mumkin — analizator ekranida ism ko'rinishi yetarli, shuning uchun
+    harf/raqam/bo'sh joy/nuqta/chiziqchadan boshqasini olib tashlaymiz."""
+    return re.sub(r"[^A-Za-z0-9 .\-]", "", to_ascii(s)).strip()
+
+
 def _patient_fields(p: dict):
-    fish = (p.get("fish") or "").strip()
+    fish = analyzer_text(p.get("fish") or "")
     dob = _hl7_ts(p.get("tugilgan_sana"))[:8]
     dob = dob + "000000" if len(dob) == 8 else ""
+    if not dob:
+        # Tug'ilgan sana yo'q → yoshdan tiklaymiz. Bo'sh sana analizatorda
+        # DateTime parse xatosi berishi mumkin (dastur yopilib qolishi).
+        try:
+            yosh = int(p.get("yosh") or 0)
+            if 0 < yosh < 130:
+                dob = f"{datetime.now().year - yosh}0101000000"
+        except Exception:
+            pass
     j = (p.get("jins") or "").lower()
     sex = "M" if j.startswith(("e", "m", "м")) else "F" if j.startswith(("a", "f", "ж", "w")) else "O"
     return fish, dob, sex
@@ -569,13 +727,13 @@ def build_hl7_ack(msh: dict, kind="R01", code="AA", text="Message accepted", err
     ts = datetime.now().strftime("%Y%m%d%H%M%S")
     app, fac = msh.get("app", ""), msh.get("fac", "")
     ctrl = msh.get("ctrl", "") or ts
-    return (f"MSH|^~\\&|LIS||{app}|{fac}|{ts}||ACK^{kind}|{ctrl}|P|2.3.1||||0||ASCII|||\r"
-            f"MSA|{code}|{ctrl}|{text}|||{err}|\r")
+    return (_reply_msh(msh, "ACK^" + kind, ctrl, ts) + "\r"
+            + f"MSA|{code}|{ctrl}|{text}|||{err}|\r")
 
 
 def parse_qry(message: str) -> dict:
     """QRY^Q02 → {sample_id, query_id, qrd, qrf, msh}"""
-    out = {"sample_id": "", "query_id": "1", "qrd": "", "qrf": "", "msh": {}}
+    out = {"sample_id": "", "query_id": "1", "qrd": "", "qrf": "", "msh": {}, "position": ""}
     for line in re.split(r"[\r\n]+", (message or "").lstrip("\x0b")):
         line = line.strip()
         if line.startswith("MSH|"):
@@ -589,16 +747,73 @@ def parse_qry(message: str) -> dict:
                 out["sample_id"] = f[8].split("^")[0].strip()
             if len(f) > 4 and f[4].strip():
                 out["query_id"] = f[4].strip()
+            # QRD-10 = namuna javoni va joyi (rack^position) — DSR da qaytarilishi kerak
+            if len(f) > 10 and f[10].strip():
+                pos = f[10].strip().split("^")[-1].strip()
+                if pos.isdigit():
+                    out["position"] = pos
         elif line.startswith("QRF|"):
             out["qrf"] = line
     return out
 
 
-def build_qck(q: dict, found: bool) -> str:
+# ─────────────────────────────────────────────────────────────────────────────
+#  JAVOB SARLAVHASI (MSH) — analizator javobimizni qabul qilishi uchun
+# ─────────────────────────────────────────────────────────────────────────────
+# BK-280 QRY^Q02 yubordi, biz QCK+DSR qaytardik, lekin analizator EKRANIDA bemor
+# chiqmadi (24.09.2026 sinovi). Eng ehtimolli sabab — javobning MSH manzili:
+#   biz:        MSH|^~\&|LIS||BIOBASE|BK-280|...   (MSH-3=LIS, qabul qiluvchi 5/6 da)
+#   analizator: MSH|^~\&|BIOBASE|BK-200|||...      (o'z xabarlarida 3/4 da)
+# Appendix E ning 29-33-betlaridagi MISOLLARDA ham LIS→analizator yo'nalishidagi
+# xabarlar BIOBASE|BK-280 ko'rinishida (matnda esa boshqacha yozilgan). Firmware
+# misolga qarab tekshirsa, bizning eski sarlavha rad etiladi.
+#
+# "mirror" — analizator o'z ORU sida qanday yuborsa, biz ham shunday qaytaramiz.
+# "lis"    — eski uslub (spetsifikatsiya MATNI bo'yicha). Analizator "mirror" ni
+#            qabul qilmasa, analizator_config.json → bioximiya.msh_style = "lis".
+REPLY_MSH_STYLE = "mirror"
+
+# Javobni analizator qabul qilmasa, kodga tegmasdan sinab ko'rish uchun
+# sozlamalar: analizator_config.json → "bioximiya" ichida
+#   "msh_style": "mirror" | "lis"
+#   "dsc_value": "0"      (STANDART) — analizator DSC maydonini Convert.ToInt32
+#                          bilan o'qiydi; BO'SH qiymatda DASTURI YIQILADI.
+#                          Isbot — analizatorning o'z jurnali (24.09.2026):
+#                            System.FormatException ... Convert.ToInt32(String)
+#                              at CRYSTAL.sample.frmSampleInput...
+#                              at CRYSTAL.Listrans...   (LIS oqimi)
+#                "".      Appendix E matni bo'yicha oxirgi DSR da bo'sh bo'lishi
+#                          kerak, lekin firmware buni ko'tara olmaydi.
+def _tune(key: str, default):
+    try:
+        from monoblok_db_config import get_analyzer
+        v = (get_analyzer("bioximiya") or {}).get(key)
+        return default if v is None else v
+    except Exception:
+        return default
+
+
+def _reply_msh(msh: dict, msg_type: str, ctrl: str, ts: str) -> str:
+    """LIS → analizator xabarining MSH segmenti (maydon tartibi analizatornikidek:
+    MSH-16=0, MSH-18=ASCII)."""
+    app = msh.get("app", "") or "BIOBASE"
+    fac = msh.get("fac", "") or "BK-280"
+    if _tune("msh_style", REPLY_MSH_STYLE) == "lis":
+        return f"MSH|^~\\&|LIS||{app}|{fac}|{ts}||{msg_type}|{ctrl}|P|2.3.1||||0||ASCII|||"
+    return f"MSH|^~\\&|{app}|{fac}|||{ts}||{msg_type}|{ctrl}|P|2.3.1||||0||ASCII|||"
+
+
+def build_qck(q: dict, found: bool, err_code: str = "") -> str:
+    """QCK^Q02. err_code bo'sh bo'lmasa — QAK|SR|AE (ilova xatosi: baza yotgan va h.k.),
+    ya'ni analizatorga "bunday bemor yo'q" (NF) deb YOLG'ON aytmaymiz."""
     ts = datetime.now().strftime("%Y%m%d%H%M%S")
     msh = q.get("msh", {})
     ctrl = msh.get("ctrl", "") or ts
-    return (f"MSH|^~\\&|LIS||{msh.get('app', '')}|{msh.get('fac', '')}|{ts}||QCK^Q02|{ctrl}|P|2.3.1|||||ASCII|||\r"
+    if err_code:
+        return (f"{_reply_msh(msh, 'QCK^Q02', ctrl, ts)}\r"
+                f"MSA|AE|{ctrl}|LIS database unavailable|||{err_code}|\r"
+                f"ERR|{err_code}|\rQAK|SR|AE|\r")
+    return (f"{_reply_msh(msh, 'QCK^Q02', ctrl, ts)}\r"
             f"MSA|AA|{ctrl}|Message accepted|||0|\rERR|0|\rQAK|SR|{'OK' if found else 'NF'}|\r")
 
 
@@ -612,19 +827,87 @@ def build_dsr(q: dict, order_data: dict, model: str, code_map: dict = None) -> s
     barcode = str(p.get("sample_id") or q.get("sample_id") or "")
     qrd = q.get("qrd") or f"QRD|{ts}|R|D|{q.get('query_id', '1')}|||RD|{barcode}|OTH|||T|"
     qrf = q.get("qrf") or f"QRF|LIS|{ts[:8]}000000|{ts}|||RCT|COR|ALL|"
+    # ── RAQAMLI MAYDONLAR BO'SH QOLMASIN ────────────────────────────────────
+    # 24.09.2026: DSR javobidan keyin analizator DASTURI "Input string was not in
+    # a correct format" berib yopilib qoldi. Bu .NET ning Int32/DateTime parse
+    # xatosi — ya'ni ular raqam kutgan maydonga bo'sh (yoki noto'g'ri) qiymat
+    # yuborganmiz. Appendix E (23-24-bet) bo'yicha ma'lumot qatorida RAQAM turi:
+    #   #22 Sample ID — int   |   #25 Collection Volume — float ("blank" ruxsat)
+    #   #4  Date of Birth — YYYYMMDDHHmmSS (bo'sh bo'lsa DateTime.Parse yiqiladi)
+    # Shuning uchun #22 hech qachon bo'sh ketmaydi, #4 esa yoshdan tiklanadi.
+    sample_no = q.get("position", "")
+    if not str(sample_no).isdigit():
+        tail = re.sub(r"\D", "", barcode)[-3:]        # 260924118344 → "344"
+        sample_no = str(int(tail)) if tail and int(tail) > 0 else "1"
     dsp = ["", "", fish, dob, sex, "", "", "", "", (p.get("telefon") or ""), "", "", "", "", "", "", "",
-           "", "", "", barcode, str(p.get("order_id") or ""), _hl7_ts(p.get("sana_vaqt")), "N", "",
+           "", "", "", barcode, sample_no, _hl7_ts(p.get("sana_vaqt")), "N", "",
            "serum", "", ""]
-    segs = [f"MSH|^~\\&|LIS||{msh.get('app', '')}|{msh.get('fac', '')}|{ts}||DSR^Q03|{ctrl}|P|2.3.1|||||ASCII|||",
-            f"MSA|AA|{ctrl}|Message accepted|||0|", "ERR|0|", "QAK|SR|OK|", qrd, qrf]
+    # BUFER CHEGARASI (25.09.2026 o'lchandi): QCK(124) + DSR birgalikda 1024
+    # baytdan oshsa analizator javobni qabul qilmaydi — 979 bayt ishladi,
+    # 1129 va 1174 bayt esa yo'q (birinchisida tahlillar tushib, keyin
+    # "Database operation errors" bilan dastur yiqildi). Javob uzun bo'lsa
+    # MAJBURIY BO'LMAGAN matnlarni bo'shatamiz: MSA izohi, telefon, namuna
+    # vaqti. Qatorlar joyida qoladi (analizator hamma DSP ni kutadi), faqat
+    # ichi bo'shaydi — bu xavfsiz, chunki 20 ta DSP allaqachon bo'sh ketadi.
+    trim_over = int(_tune("dsr_trim_over", 950))
+    msa_text = "Message accepted"
+    segs = [_reply_msh(msh, "DSR^Q03", ctrl, ts),
+            f"MSA|AA|{ctrl}|{msa_text}|||0|", "ERR|0|", "QAK|SR|OK|", qrd, qrf]
+    # XABAR HAJMI — analizatorning qabul buferi ~1024 bayt (24.09.2026 o'lchandi:
+    # 615/636/739 baytli javoblar ishladi, 1058 baytlik (25 tahlil) javobsiz qoldi,
+    # analizator na ACK berdi, na ekranda ko'rsatdi, na yiqildi). Bo'sh DSP
+    # qatorlari ("DSP|7|||||") ma'lumot tashimaydi, lekin ~220 bayt yeydi.
+    # LEKIN 25.09.2026: ularni olib tashlaganda 439 BAYTLIK javob ham qabul
+    # qilinmadi (ACK yo'q) — analizator 28 ta DSP qatorining HAMMASINI kutadi.
+    # Shuning uchun standart qiymat endi False (hammasi yuboriladi). Set ID (DSP-1) saqlanadi, shuning uchun qolgan
+    # qatorlarning ma'nosi o'zgarmaydi. Kerak bo'lsa o'chirish:
+    # analizator_config.json → bioximiya.dsr_skip_empty = false
+    skip_empty = _tune("dsr_skip_empty", False)
     for i, v in enumerate(dsp, 1):
+        if skip_empty and not str(v).strip():
+            continue
         segs.append(f"DSP|{i}||{v}|||")
     i = len(dsp) + 1
     for acode, nm, unit, norma in worklist_items(order_data, model, code_map):
-        segs.append(f"DSP|{i}||{acode}^{nm}^{unit}^{norma}|||")
+        # Tahlil qatori formati. Appendix E ning 32-betdagi MISOLI:
+        #     DSP|29||1^^^|||      (faqat kod, nom/birlik/norma BO'SH)
+        # Jadval matnida "Test ID ^ Test Name ^ Unit ^ Normal Range" deyilgan va biz
+        # shu ko'rinishda yuborgandik — analizator HAR SAFAR yiqildi (24.09.2026,
+        # 5 ta sinov: "236^ALT^^" ham, "236^ALT^U/L^0~41" ham). Firmware nom/birlik
+        # turgan komponentni songa aylantirmoqchi bo'ladi (Convert.ToInt32) va
+        # FormatException beradi; BO'SH komponentni esa o'tkazib yuboradi.
+        # Analizator tahlilni KOD bo'yicha taniydi — nom baribir kerak emas.
+        # Kerak bo'lsa: analizator_config.json → bioximiya.dsr_item_style =
+        #   "bare" (standart, misoldagidek) | "name" (kod^nom^^) | "full" (hammasi)
+        style = _tune("dsr_item_style", "bare")
+        if style == "full":
+            body = f"{acode}^{to_ascii(nm)}^{to_ascii(unit)}^{to_ascii(norma)}"
+        elif style == "name":
+            body = f"{acode}^{to_ascii(nm)}^^"
+        else:
+            body = f"{acode}^^^"
+        segs.append(f"DSP|{i}||{body}|||")
         i += 1
-    segs.append("DSC||")
-    return "\r".join(segs) + "\r"
+    segs.append(f'DSC|{_tune("dsc_value", "0")}|')
+    out = "\r".join(segs) + "\r"
+    if len(out) > trim_over:
+        # 1-bosqich: MSA izohi, telefon (#10), namuna vaqti (#23) bo'shatiladi
+        trimmed = []
+        for ln in out.split("\r"):
+            if ln.startswith("MSA|"):
+                ln = f"MSA|AA|{ctrl}||||0|"
+            elif ln.startswith("DSP|10||") or ln.startswith("DSP|23||"):
+                ln = ln.split("||")[0] + "|||||"
+            trimmed.append(ln)
+        out = "\r".join(trimmed)
+    if len(out) > int(_tune("dsr_trim2_over", 1015)):
+        # 2-bosqich (deyarli hamma kanal buyurtma qilingan kamdan-kam holat):
+        # tug'ilgan sana (#4) va namuna turi (#26) ham bo'shatiladi — ekranda
+        # yosh ko'rinmaydi, lekin BARCHA TAHLIL tushadi, bu muhimroq.
+        out = "\r".join(
+            (ln.split("||")[0] + "|||||" if ln.startswith(("DSP|4||", "DSP|26||")) else ln)
+            for ln in out.split("\r"))
+    return out
 
 
 def orm_sample_id(message: str) -> str:
@@ -641,7 +924,7 @@ def build_orr(msh: dict, order_data, sample_id: str, model: str, code_map: dict 
     """ORR^O02 — ORM^O01 so'roviga javob: PID + har tahlil uchun ORC/OBR (OBR-4 = kanal^nom)."""
     ts = datetime.now().strftime("%Y%m%d%H%M%S")
     ctrl = msh.get("ctrl", "") or ts
-    segs = [f"MSH|^~\\&|LIS||{msh.get('app', '')}|{msh.get('fac', '')}|{ts}||ORR^O02|{ctrl}|P|2.3.1||||0||ASCII|||"]
+    segs = [_reply_msh(msh, "ORR^O02", ctrl, ts)]
     if not order_data:
         segs.append(f"MSA|AR|{ctrl}|Sample not found|||204|")
         return "\r".join(segs) + "\r"

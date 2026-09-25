@@ -104,7 +104,11 @@ def db():
 
 def get_order_by_sample_id(sample_id):
     """Barcode (orders.sample_id / bemor kodlari) → order_id. orders.id bo'yicha QIDIRMAYDI."""
-    od = _bp.lookup_order(sample_id)
+    try:
+        od = _bp.lookup_order(sample_id)
+    except _bp.LookupUnavailable as e:
+        _log(f"[XATO] Baza javob bermadi, buyurtma aniqlanmadi ({sample_id}): {e}")
+        return None
     return od["patient"]["order_id"] if od else None
 
 
@@ -189,20 +193,62 @@ def _handle_result(message: str, send, fmt: str):
             _log(f"[OGOHLANTIRISH] callback: {e}")
 
 
+def save_query_raw(direction: str, text: str):
+    """Shtrix-kod so'rovi/javobini xom holda saqlash — analizator javobimizni qabul
+    qilmasa, aynan qanday baytlar ketganini keyin ko'rish uchun (24.09.2026 sinovi)."""
+    try:
+        dt = datetime.now()
+        folder = os.path.join(BASE_DIR, dt.strftime("%Y%m"), "QUERY")
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, dt.strftime(f"qry_%Y%m%d_%H%M%S_%f_{direction}.txt"))
+        with open(path, "w", encoding="utf-8", errors="replace") as f:
+            f.write(text)
+    except Exception as e:
+        _log(f"[OGOHLANTIRISH] so'rov xom fayli saqlanmadi: {e}")
+
+
 def _handle_query_hl7_qry(message: str, send):
     q = _bp.parse_qry(message)
     sid = q.get("sample_id", "")
     model = _cfg_live.get("model", _bp.DEFAULT_MODEL)
     _log(f"◄ QRY^Q02 (shtrix-kod): {sid or '-'}")
-    od = _bp.lookup_order(sid) if sid else None
-    send(_bp.wrap_mllp(_bp.build_qck(q, bool(od)), ENCODING))
+    _log(f"  xom so'rov: {message.strip()[:300]!r}")
+    save_query_raw("in", message)
+
+    try:
+        od = _bp.lookup_order(sid) if sid else None
+    except _bp.LookupUnavailable as e:
+        # Baza yotgan — "topilmadi" (NF) deb YOLG'ON aytmaymiz, ilova xatosi (AE)
+        _log(f"[XATO] Baza javob bermadi, QCK AE yuborilmoqda: {e}")
+        qck_ae = _bp.build_qck(q, False, err_code="207")
+        send(_bp.wrap_mllp(qck_ae, ENCODING))
+        save_query_raw("out_ae", qck_ae)
+        return
+
+    qck = _bp.build_qck(q, bool(od))
+    send(_bp.wrap_mllp(qck, ENCODING))
+    save_query_raw("out_qck", qck)
     if not od:
         _log("  -> bemor topilmadi: QCK NF")
         return
-    time.sleep(0.1)
-    items = _bp.worklist_items(od, model)
-    send(_bp.wrap_mllp(_bp.build_dsr(q, od, model), ENCODING))
-    _log(f"  -> DSR^Q03: {od['patient'].get('fish')} | tahlillar: {[a for a, *_ in items]}")
+    # QCK va DSR orasidagi pauza. Analizator ikkala xabarni BITTA o'qishda
+    # olsa, ularning yig'indisi 1024 baytlik buferiga sig'maydi. Pauza
+    # uzunroq bo'lsa u QCK ni o'qib, buferni bo'shatib ulguradi.
+    time.sleep(float(_bp._tune("dsr_delay", 0.6)))
+    skipped = []
+    items = _bp.worklist_items(od, model, skipped_out=skipped)
+    if skipped:
+        _log(f"  [DIQQAT] Analizator taniymaydigan tahlil worklistga qo'shilmadi: {skipped} "
+             f"— bu tahlilni analizatorda QO'LDA tanlang")
+    dsr = _bp.build_dsr(q, od, model)
+    send(_bp.wrap_mllp(dsr, ENCODING))
+    save_query_raw("out_dsr", dsr)
+    _log(f"  -> DSR^Q03: {od['patient'].get('fish')} | tahlillar: {[a for a, *_ in items]} "
+         f"| {len(dsr)} bayt")
+    if len(dsr) > 1000:
+        _log(f"  [OGOHLANTIRISH] Javob {len(dsr)} bayt — analizator buferi ~1024 bayt. "
+             f"Katta ro'yxat qabul qilinmasligi mumkin (ACK kelmasa shu sabab).")
+    _log(f"  xom javob: {dsr.strip()[:300]!r}")
 
 
 def _handle_query_hl7_orm(message: str, send):
@@ -210,7 +256,13 @@ def _handle_query_hl7_orm(message: str, send):
     model = _cfg_live.get("model", _bp.DEFAULT_MODEL)
     msh = _bp.parse_qry(message).get("msh", {})
     _log(f"◄ ORM^O01 (shtrix-kod): {sid or '-'}")
-    od = _bp.lookup_order(sid) if sid else None
+    try:
+        od = _bp.lookup_order(sid) if sid else None
+    except _bp.LookupUnavailable as e:
+        _log(f"[XATO] Baza javob bermadi, ORR AE yuborilmoqda: {e}")
+        send(_bp.wrap_mllp(_bp.build_hl7_ack(msh, "O02", "AE",
+                                             "LIS database unavailable", "207"), ENCODING))
+        return
     send(_bp.wrap_mllp(_bp.build_orr(msh, od, sid, model), ENCODING))
     _log(f"  -> ORR^O02: {'topildi ' + str(od['patient'].get('fish')) if od else 'topilmadi (AR)'}")
 
@@ -219,7 +271,11 @@ def _handle_query_astm(message: str, send):
     sid = _gp.astm_query_sample_id(message)
     model = _cfg_live.get("model", _bp.DEFAULT_MODEL)
     _log(f"◄ ASTM Q (shtrix-kod): {sid or '-'}")
-    od = _bp.lookup_order(sid) if sid else None
+    try:
+        od = _bp.lookup_order(sid) if sid else None
+    except _bp.LookupUnavailable as e:
+        _log(f"[XATO] Baza javob bermadi, ASTM worklist yuborilmadi: {e}")
+        return
     send(b"\x05")
     send(_gp.astm_frames(_bp.build_astm_worklist(sid, od, model)))
     send(b"\x04")
@@ -323,7 +379,10 @@ def push_worklist(sample_id: str, style: str = "dsr"):
     tr = next((t for t in _transports if t.connected), None)
     if tr is None:
         return False, "Analizator hozir ulanmagan (natija porti) — yuborib bo'lmaydi"
-    od = _bp.lookup_order(sid)
+    try:
+        od = _bp.lookup_order(sid)
+    except _bp.LookupUnavailable as e:
+        return False, f"Bazaga ulanib bo'lmadi: {e}"
     if not od:
         return False, f"{sid} bazada topilmadi (orders.sample_id)"
     model = _cfg_live.get("model", _bp.DEFAULT_MODEL)
