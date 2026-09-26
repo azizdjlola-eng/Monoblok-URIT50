@@ -147,6 +147,106 @@ def ichki_tarmoqmi(host: str) -> bool:
     return host.endswith((".local", ".lan", ".home", ".mshome.net", ".internal"))
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# caching_sha2_password KESHI (MySQL 8) — "1045 Access denied" ning ildizi
+# ═══════════════════════════════════════════════════════════════════════════
+# NOSOZLIK: parol TO'G'RI bo'la turib dastur "1045 (28000): Access denied for
+# user 'root'@'localhost' (using password: YES)" berardi. Sabab uch narsaning
+# BIRIKISHIDA:
+#   1. MySQL rasmiy installeri (MySQL80) `root@localhost` ni
+#      `caching_sha2_password` bilan yaratadi (eski AzizMedLine MySQL'i esa
+#      `mysql_native_password` ishlatardi — shuning uchun ilgari muammo yo'q edi).
+#   2. Tezlik uchun TLS o'chirildi (`ssl_disabled=True`) — 13.5s → 1.2s.
+#   3. caching_sha2 QOIDASI: kesh BO'SH bo'lsa to'liq autentifikatsiya kerak,
+#      u esa FAQAT shifrlangan kanalda yoki server RSA kaliti bilan bo'ladi.
+#      `ssl_disabled=True` ikkalasini ham yopadi → server 1045 qaytaradi.
+# Kesh MySQL har qayta ishga tushganda (yoki FLUSH PRIVILEGES da) BO'SHAYDI —
+# shuning uchun nosozlik "goh bor, goh yo'q" bo'lib ko'rinardi va odатda
+# kompyuter qayta yoqilgandan keyin boshlanardi.
+# YECHIM: bir marta TLS bilan ulansak, server keshni to'ldiradi va shundan
+# keyin TEZKOR (TLS'siz) ulanish YANA ishlaydi. Ya'ni sekin yo'l uchun faqat
+# BITTA ulanish to'lanadi, tezlik yutug'i saqlanadi.
+
+_SHA2_TEKSHIRILDI = {}      # (host, port, user) -> tekshirilgan vaqt (monotonic)
+_SHA2_QAYTA_URINISH = 30.0  # server o'lik bo'lsa har chaqiruvda urinmaslik uchun
+_SHA2_ICHIDA = False        # isitish ulanishining o'zi qayta kirmasin
+
+
+def sha2_keshini_isit(cfg: dict) -> bool:
+    """TLS'siz ulanish 1045 bersa — bir marta TLS bilan ulanib, serverning
+    caching_sha2 keshini to'ldiradi. Qaytaradi: isitish BAJARILDIMI.
+
+    Xavfsiz: parol haqiqatan noto'g'ri bo'lsa TLS bilan ham 1045 keladi va
+    funksiya False qaytaradi — ya'ni bu yechim noto'g'ri parolni YASHIRMAYDI.
+    """
+    global _SHA2_ICHIDA
+    if _SHA2_ICHIDA:
+        return False
+    try:
+        import mysql.connector
+    except Exception:
+        return False
+    _SHA2_ICHIDA = True
+    try:
+        conn = mysql.connector.connect(
+            host=cfg.get("host", "127.0.0.1"), user=cfg.get("user", "root"),
+            password=cfg.get("password", ""), port=int(cfg.get("port", 3306) or 3306),
+            connection_timeout=8, use_pure=True,
+            # database ATAYIN berilmaydi — baza hali yaratilmagan bo'lsa ham
+            # kesh isishi kerak (aks holda BazaUstasi ham ishlay olmasdi).
+        )
+        conn.close()
+        return True
+    except Exception:
+        return False
+    finally:
+        _SHA2_ICHIDA = False
+
+
+def _sha2_kesh_kerakmi(cfg: dict):
+    """TLS'siz ulanishdan OLDIN bir martalik tekshiruv: tezkor yo'l ishlaydimi?
+    Ishlamasa (1045) keshni isitib qo'yamiz. Har jarayonda bir marta."""
+    if _SHA2_ICHIDA:
+        return
+    try:
+        import mysql.connector
+    except Exception:
+        return
+    # ⚠️ PAROL ham kalitning bir qismi (ochiq holda EMAS — xesh bilan).
+    # Nega: agar biror joy AVVAL noto'g'ri parol bilan tekshirsa (masalan
+    # sozlama oynasidagi "Tekshirish"), belgi qo'yilib qolar va keyingi
+    # HAQIQIY ulanish sovuq keshda isitilmay 1045 bilan yiqilardi.
+    import hashlib as _h
+    kalit = (str(cfg.get("host", "")), str(cfg.get("port", 3306)),
+             str(cfg.get("user", "")),
+             _h.sha256(str(cfg.get("password", "")).encode()).hexdigest()[:16])
+    import time as _t
+    oxirgi = _SHA2_TEKSHIRILDI.get(kalit)
+    if oxirgi is not None and (oxirgi is True or
+                               (_t.monotonic() - oxirgi) < _SHA2_QAYTA_URINISH):
+        return
+    try:
+        conn = mysql.connector.connect(
+            host=cfg.get("host", "127.0.0.1"), user=cfg.get("user", "root"),
+            password=cfg.get("password", ""), port=int(cfg.get("port", 3306) or 3306),
+            connection_timeout=5, use_pure=True, ssl_disabled=True)
+        conn.close()
+        _SHA2_TEKSHIRILDI[kalit] = True      # tezkor yo'l ishlayapti
+        return
+    except Exception as e:
+        if "1045" in str(e) or "Access denied" in str(e):
+            if sha2_keshini_isit(cfg):
+                _SHA2_TEKSHIRILDI[kalit] = True
+                print("[DB] caching_sha2 keshi isitildi — tezkor (TLS'siz) "
+                      "ulanish yana ishlaydi")
+                return
+            # TLS bilan ham o'tmadi → parol HAQIQATAN noto'g'ri.
+            _SHA2_TEKSHIRILDI[kalit] = True
+            return
+        # Server o'lik / tarmoq yo'q — bu boshqa muammo. Qisqa muddat kutamiz.
+        _SHA2_TEKSHIRILDI[kalit] = _t.monotonic()
+
+
 def tls_kwargs(cfg: dict) -> dict:
     """MySQL ulanishida TLS kerakmi — BARCHA modullar uchun YAGONA qoida.
 
@@ -168,11 +268,23 @@ def tls_kwargs(cfg: dict) -> dict:
     if rejim in ("on", "yes", "1", "true", "yoqilgan"):
         return {}
     if rejim in ("off", "no", "0", "false", "o'chiq", "ochirilgan"):
-        return {"ssl_disabled": True}
-    host = str(cfg.get("host", "") or cfg.get("HOST", "") or "").strip().lower()
-    if host in ("127.0.0.1", "localhost", "::1", ""):
-        return {"ssl_disabled": True}
-    return {"ssl_disabled": True} if ichki_tarmoqmi(host) else {}
+        natija = {"ssl_disabled": True}
+    else:
+        host = str(cfg.get("host", "") or cfg.get("HOST", "") or "").strip().lower()
+        if host in ("127.0.0.1", "localhost", "::1", ""):
+            natija = {"ssl_disabled": True}
+        else:
+            natija = {"ssl_disabled": True} if ichki_tarmoqmi(host) else {}
+
+    # TLS o'chirilayotgan bo'lsa — caching_sha2 keshi sovuq emasligiga
+    # ishonch hosil qilamiz (yuqoridagi izohga qarang). Har jarayonda BIR
+    # MARTA, faqat to'liq ma'lumot bo'lganda.
+    if natija.get("ssl_disabled") and cfg.get("user") and cfg.get("password"):
+        try:
+            _sha2_kesh_kerakmi(cfg)
+        except Exception:
+            pass
+    return natija
 
 
 def bu_kompyuter_ip() -> str:
@@ -196,7 +308,14 @@ def bu_kompyuter_ip() -> str:
     return ip
 
 
-_MYSQL_SERVICE = "AzizMedLineMySQL"
+# MySQL xizmati har o'rnatishda bir xil nomlanmaydi:
+#   "AzizMedLineMySQL" — bizning FULL o'rnatish yaratadi,
+#   "MySQL80"          — rasmiy MySQL Installer yaratadi (asosiy kompyuterlarda).
+# Ilgari faqat birinchi nom so'ralardi va MySQL80 li kompyuterda xizmat "yoq"
+# hisoblanardi -> "🔧 Lokal MySQL'ni ishga tushirish" tugmasi noto'g'ri
+# "xizmat o'rnatilmagan" deb javob berardi (2026-08-22).
+_MYSQL_SERVICES = ("AzizMedLineMySQL", "MySQL80")
+_MYSQL_SERVICE = _MYSQL_SERVICES[0]   # eski kod bilan moslik uchun
 
 
 def _port_ochiqmi(host: str, port: int, timeout: float = 2.0) -> bool:
@@ -210,13 +329,13 @@ def _port_ochiqmi(host: str, port: int, timeout: float = 2.0) -> bool:
         return False
 
 
-def _sc_holat() -> str:
-    """AzizMedLineMySQL xizmati holati: 'yoq' | 'running' | 'stopped'.
+def _sc_bitta(nom: str) -> str:
+    """Bitta xizmatning holati: 'yoq' | 'running' | 'stopped'.
     (sc query STATE 'RUNNING'/'STOPPED' — til-mustaqil kalitlar; returncode 1060=yo'q.)"""
     import subprocess
     cf = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
-        r = subprocess.run(["sc", "query", _MYSQL_SERVICE],
+        r = subprocess.run(["sc", "query", nom],
                            capture_output=True, text=True, errors="replace",
                            creationflags=cf, timeout=10)
         if r.returncode != 0:
@@ -229,6 +348,26 @@ def _sc_holat() -> str:
         return "yoq"
 
 
+def _mysql_xizmat_top():
+    """Bu kompyuterdagi MySQL xizmatining (nom, holat) juftligi.
+    Ishlab turgani ustun, keyin to'xtab qolgani; hech biri yo'q bo'lsa (None, 'yoq')."""
+    toxtagan = None
+    for nom in _MYSQL_SERVICES:
+        holat = _sc_bitta(nom)
+        if holat == "running":
+            return nom, "running"
+        if holat == "stopped" and toxtagan is None:
+            toxtagan = nom
+    if toxtagan:
+        return toxtagan, "stopped"
+    return None, "yoq"
+
+
+def _sc_holat() -> str:
+    """MySQL xizmati holati: 'yoq' | 'running' | 'stopped' (nomi qaysi bo'lsa ham)."""
+    return _mysql_xizmat_top()[1]
+
+
 def lokal_mysql_ishga_tushir():
     """
     Lokal AzizMedLineMySQL Windows xizmatini ishga tushirishga urinadi.
@@ -236,15 +375,15 @@ def lokal_mysql_ishga_tushir():
     """
     import subprocess
     cf = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    holat = _sc_holat()
+    nom, holat = _mysql_xizmat_top()
     if holat == "yoq":
         return False, ("MySQL xizmati bu kompyuterda o'rnatilmagan.\n"
                        "FULL o'rnatish (MySQL bilan) yoki BazaUstasi orqali bazani sozlang.")
     if holat == "running":
         return True, "MySQL allaqachon ishlayapti."
-    # stopped — ishga tushiramiz
+    # stopped — ishga tushiramiz (xizmat nomi qaysi bo'lsa o'shani)
     try:
-        subprocess.run(["net", "start", _MYSQL_SERVICE],
+        subprocess.run(["net", "start", nom],
                        capture_output=True, creationflags=cf, timeout=45)
     except Exception:
         pass
@@ -280,19 +419,46 @@ def ulanish_diagnostika(cfg: dict) -> str:
     ok, msg = test_ulanish(cfg)
     if ok:
         return "✅ Ulanish muvaffaqiyatli."
+    if "1045" in msg or "Access denied" in msg:
+        return (f"⚠️ Server ishlayapti, lekin PAROL qabul qilinmadi:\n{msg}\n\n"
+                "Bu holatda kod caching_sha2 keshini isitishga ham urinib "
+                "ko'rdi (MySQL 8 ning sovuq-kesh nosozligi) — demak sabab "
+                "haqiqatan foydalanuvchi/parol yoki ruxsat (grant).\n\n"
+                "Tekshiring:\n"
+                "• db_config.txt dagi USER/PASS shu MySQL niki ekanmi\n"
+                "• Bu kompyuterda MySQL rasmiy installer bilan qayta "
+                "o'rnatilmaganmi (u root paroli BOSHQA bo'ladi)")
     return (f"⚠️ Server javob beryapti, lekin ulanmadi:\n{msg}\n\n"
             "Odatda foydalanuvchi/parol yoki ruxsat (grant) noto'g'ri.")
 
 
 def test_ulanish(cfg: dict):
-    """(ok, xabar) qaytaradi."""
+    """(ok, xabar) qaytaradi.
+
+    ⚠️ `cfg[...]` EMAS, `cfg.get(...)` — chaqiruvchilarning hammasida ham
+    `port` kaliti yo'q edi (masalan `login.load_db_config()`). KeyError
+    tashqariga «Ulanmadi: 'port'» bo'lib chiqar va foydalanuvchi buni
+    ulanish xatosi deb o'qir edi: haqiqiy sabab BUTUNLAY berkitilgan edi.
+
+    ⚠️ TLS qoidasi dasturdagi bilan AYNAN bir xil bo'lishi shart. Ilgari bu
+    yerda TLS doim yoqiq edi — natijada «Tekshirish» tugmasi ✅ deb turgan
+    paytda dastur o'zi 1045 bilan yiqilardi (caching_sha2 keshi izohiga
+    qarang), ya'ni tekshiruv nosozlikni KO'RSATMASDI."""
     try:
         import mysql.connector
-        conn = mysql.connector.connect(
-            host=cfg["host"], user=cfg["user"], password=cfg["password"],
-            database=cfg["database"], port=int(cfg["port"]), connection_timeout=5,
+        kw = dict(
+            host=cfg.get("host", "127.0.0.1"), user=cfg.get("user", "root"),
+            password=cfg.get("password", ""),
+            database=cfg.get("database", "lab_tizim"),
+            connection_timeout=5,
             use_pure=True,   # C-extension "Failed raising error" nosozligidan saqlanish
         )
+        try:
+            kw["port"] = int(cfg.get("port", 3306) or 3306)
+        except (TypeError, ValueError):
+            kw["port"] = 3306
+        kw.update(tls_kwargs(cfg))
+        conn = mysql.connector.connect(**kw)
         conn.close()
         return True, "Ulanish muvaffaqiyatli ✅"
     except Exception as e:
