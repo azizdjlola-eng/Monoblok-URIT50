@@ -33,6 +33,8 @@ try:
 except ImportError:
     DB_AVAILABLE = False
 
+import bio_protokol as _bp   # universal parser (HL7/ASTM) + kod xaritasi
+
 def db_conn():
     if not DB_AVAILABLE:
         return None
@@ -360,31 +362,56 @@ def get_db_name(lis_code, analyzer_name):
     return analyzer_name if analyzer_name else f"Kod:{lis_code}"
 
 
-def _lookup_patient_jins_yosh(sample_id):
-    """Sample_id orqali buyurtma/bemorni topib, jinsi va yoshini qaytaradi
-    (gender/age-mos norma tanlash uchun — asosiy oyna/blanka shu ma'lumotdan
-    foydalanadi, RAW oynasi esa buni bilmagani uchun normalar farq qilardi)."""
-    if not sample_id or not DB_AVAILABLE:
-        return '', None
+_PATIENT_BY_SID_CACHE = {}
+
+
+def lookup_patient_by_sample_id(sample_id, use_cache=True):
+    """Shtrix-kod (orders.sample_id) → {'fish','jins','yosh','order_id'} yoki None.
+
+    Analizatorda faqat BARKOD skanerlanib, bemor ismi kiritilmagan bo'lsa
+    (LIS so'rovi ishlamaganda shunday bo'ladi), natija "ismsiz" keladi.
+    Shu funksiya orqali RAW oynasi bemorni BARKOD bo'yicha aniqlaydi —
+    ism yozilishiga qarab emas, ID bo'yicha, ya'ni ishonchliroq."""
+    sid = (sample_id or '').strip()
+    if not sid or not DB_AVAILABLE:
+        return None
+    if use_cache and sid in _PATIENT_BY_SID_CACHE:
+        return _PATIENT_BY_SID_CACHE[sid]
     conn = db_conn()
     if not conn:
-        return '', None
+        return None          # baza yotgan — keshga YOZMAYMIZ (keyin qayta urinadi)
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute("""
-            SELECT b.yosh, b.jins FROM orders o
+            SELECT o.id AS order_id, b.fish, b.yosh, b.jins FROM orders o
             INNER JOIN bemorlar b ON o.bemor_id = b.id
             WHERE o.sample_id = %s
             ORDER BY o.sana_vaqt DESC LIMIT 1
-        """, (sample_id,))
+        """, (sid,))
         row = cur.fetchone()
         if row:
-            return (row.get('jins') or ''), row.get('yosh')
+            info = {'fish': (row.get('fish') or '').strip(),
+                    'jins': row.get('jins') or '',
+                    'yosh': row.get('yosh'),
+                    'order_id': row.get('order_id')}
+            _PATIENT_BY_SID_CACHE[sid] = info
+            return info
+        _PATIENT_BY_SID_CACHE[sid] = None      # bazada yo'q — qayta so'ramaymiz
     except Exception:
         pass
     finally:
         try: conn.close()
         except Exception: pass
+    return None
+
+
+def _lookup_patient_jins_yosh(sample_id):
+    """Sample_id orqali buyurtma/bemorni topib, jinsi va yoshini qaytaradi
+    (gender/age-mos norma tanlash uchun — asosiy oyna/blanka shu ma'lumotdan
+    foydalanadi, RAW oynasi esa buni bilmagani uchun normalar farq qilardi)."""
+    info = lookup_patient_by_sample_id(sample_id)
+    if info:
+        return info['jins'], info['yosh']
     return '', None
 
 
@@ -500,6 +527,8 @@ def open_window(parent=None, on_import_callback=None):
     rtree.tag_configure("critical",   background="#ffcccc", foreground="#a00000",
                                       font=("Arial", 9, "bold"))
     ptree.tag_configure("crit_patient", background="#ffe0e0", foreground="#a00000")
+    # Ismi analizatorda emas, barkod orqali LIS bazasidan topilgan bemor
+    ptree.tag_configure("name_from_db", foreground="#0055aa")
     _alerted_sids = set()   # allaqachon ovoz berilgan bemorlar (takror bermaslik)
     rs = ttk.Scrollbar(rp, orient=tk.VERTICAL, command=rtree.yview)
     rtree.configure(yscrollcommand=rs.set)
@@ -1014,10 +1043,10 @@ def _extract_test_date(dt_str):
 
 def parse_hl7_file(file_path):
     """
-    BK-280 RAW fayldan parse qilish.
-
-    OBR field[2] = Barcode (12 xonali) → sample_id.
-    12 xonali bo'lmasa sample_id = '', filename fallback ishlatilmaydi.
+    Bioximiya RAW fayldan parse qilish (HL7 ORU^R01 yoki ASTM — bio_protokol).
+    Analizator kodlari kanonik LIS kodlariga (BK-280 raqamlari) keltiriladi — shuning
+    uchun boshqa brend (Mindray BS, Erba ...) natijalari ham shu oynada bir xil ko'rinadi.
+    sample_id = shtrix-kod (OBR-2/OBR-3/PID-3 dan barcode ko'rinishidagi); bo'lmasa ''.
     """
     result = {}
     try:
@@ -1033,98 +1062,69 @@ def parse_hl7_file(file_path):
         f"{m.group(3)}.{m.group(2)}.{m.group(1)} {m.group(4)}:{m.group(5)}"
         if m else datetime.now().strftime("%d.%m.%Y %H:%M")
     )
+    test_date = f"{m.group(1)}{m.group(2)}{m.group(3)}" if m else datetime.now().strftime("%Y%m%d")
 
-    sample_id = ''
-    name = ''
-    test_time = fallback_time
-    test_date = ''
-    tests = {}
-    has_ab = False
-    obr_seq = ''
-
-    for line in re.split(r'[\r\n]+', content):
-        line = line.strip()
-        if not line or len(line) < 3:
-            continue
-        seg = line[:3]
-        f = line.split('|')
-
-        if seg == 'MSH':
-            if len(f) > 6 and f[6].strip():
-                raw = f[6].strip()
-                test_date = test_date or _extract_test_date(raw)
-                t = _fmt_time(raw, fallback_time)
-                if t:
-                    test_time = t
-
-        elif seg == 'PID':
-            for idx in [4, 5]:
-                if len(f) > idx and f[idx].strip() and not f[idx].strip().isdigit():
-                    name = f[idx].strip()
-                    break
-
-        elif seg == 'OBR':
-            obr_seq = f[1].strip() if len(f) > 1 and f[1].strip() else ''
-            if len(f) > 2 and f[2].strip():
-                cand = f[2].strip()
-                if cand and not cand.upper().startswith('BIOBASE'):
-                    sample_id = cand if (len(cand) == 12 and cand.isdigit()) else ''
-            if len(f) > 6 and f[6].strip():
-                raw = f[6].strip()
-                test_date = test_date or _extract_test_date(raw)
-                t = _fmt_time(raw, test_time)
-                if t:
-                    test_time = t
-
-        elif seg == 'OBX':
-            if len(f) < 5:
-                continue
-            lis_code = f[3].strip() if len(f) > 3 else ''
-            aname = f[4].strip() if len(f) > 4 else ''
-            value = f[5].strip() if len(f) > 5 else ''
-            unit = f[6].strip() if len(f) > 6 else ''
-            ref = f[7].strip() if len(f) > 7 else ''
-            flag = f[8].strip() if len(f) > 8 else ''
-            if not value:
-                continue
-
-            display = get_db_name(lis_code, aname)
-            tahlil_id = LIS_TO_TAHLIL_ID.get(lis_code)  # LIMS DB tahlil ID (LIS nomer kabi)
-            is_ab = bool(flag) and flag.upper() not in ('N',) and (
-                'H' in flag.upper() or 'L' in flag.upper())
-            if is_ab:
-                has_ab = True
-
-            ref_clean = ref.replace('~', ' - ')
-            tests[lis_code or aname] = {
-                'lis_code': lis_code,
-                'tahlil_id': tahlil_id,  # None bo'lsa — LIS_TO_TAHLIL_ID da yo'q
-                'analyzer_name': aname,
-                'name': display,
-                'value': _fmt_val(value, ref_clean),
-                'unit': unit,
-                'ref': ref_clean,
-                'flag': flag,
-                'abnormal': is_ab,
-            }
-
-    if not tests:
+    try:
+        _model = (_bio_cfg_cached() or {}).get('model') or _bp.DEFAULT_MODEL
+        parsed = _bp.parse_message(content, _model)
+    except Exception as e:
+        print(f"⚠️ Parse xato ({fname}): {e}")
         return result
 
-    normalized_name = name.replace('^', ' ').strip().upper() if name else 'NONAME'
-    if not test_date:
-        test_date = datetime.now().strftime("%Y%m%d")
+    raw_tests = parsed.get('tests', {})
+    if not raw_tests:
+        return result
 
+    tests = {}
+    has_ab = False
+    for lis_code, td in raw_tests.items():
+        aname = td.get('analyzer_name', '') or ''
+        display = get_db_name(lis_code, aname)
+        tahlil_id = LIS_TO_TAHLIL_ID.get(lis_code)  # LIMS DB tahlil ID (LIS nomer kabi)
+        is_ab = bool(td.get('abnormal'))
+        if is_ab:
+            has_ab = True
+        ref_clean = td.get('ref', '')
+        tests[lis_code] = {
+            'lis_code': lis_code,
+            'tahlil_id': tahlil_id,  # None bo'lsa — LIS_TO_TAHLIL_ID da yo'q
+            'analyzer_name': aname,
+            'name': display,
+            'value': _fmt_val(td.get('value', ''), ref_clean),
+            'unit': td.get('unit', ''),
+            'ref': ref_clean,
+            'flag': td.get('flag', ''),
+            'abnormal': is_ab,
+        }
+
+    sample_id = parsed.get('sample_id', '') or ''
+    name = parsed.get('name', '') or ''
+    # Analizator vaqti (sana.oy.yil soat:daqiqa) — bo'lmasa fayl vaqti
+    test_time = parsed.get('time') or fallback_time
+    normalized_name = name.replace('^', ' ').strip().upper() if name else 'NONAME'
     key = sample_id if sample_id else f"{test_date}|{normalized_name}"
     result[key] = {
         'time': test_time,
         'sample_id': sample_id,
         'name': name,
-        'obr_seq': obr_seq,
+        'obr_seq': parsed.get('sample_no', ''),
         'tests': tests,
         'abnormal': has_ab,
     }
     return result
+
+
+_BIO_CFG_CACHE = {}
+def _bio_cfg_cached():
+    """analizator_config.json → bioximiya (bir marta o'qiladi)."""
+    if not _BIO_CFG_CACHE:
+        try:
+            from monoblok_db_config import get_analyzer
+            _BIO_CFG_CACHE.update(get_analyzer("bioximiya") or {})
+        except Exception:
+            _BIO_CFG_CACHE.update({"model": _bp.DEFAULT_MODEL})
+    return _BIO_CFG_CACHE
+
 
 
 def refresh_patient_list(ptree, rtree, status_var,
@@ -1191,13 +1191,30 @@ def refresh_patient_list(ptree, rtree, status_var,
     for i, sid in enumerate(sorted_sids):
         patients_data[sid]['_display_num'] = i + 1  # 1=eng eski
 
+    # Ismi yo'q, lekin BARKODI bor natijalar — bemorni bazadan barkod bo'yicha
+    # aniqlaymiz (analizatorda faqat shtrix-kod skanerlangan holat).
+    for sid in sorted_sids:
+        p = patients_data[sid]
+        if p.get('name', '').strip():
+            continue
+        info = lookup_patient_by_sample_id(p.get('sample_id') or sid)
+        if info and info['fish']:
+            p['name'] = info['fish']
+            p['name_src'] = 'db'          # ism analizatordan emas, LIS bazasidan
+            p['order_id'] = info['order_id']
+
     # Eng yangi yuqorida bo'lishi uchun position=0 ga qo'shamiz (stack usuli)
     for sid in sorted_sids:
         p = patients_data[sid]
+        nm = p.get('name', '')
+        tags = ()
+        if p.get('name_src') == 'db':
+            nm = f"{nm}  ⟵ barkod"      # ism qayerdan kelgani ko'rinib tursin
+            tags = ("name_from_db",)
         ptree.insert("", 0, values=(
-            p['time'], sid, p.get('name', ''),
+            p['time'], sid, nm,
             p['_display_num']
-        ))
+        ), tags=tags)
 
 
     status_var.set(f"Yuklandi: {len(patients_data)} ta bemor ({len(files)} ta fayl)")
@@ -1271,6 +1288,41 @@ def save_all_patients_to_db(patients_data, status_var):
     status_var.set(f"Saqlandi: {saved} ta, topilmadi: {len(not_found)} ta")
 
 
+def _norm_fish(s):
+    """Ismni taqqoslash uchun soddalashtirish: apostrof, bo'sh joy, registr farqsiz."""
+    s = (s or '').upper()
+    for ch in ("ʻ", "ʼ", "‘", "’", "`", "'", "´"):
+        s = s.replace(ch, '')
+    return re.sub(r'[^A-Z0-9]', '', s)
+
+
+def _find_orders_by_name(cur, name, date_str):
+    """Analizatordagi F.I.SH bo'yicha o'sha kundagi buyurtmalarni topish.
+
+    Analizator PID-5 ni QISQARTIRIB yuboradi ("Raxmonberdiyeva Irod"), shuning
+    uchun to'liq tenglik yetarli emas — prefiks bo'yicha ham solishtiramiz.
+    Qaytaradi: (aniq_mos_ro'yxat, prefiks_mos_ro'yxat)."""
+    n = _norm_fish(name)
+    if not n or len(n) < 5 or not date_str:
+        return [], []
+    cur.execute("""
+        SELECT o.id AS order_id, o.sample_id, b.fish
+        FROM orders o INNER JOIN bemorlar b ON o.bemor_id = b.id
+        WHERE DATE(o.sana_vaqt) = %s
+        ORDER BY o.id
+    """, (date_str,))
+    exact, prefix = [], []
+    for r in cur.fetchall():
+        dbn = _norm_fish(r.get('fish'))
+        if not dbn:
+            continue
+        if dbn == n:
+            exact.append(r)
+        elif dbn.startswith(n) or n.startswith(dbn):
+            prefix.append(r)
+    return exact, prefix
+
+
 def _do_save(patient_info, status_var, silent=False):
     if not DB_AVAILABLE:
         if not silent: messagebox.showerror("Xato", "MySQL moduli yo'q!")
@@ -1303,12 +1355,49 @@ def _do_save(patient_info, status_var, silent=False):
         """, (sid, sid if str(sid).isdigit() else '0'))
 
         row = cur.fetchone()
+
+        # ── Barkod topilmadi → ISM bo'yicha qidiramiz ────────────────────────
+        # Analizatorda barkod kiritilmay, faqat ism yozilgan bo'lsa ham natija
+        # egasiz qolmasin. Xavfsizlik uchun: bir nechta mos bemor bo'lsa yoki
+        # ism qisqartirilgan bo'lsa — laborant tasdiqlaydi.
+        if not row and name:
+            try:
+                d = patient_info.get('time', '')            # "24.09.2026 13:09"
+                date_str = datetime.strptime(d.split()[0], "%d.%m.%Y").strftime("%Y-%m-%d") if d else ''
+            except Exception:
+                date_str = ''
+            exact, prefix = _find_orders_by_name(cur, name, date_str)
+            cand = exact if exact else prefix
+            if len(cand) == 1 and (exact or not silent):
+                c = cand[0]
+                ok = True
+                if not silent:
+                    ok = messagebox.askyesno(
+                        "Ism bo'yicha topildi",
+                        f"Barkod ({sid}) bazada yo'q.\n\n"
+                        f"Analizatordagi ism: {name}\n"
+                        f"Bazadagi bemor:     {c['fish']}\n"
+                        f"Buyurtma:           #{c['order_id']}  ({c['sample_id']})\n\n"
+                        f"Natija SHU bemorga biriktirilsinmi?")
+                if ok:
+                    row = {'order_id': c['order_id'], 'fish': c['fish']}
+            elif len(cand) > 1 and not silent:
+                messagebox.showwarning(
+                    "Bir nechta bemor",
+                    f"Analizatordagi ism: {name}\n\n"
+                    f"Bugun shu ismga o'xshash {len(cand)} ta bemor bor:\n" +
+                    "\n".join(f"  • {c['fish']} — #{c['order_id']} ({c['sample_id']})"
+                              for c in cand[:8]) +
+                    "\n\nQaysi biri ekanini aniqlab bo'lmadi.\n"
+                    "Monoblokda bemorni tanlab, «Natijani qo'shish» tugmasidan foydalaning.")
+
         if not row:
             if not silent:
                 messagebox.showwarning("Topilmadi",
                     f"Barcode: {sid}\n"
                     f"Bemor nomi: {name}\n\n"
-                    f"Bu barcode (sample_id) bazada topilmadi.\n\n"
+                    f"Bu barcode (sample_id) bazada topilmadi va\n"
+                    f"ism bo'yicha ham mos bemor aniqlanmadi.\n\n"
                     f"❗ Yechim:\n"
                     f"BK-280 da «Primer shtrix-kod» maydoniga\n"
                     f"barcode skaneri bilan monoblokdagi\n"

@@ -28,6 +28,12 @@ except Exception as _e:
 COM_PORT = _siydik_cfg.get("com_port", "COM4")   # mijozda farq qilishi mumkin
 BAUDRATE = int(_siydik_cfg.get("baudrate", 9600))
 
+# Universal transport + parser (URIT-50 / Dirui / Mindray UA / HL7 / ASTM) —
+# analizator modeli va ulanish turi sozlamadan olinadi (siydik_protokol.PROFILES).
+import siydik_protokol as _sp
+ANALYZER_MODEL = _siydik_cfg.get("model", _sp.DEFAULT_MODEL)
+ANALYZER_NAME = _sp.PROFILES.get(ANALYZER_MODEL, {}).get("name", ANALYZER_MODEL)
+
 # Asosiy papkalar (frozen-aware — mijozda G: bo'lmasligi mumkin)
 BASE_DIR = os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), "AzizMedLine", "URIT_natijalar")
 os.makedirs(BASE_DIR, exist_ok=True)
@@ -285,87 +291,22 @@ def get_microscopy_values(leu_value: str, bld_value: str) -> dict:
 
 def parse_urit_block(block: str) -> dict:
     """
-    URIT-50 dan kelgan bitta blokni lug'atga aylantiradi.
-    Bundan tashqari qaysi ko'rsatkich oldida * bo'lganini ham saqlaydi.
+    Analizatordan kelgan bitta natija blokini lug'atga aylantiradi.
+    URIT-50 matni, Dirui/Mindray UA matni, HL7 (ORU^R01) yoki ASTM — format
+    avtomatik aniqlanadi (siydik_protokol.parse_block). Kalitlar bir xil:
+    NO, ID, DATE, TIME, LEU..ACR, ABNORMAL (* bo'lgan kodlar).
     """
-    lines = [ln.strip("\r") for ln in block.splitlines()]
-    result = {}
-    abnormal = set()  # * bo'lgan kodlar
+    data = _sp.parse_block(block, _siydik_cfg.get("protocol", "auto"))
+    if data.get("ID"):
+        print(f"🆔 Analizatordan ID (sample_id) topildi: {data['ID']}  [{data.get('FORMAT')}]")
+    if data.get("DATE"):
+        print(f"📅 Analizatordan DATE topildi: {data['DATE']}")
+    if data.get("TIME"):
+        print(f"🕐 Analizatordan TIME topildi: {data['TIME']}")
+    if data.get("EXTRA"):
+        print(f"ℹ️ Noma'lum kodlar (blankaga kirmaydi): {data['EXTRA']}")
+    return data
 
-    sample_no = None
-    sample_id_from_urit = None  # ✅ URIT-50 dan kelgan ID (sample_id)
-    sample_date = None
-    sample_time = None
-
-    # ID, NO va sana/vaqtni ajratib olish
-    for line in lines:
-        line_clean = line.strip()
-
-        # ✅ ID: qismini o'qish (sample_id sifatida ishlatiladi)
-        if line_clean.startswith("ID:"):
-            sample_id_from_urit = line_clean.replace("ID:", "").strip()
-            print(f"🆔 URIT-50 dan ID (sample_id) topildi: {sample_id_from_urit}")
-
-        if line_clean.startswith("NO."):
-            parts = line_clean.split()
-            if len(parts) >= 2:
-                sample_no = parts[0].replace("NO.", "")
-                sample_date = parts[1]
-                print(f"📅 URIT-50 dan DATE topildi: {sample_date}")
-
-        elif ":" in line_clean and sample_time is None:
-            maybe = line_clean.replace(" ", "")
-            # Vaqt formatlarini tekshirish: HH:MM:SS yoki HH:MM
-            if len(maybe) >= 5 and maybe[2] == ":":
-                # HH:MM yoki HH:MM:SS
-                if len(maybe) == 8 and maybe[5] == ":":  # HH:MM:SS
-                    sample_time = maybe
-                    print(f"🕐 URIT-50 dan TIME topildi: {sample_time}")
-                elif len(maybe) == 5:  # HH:MM
-                    sample_time = maybe
-                    print(f"🕐 URIT-50 dan TIME topildi: {sample_time}")
-
-    # Har bir analiz ko'rsatkichini ajratib olish
-    for i, line in enumerate(lines):
-        original = line
-        starred = "*" in original            # shu qatorda * bormi?
-        line_nostar = original.replace("*", "")
-
-        for analyte in ANALYTES:
-            if re.search(r"\b" + re.escape(analyte) + r"\b", line_nostar):
-                parts = re.split(r"\b" + re.escape(analyte) + r"\b",
-                                 line_nostar,
-                                 maxsplit=1)
-                raw_after = parts[1]
-                after = raw_after.strip(" :-\t")
-
-                j = i + 1
-                while j < len(lines) and not any(
-                    re.search(r"\b" + re.escape(a) + r"\b", lines[j])
-                    for a in ANALYTES
-                ):
-                    after += " " + lines[j].replace("*", "").strip()
-                    j += 1
-
-                after = after.replace("CELL/uL", "CELL/µL").strip()
-                # NIT (va boshqa) uchun manfiy natija: '-' belgisini saqlash
-                if not after and "-" in raw_after:
-                    after = "-"
-                result[analyte] = after
-
-                if starred:
-                    abnormal.add(analyte)
-                break
-
-    result_all = {
-        "NO": sample_no,
-        "ID": sample_id_from_urit,  # ✅ URIT-50 dan kelgan ID (sample_id)
-        "DATE": sample_date,
-        "TIME": sample_time,
-    }
-    result_all.update(result)
-    result_all["ABNORMAL"] = list(abnormal)
-    return result_all
 
 def optimize_page_spacing(doc):
     """
@@ -2112,49 +2053,29 @@ def create_doc_from_data(data: dict, fish: str = "", yosh: str = "", tugilgan_sa
 
 
 
+_block_reader = None
+
+
 def read_one_block() -> str:
     """
-    URIT-50 dan bitta natijani (0x03 / ETX gacha) o'qib qaytaradi.
-    Har chaqirilganda COM4 portni ochib-yopadi.
+    Analizatordan bitta natija blokini o'qib qaytaradi (sozlamadagi ulanish turi
+    bo'yicha: COM port / TCP server / TCP client; freym: STX-ETX / MLLP / ASTM).
+    Xatoda '' qaytaradi — asosiy sikl 5 s kutib qayta uradi.
     """
-    try:
-        with serial.Serial(
-            port=COM_PORT,
-            baudrate=BAUDRATE,
-            bytesize=serial.EIGHTBITS,
-            parity=serial.PARITY_NONE,
-            stopbits=serial.STOPBITS_ONE,
-            timeout=1,
-        ) as ser:
-            buffer = ""
+    global _block_reader
+    if _block_reader is None:
+        _block_reader = _sp.BlockReader(_siydik_cfg, log=print)
+        print(f"🔧 Siydik analizatori: {ANALYZER_NAME} — {_block_reader.describe()}")
+    block = _block_reader.read_block()
+    if not block:
+        # Ulanish qayta tiklanishi uchun reader'ni yangidan yaratamiz
+        try:
+            _block_reader.close()
+        except Exception:
+            pass
+        _block_reader = None
+    return block
 
-            while True:
-                chunk = ser.read(ser.in_waiting or 1)
-                if not chunk:
-                    continue
-
-                text = chunk.decode(errors="ignore")
-                buffer += text
-
-                if "\x03" in buffer:
-                    block, _, _ = buffer.partition("\x03")
-                    return block
-    except serial.SerialException as e:
-        error_msg = f"COM port ({COM_PORT}) ochib bo'lmadi: {e}"
-        print(f"⚠️ {error_msg}")
-        print(f"   Tekshiring:")
-        print(f"   1. URIT-50 qurilmasi ulanganmi?")
-        print(f"   2. COM{COM_PORT[-1]} port mavjudmi? (Device Manager)")
-        print(f"   3. Port boshqa dastur tomonidan ishlatilmoqdami?")
-        print(f"   4. Port nomi to'g'rimi? (Hozirgi: {COM_PORT})")
-        # Bo'sh string qaytarish - dastur to'xtamasligi uchun
-        return ""
-    except Exception as e:
-        error_msg = f"COM port o'qishda xato: {e}"
-        print(f"❌ {error_msg}")
-        import traceback
-        traceback.print_exc()
-        return ""
 
 
 # ====== ASOSIY SIKL: HAR TАHLIL UCHUN ALOHIDA ULANISH ======
@@ -2175,9 +2096,10 @@ def main():
             sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
     
     print("=" * 60)
-    print("  URIT-50 Integratsiya - AzizMedLine LIMS")
+    print(f"  Siydik analizatori integratsiyasi - AzizMedLine LIMS")
+    print(f"  Model: {ANALYZER_NAME}")
     print("=" * 60)
-    print("URIT-50 ma'lumot kutilyapti...")
+    print("Analizatordan ma'lumot kutilyapti...")
     print("Skaner orqali barcode o'qib, bemor ma'lumotlari avtomatik olinadi")
     print("Natijalar blankaga avtomatik yoziladi\n")
 
@@ -2191,7 +2113,7 @@ def main():
     while True:
         # 1) URIT-50 dan bitta natija blokini o'qiymiz
         print("\n" + "=" * 60)
-        print("📡 Yangi tahlilni yuborish uchun URIT'da RS232 tugmasini bosing...")
+        print(f"📡 {ANALYZER_NAME}: yangi natija kutilyapti...")
         print("📷 Yoki avval barcode skanerlang (kod_yollanma yoki natija_kodi)")
         print("=" * 60)
         

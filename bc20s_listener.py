@@ -1,22 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-BC-20S MLLP Client — Mindray BC-20S gematologiya analizatoriga ulanish
+Gemotologiya analizatori listener — UNIVERSAL (Mindray BC-20S, Genrui, Edan, Dymind, Zybio,
+URIT, Dirui, Biobase, Erba, Cyan, Human, Sysmex, Diatron ...).
 
-MUHIM: BC-20S analizator TCP SERVER (port 5100).
-       LIS (biz) TCP CLIENT sifatida ulanamiz.
-       (mindray_integration.py dan isbotlangan arxitektura)
-
-Protokol: HL7 v2.3.1 + MLLP
-  - Heartbeat: analizator har 3 soniyada \x02 yuboradi
-  - ORM^O01 (Worklist Query)  → DB dan bemor topib ORR^O02 qaytaramiz
-  - ORU^R01 (Result Message)  → TXT fayliga DARHOL yozamiz + DB ga saqlaymiz
-                                  + hematologiya oynasiga xabar beramiz
-
-Ishga tushirish:
+Modul nomi tarixiy (BC-20S bilan boshlangan) — import qilinadigan API o'zgarmagan:
     from bc20s_listener import start_bc20s_listener, stop_bc20s_listener
-    thread = start_bc20s_listener(result_callback=on_new_result)
+Ulanish turi/protokol/model — analizator_config.json → "gemotologiya" (Tizim Sozlamalari → Gemotologiya):
+  * tcp_client  — analizator TCP SERVER (Mindray BC-20s/30s/5000: port 5100), biz ulanamiz
+  * tcp_server  — analizator bizga ulanadi (Genrui, Dymind, Zybio, Edan, Biobase, URIT-5xxx ...)
+  * serial      — RS-232 (Mindray BC-3000Plus HL7, URIT-3000Plus HL7, Sysmex/Human/Abacus ASTM)
+Protokol: HL7 v2.3.1 (MLLP) — ORM^O01 worklist → ORR^O02, ORU^R01 natija → ACK;
+          ASTM E1394 — Q so'rov → H/P/O/L, R yozuvlar → natija.
+Transport va parser: gemo_protokol.py. Har natija TXT ga (BC-20s/YYYYMM/) + DB ga + callback.
 """
-
 import os
 import re
 import sys
@@ -39,9 +35,15 @@ except Exception as _e:
     print(f"[OGOHLANTIRISH] gemotologiya config yuklanmadi: {_e}")
     _gema_cfg = {}
 
-ANALYZER_IP     = _gema_cfg.get("ip", "192.168.0.2")        # BC-20S analizator IP manzili
-ANALYZER_PORT   = int(_gema_cfg.get("port", 5100))          # BC-20S TCP server porti
-ENCODING        = _gema_cfg.get("encoding", "utf-8")        # Matn kodirovkasi
+import gemo_protokol as _gp
+_gema_eff       = _gp.effective_config(_gema_cfg)
+ANALYZER_MODEL  = _gema_cfg.get("model", _gp.DEFAULT_MODEL)
+ANALYZER_NAME   = _gp.PROFILES.get(ANALYZER_MODEL, {}).get("name", ANALYZER_MODEL)
+ANALYZER_IP     = _gema_eff.get("ip", "192.168.0.2")         # tcp_client: analizator IP; tcp_server: tinglash IP
+ANALYZER_PORT   = int(_gema_eff.get("port", 5100))
+ENCODING        = _gema_eff.get("encoding", "utf-8")
+WORKLIST_ENABLED = bool(_gema_eff.get("worklist", True))    # ORM^O01 so'roviga bemor qaytarish
+
 
 MLLP_START      = b"\x0b"         # <VT>  - Start Block
 MLLP_END        = b"\x1c\x0d"     # <FS><CR> - End Block
@@ -197,141 +199,13 @@ def _hl7_age_to_years(value_str, unit_str) -> str:
 
 
 def _parse_oru_r01(message: str) -> dict:
-    """ORU^R01 dan bemor va natijalarni chiqarish"""
-    now_str = datetime.now().strftime("%d.%m.%Y %H:%M")
-    patient = {
-        "time": now_str, "sample_id": "", "name": "",
-        "age": "", "gender": "", "tests": {}, "abnormal": False
-    }
-
-    CLINICAL = {
-        "WBC","LYM#","LYM%","MID#","MID%","GRAN#","GRAN%",
-        "RBC","HGB","HCT","MCV","MCH","MCHC",
-        "RDW-CV","RDW-SD","PLT","MPV","PDW","PCT","NLR","PLR"
-    }
-    NAME_MAP = {
-        "6690-2":"WBC","731-0":"LYM#","736-9":"LYM%",
-        "789-8":"RBC","718-7":"HGB","787-2":"MCV","785-6":"MCH",
-        "786-4":"MCHC","788-0":"RDW-CV","21000-5":"RDW-SD",
-        "4544-3":"HCT","777-3":"PLT","32623-1":"MPV","32207-3":"PDW",
-        "10002":"PCT","10027":"MID#","10029":"MID%",
-        "10028":"GRAN#","10030":"GRAN%","10057":"NLR","10058":"PLR",
-    }
-
-    raw_hl7 = message  # saqlash uchun
-
-    for seg in message.split("\r"):
-        seg = seg.strip()
-        if not seg:
-            continue
-        tag = seg[:3]
-        f   = _hl7_fields(seg)
-
-        if tag == "MSH":
-            if len(f) > 7 and f[7]:
-                t = _hl7_time(f[7], now_str)
-                if t:
-                    patient["time"] = t
-
-        elif tag == "PID":
-            if len(f) > 5 and f[5]:
-                parts = f[5].split("^")
-                given  = _decode_cyrillic(parts[0]) if parts else ""
-                family = _decode_cyrillic(parts[1]) if len(parts) > 1 else ""
-                patient["name"] = (f"{family} {given}".strip()
-                                   if family and given else given or family)
-            if len(f) > 7 and f[7]:
-                try:
-                    bs = f[7].strip()
-                    if len(bs) >= 8:
-                        by, bm, bd = int(bs[:4]), int(bs[4:6]), int(bs[6:8])
-                        today = date.today()
-                        age = today.year - by - ((today.month, today.day) < (bm, bd))
-                        patient["age"] = str(age)
-                except Exception:
-                    pass
-            if len(f) > 8 and f[8]:
-                g = f[8].strip().upper()
-                try:
-                    g = g.encode("latin-1").decode("utf-8").upper()
-                except Exception:
-                    pass
-                if "М" in g or g in ("M","МУЖ","ERKAK"):
-                    patient["gender"] = "Erkak"
-                elif "Ж" in g or g in ("F","ЖЕН","AYOL","ЖЕНЩИНА"):
-                    patient["gender"] = "Ayol"
-
-        elif tag == "OBR":
-            if len(f) > 3 and f[3]:
-                sid = f[3].split("^")[0].strip()
-                if sid:
-                    patient["sample_id"] = sid
-            if len(f) > 7 and f[7]:
-                t = _hl7_time(f[7].strip(), patient["time"])
-                if t:
-                    patient["time"] = t
-
-        elif tag == "OBX":
-            if len(f) < 6:
-                continue
-            code_str = f[3] if len(f) > 3 else ""
-            parts = code_str.split("^")
-            test_code = parts[0].strip()
-            test_name = parts[1].strip() if len(parts) > 1 else test_code
-
-            # Yosh (30525-0) va jins guruhi (01002) — OBX-6 birligi (yr/mo/d)
-            # hisobga olinadi, aks holda 1 yoshdan kichik bemor yoshi (masalan
-            # "7|mo") xato ravishda "7 yosh" deb talqin qilinib, blankadagi
-            # multi-ref normasi (get_multi_ref) noto'g'ri diapazon tanlaydi.
-            if test_code == "30525-0" and len(f) > 5 and f[5] and not patient["age"]:
-                _age_unit = f[6].strip() if len(f) > 6 else ""
-                patient["age"] = _hl7_age_to_years(f[5].strip(), _age_unit)
-                continue
-            if test_code == "01002" and len(f) > 5 and f[5]:
-                rg = f[5].strip()
-                try:
-                    rg = rg.encode("latin-1").decode("utf-8")
-                except Exception:
-                    pass
-                rl = rg.lower()
-                if not patient["gender"]:
-                    if "жен" in rl or "ayol" in rl:
-                        patient["gender"] = "Ayol"
-                    elif "муж" in rl or "erkak" in rl:
-                        patient["gender"] = "Erkak"
-                continue
-
-            # Histogramlarni o'tkazib yuborish
-            try:
-                if test_code.isdigit() and 15000 <= int(test_code) <= 15200:
-                    continue
-            except Exception:
-                pass
-
-            # Parametr kalitini topish
-            param_key = (NAME_MAP.get(test_code)
-                         or (test_name.upper() if test_name.upper() in CLINICAL else None)
-                         or (test_code.upper() if test_code.upper() in CLINICAL else None))
-            if not param_key:
-                continue
-
-            value = f[5].strip() if len(f) > 5 else ""
-            unit  = f[6].strip() if len(f) > 6 else ""
-            ref   = f[7].strip() if len(f) > 7 else ""
-            flag  = f[8].strip() if len(f) > 8 else ""
-            fu    = flag.upper()
-            if ("H" in fu or "L" in fu) and fu != "N":
-                patient["abnormal"] = True
-
-            patient["tests"][param_key] = {
-                "name": test_name or param_key,
-                "value": value, "unit": unit,
-                "ref": ref, "flag": flag,
-                "abnormal": ("H" in fu or "L" in fu) and fu != "N"
-            }
-
-    patient["_raw_hl7"] = raw_hl7
+    """ORU^R01 (yoki ASTM) → bemor lug'ati. Parser gemo_protokol da (barcha brendlar uchun umumiy).
+    Kalitlar: time, sample_id, name, age, gender, tests{WBC..}, abnormal, _raw_hl7."""
+    patient = _gp.parse_message(message)
+    if patient.get("_extra"):
+        _log(f"  Noma'lum kodlar (o'tkazib yuborildi): {list(patient['_extra'].keys())[:10]}")
     return patient
+
 
 # ─────────────────────────── TXT YOZISH ───────────────────────
 def _next_mindray_txt_path() -> str:
@@ -420,12 +294,7 @@ def _save_to_db(patient: dict) -> bool:
                         (order_id, now_str, now_str))
             result_id = cur.lastrowid
 
-        HL7_TO_DB = {
-            "WBC":"WBC","LYM#":"Lymph#","LYM%":"Lymph%","MID#":"Mid#","MID%":"Mid%",
-            "GRAN#":"Gran#","GRAN%":"Gran%","RBC":"RBC","HGB":"HGB","HCT":"HCT",
-            "MCV":"MCV","MCH":"MCH","MCHC":"MCHC","RDW-CV":"RDW-CV","RDW-SD":"RDW-SD",
-            "PLT":"PLT","MPV":"MPV","PDW":"PDW","PCT":"PCT","NLR":"NLR","PLR":"PLR"
-        }
+        HL7_TO_DB = _gp.DB_NAME_MAP   # 3-diff + 5-diff nomlari (gemo_protokol)
         for pk, tdata in tests.items():
             val = tdata.get("value", "")
             if not val:
@@ -441,10 +310,12 @@ def _save_to_db(patient: dict) -> bool:
                            (result_id, tahlil_nomi, qiymat, birlik, norma, note)
                            VALUES (%s,%s,%s,%s,%s,%s)""",
                         (result_id, db_name, val, unit, ref,
-                         f"BC-20S | {now_str} | Flag: {flag}"))
+                         f"{ANALYZER_NAME} | {now_str} | Flag: {flag}"))
 
+            # "source": "BC-20S" — gemotologiya manba tegi (tarixiy nom; gemo_monitor va
+            # blanka shu teg bo'yicha qidiradi). Haqiqiy model "analyzer" maydonida.
             rj = json.dumps({"result": val, "unit": unit, "ref": ref,
-                             "flag": flag, "source": "BC-20S",
+                             "flag": flag, "source": "BC-20S", "analyzer": ANALYZER_NAME,
                              "sample_id": sample_id}, ensure_ascii=False)
             cur.execute("""INSERT INTO test_results
                            (order_id, test_name, test_type, result_data, status)
@@ -625,9 +496,54 @@ def _process_message(message: str, sock: socket.socket):
 
     msh_line = message.split("\r")[0] if "\r" in message else message[:200]
 
+    kind = _gp.message_kind(message)
+
+    # ── ASTM: worklist so'rovi (Q) ────────────────────────────
+    if kind == "astm_query":
+        sid = _gp.astm_query_sample_id(message)
+        _log(f"◄ ASTM Q (worklist) qabul qilindi: sample={sid}")
+        patient = _get_patient_for_worklist(sid) if (sid and WORKLIST_ENABLED) else None
+        if patient:
+            patient = dict(patient)
+            patient.setdefault("dob", "")
+        try:
+            sock.sendall(b"\x05")  # ENQ — javob yuborishni boshlaymiz
+            sock.sendall(_gp.astm_frames(_gp.build_astm_worklist(sid, patient)))
+            sock.sendall(b"\x04")
+            _log(f"  >>> ASTM worklist yuborildi ({'topildi' if patient else 'topilmadi'})")
+        except Exception as e:
+            _log(f"[XATO] ASTM javob yuborishda: {e}")
+        return
+
+    # ── ASTM: natija (R yozuvlar) ─────────────────────────────
+    if kind == "astm_result":
+        _last_result_time = datetime.now()
+        _log("◄ ASTM natija qabul qilindi")
+        patient = _parse_oru_r01(message)
+        sid = patient.get("sample_id", "")
+        _log(f"  Sample: {sid} | Ism: {patient.get('name', '?')} | Tests: {len(patient.get('tests', {}))}")
+        _write_to_mindray_txt(message)
+        db_ok = _save_to_db(patient)
+        cb = _result_callback
+        if cb:
+            try:
+                cb(sid, patient)
+            except Exception as e:
+                _log(f"[XATO] result_callback: {e}")
+        _log(f"  OK: TXT=yozildi, DB={'saqlandi' if db_ok else 'order topilmadi'}")
+        return
+
+
     # ── ORM^O01 — Worklist query (barcode skanerda o'qilganda) ─
     if "ORM^O01" in msh_line or "ORM" in msh_line:
         _log("◄ ORM^O01 (Worklist) qabul qilindi")
+        if not WORKLIST_ENABLED:
+            _log("  -> worklist sozlamada o'chirilgan, AR javob")
+            try:
+                sock.sendall(_wrap_mllp(_build_ack(_extract_msg_id(message), "AR", "204^Worklist disabled")))
+            except Exception:
+                pass
+            return
         sample_id = _extract_sample_id_from_orm(message)
         req_msg_id = _extract_msg_id(message)
 
@@ -703,194 +619,113 @@ def _process_message(message: str, sock: socket.socket):
             except Exception:
                 pass
 
-# ─────────────────────────── TCP CLIENT LOOP ─────────────────
-def _close_socket(sock: socket.socket):
-    """Socketni xavfsiz yopish"""
-    if sock:
-        try:
-            sock.shutdown(socket.SHUT_RDWR)
-        except Exception:
-            pass
-        try:
-            sock.close()
-        except Exception:
-            pass
+# ─────────────────────────── TRANSPORT (gemo_protokol) ─────────
+_transport = None
 
-def _connect_once(ip: str, port: int) -> socket.socket | None:
-    """Bir marta ulanishga harakat qilish"""
+
+class _Sender:
+    """_process_message uchun socket o'rnini bosuvchi — Transport.send ga yo'naltiradi"""
+    def __init__(self, send_fn):
+        self._send = send_fn
+
+    def sendall(self, data: bytes):
+        self._send(data)
+
+
+def _transport_loop(cfg: dict):
+    global _transport, _connected, _last_rx_time
+    tr = _gp.Transport(cfg, log=_log)
+    _transport = tr
+    _log(f"{ANALYZER_NAME} — {tr.describe()}")
+
+    def handler(message: str, send):
+        global _last_rx_time
+        _last_rx_time = datetime.now()
+        try:
+            _process_message(message, _Sender(send))
+        except Exception as e:
+            _log(f"[XATO] process_message: {e}")
+            traceback.print_exc()
+
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-        s.settimeout(SOCKET_TIMEOUT)
-        s.connect((ip, port))
-        return s
-    except Exception as e:
-        _log(f"[XATO] Ulanish: {e}")
-        try:
-            s.close()
-        except Exception:
-            pass
-        return None
-
-def _client_loop(ip: str, port: int):
-    """
-    Asosiy TCP CLIENT loop:
-      1. Analizatorga ulanish (192.168.0.2:5100)
-      2. Heartbeat/MLLP xabarlarni qabul qilish
-      3. Uzilsa → qayta ulanish (cheksiz)
-    Bu URIT siydik analizatori kabi — ma'lumot HECH QACHON yo'qolmaydi.
-    """
-    global _running, _socket, _connected, _last_rx_time
-
-    _log(f"BC-20S client ishga tushdi — analizator: {ip}:{port}")
-
-    while _running:
-        # ── 1. ULANISH ──
-        _log(f"Analizatorga ulanmoqda: {ip}:{port} ...")
+        tr.run(handler, lambda: _running)
+    finally:
+        tr.close()
+        _transport = None
         _connected = False
-        _socket = None
+    _log("Gemotologiya listener to'xtatildi")
 
-        attempt = 0
-        while _running:
-            attempt += 1
-            sock = _connect_once(ip, port)
-            if sock:
-                with _lock:
-                    _socket = sock
-                    _connected = True
-                _log(f"Analizatorga ulandi! (urinish #{attempt})")
-                break
-            else:
-                if MAX_RECONNECT > 0 and attempt >= MAX_RECONNECT:
-                    _log(f"[XATO] Maksimal urinishlar soni oshdi ({MAX_RECONNECT})")
-                    _running = False
-                    return
-                _log(f"  Qayta ulanish {RECONNECT_INTERVAL}s dan keyin... (urinish #{attempt})")
-                # Kutish — lekin _running tekshiruvi bilan
-                for _ in range(RECONNECT_INTERVAL * 10):
-                    if not _running:
-                        return
-                    time.sleep(0.1)
 
-        if not _running:
-            break
-
-        # ── 2. QABUL QILISH LOOP ──
-        buf = b""
-        try:
-            while _running and _connected:
-                try:
-                    ready, _, _ = select.select([_socket], [], [], 1.0)
-                    if not ready:
-                        continue
-
-                    data = _socket.recv(8192)
-                    if not data:
-                        # Socket yopilgan
-                        _log("Analizator ulanishni yopdi (no data)")
-                        break
-
-                    _last_rx_time = datetime.now()
-
-                    # Heartbeat — analizator har 3 soniyada \x02 yuboradi
-                    if data == HEARTBEAT:
-                        continue
-
-                    # Heartbeat aralash kelishi mumkin — tozalash
-                    data = data.replace(HEARTBEAT, b"")
-                    if not data:
-                        continue
-
-                    buf += data
-
-                    # MLLP xabarlarni ajratib olish
-                    messages, buf = _unwrap_mllp(buf)
-                    for msg in messages:
-                        if msg:
-                            try:
-                                _process_message(msg, _socket)
-                            except Exception as e:
-                                _log(f"[XATO] process_message: {e}")
-                                traceback.print_exc()
-
-                except socket.timeout:
-                    continue
-                except OSError as e:
-                    _log(f"[XATO] Socket xatosi: {e}")
-                    break
-                except Exception as e:
-                    _log(f"[XATO] Qabul qilish xatosi: {e}")
-                    break
-        finally:
-            # Ulanishni yopish
-            with _lock:
-                _connected = False
-                _close_socket(_socket)
-                _socket = None
-
-        # ── 3. QAYTA ULANISH ──
-        if _running:
-            _log(f"Ulanish uzildi — {RECONNECT_INTERVAL}s dan keyin qayta ulaniladi...")
-            for _ in range(RECONNECT_INTERVAL * 10):
-                if not _running:
-                    return
-                time.sleep(0.1)
-
-    _log("BC-20S client to'xtatildi")
 
 # ─────────────────────────── PUBLIC API ───────────────────────
 def start_bc20s_listener(host: str = None,
-                         analyzer_ip: str = ANALYZER_IP,
-                         port: int = ANALYZER_PORT,
-                         result_callback=None) -> threading.Thread | None:
+                         analyzer_ip: str = None,
+                         port: int = None,
+                         result_callback=None,
+                         cfg: dict = None) -> threading.Thread | None:
     """
-    BC-20S analizatorga CLIENT sifatida ulanish (background thread).
+    Gemotologiya analizatoriga ulanish (background thread). Ulanish turi/protokol/model —
+    analizator_config.json → "gemotologiya" dan (yoki cfg parametri).
 
     Args:
-        host:            (eskirgan, e'tiborsiz) eski SERVER mode uchun edi
-        analyzer_ip:     analizator IP manzili (default: 192.168.0.2)
-        port:            analizator porti (default: 5100)
+        host:            (eskirgan, e'tiborsiz)
+        analyzer_ip:     IP (sozlamani vaqtincha bosib o'tish uchun)
+        port:            port (sozlamani vaqtincha bosib o'tish uchun)
         result_callback: fn(sample_id, patient_info) — har natijada chaqiriladi
-
-    Returns:
-        Thread obyekti yoki None (xato bo'lsa)
+        cfg:             to'liq sozlama lug'ati (None → analizator_config.json dan)
     """
-    global _running, _client_thread, _result_callback
+    global _running, _client_thread, _result_callback, ANALYZER_NAME, WORKLIST_ENABLED
 
     if _running:
         _log("Allaqachon ishlayapti, qayta ishga tushirilmadi")
         return _client_thread
 
+    full = dict(cfg) if cfg else dict(_gema_cfg)
+    if analyzer_ip:
+        full["ip"] = analyzer_ip
+    if port:
+        full["port"] = int(port)
+    eff = _gp.effective_config(full)
+    ANALYZER_NAME = _gp.PROFILES.get(full.get("model", _gp.DEFAULT_MODEL), {}).get("name", full.get("model", "?"))
+    WORKLIST_ENABLED = bool(eff.get("worklist", True))
+
     _result_callback = result_callback
     _running = True
 
-    t = threading.Thread(target=_client_loop, args=(analyzer_ip, port),
-                         daemon=True, name="bc20s-client")
+    t = threading.Thread(target=_transport_loop, args=(full,),
+                         daemon=True, name="gemo-listener")
     t.start()
     _client_thread = t
     return t
 
 def stop_bc20s_listener():
-    """BC-20S client ni to'xtatish"""
-    global _running, _socket, _connected
+    """Listener ni to'xtatish"""
+    global _running, _connected
     _running = False
-    with _lock:
-        _connected = False
-        _close_socket(_socket)
-        _socket = None
-    _log("BC-20S client to'xtatilish so'rovi")
+    _connected = False
+    tr = _transport
+    if tr is not None:
+        try:
+            tr.close()
+        except Exception:
+            pass
+    _log("Gemotologiya listener to'xtatilish so'rovi")
 
 def is_running() -> bool:
     return _running and _client_thread is not None and _client_thread.is_alive()
 
 def get_status() -> dict:
-    """Diagnostika: ulanish holati, oxirgi heartbeat va oxirgi natija vaqti."""
+    """Diagnostika: ulanish holati, oxirgi bayt va oxirgi natija vaqti."""
+    tr = _transport
     return {
         "running":     is_running(),
-        "connected":   _connected,
-        "last_rx":     _last_rx_time,
+        "connected":   bool(tr and tr.connected),
+        "last_rx":     (tr.last_rx if tr and tr.last_rx else _last_rx_time),
         "last_result": _last_result_time,
+        "analyzer":    ANALYZER_NAME,
+        "transport":   (tr.describe() if tr else ""),
     }
+
 
 # ─────────────────────────── STANDALONE TEST ──────────────────
 if __name__ == "__main__":
