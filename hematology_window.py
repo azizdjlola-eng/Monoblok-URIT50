@@ -286,10 +286,32 @@ BC20S_DAT_BASE = r"G:\DASTUR\URIT 50\BC-20s"
 # Analyzer → DB/Blanka nomlari
 # HL7/ASTM kaliti → DB tahlil nomi (3-diff + 5-diff). Yagona manba: gemo_protokol.DB_NAME_MAP
 import gemo_protokol as _gp
+import gemo_histogram as _gh
 HL7_TO_DB_NAME = dict(_gp.DB_NAME_MAP)
 
 # Klinik muhim ko'rsatkichlar — ko'rsatish tartibi (faqat bular olinadi)
 CLINICAL_PARAMETERS = {k: k for k in _gp.CANONICAL}
+
+
+def _center_on_work_area(window, want_w, want_h):
+    """Oynani ekranning ISH maydoni (vazifalar paneli chiqarib tashlangan) markaziga joylash;
+    ekran kichik bo'lsa o'lchamni moslaydi — pastki qismi vazifalar paneli ostida qolmaydi."""
+    left, top = 0, 0
+    right, bottom = window.winfo_screenwidth(), window.winfo_screenheight() - 40
+    try:
+        import ctypes
+        from ctypes import wintypes
+        r = wintypes.RECT()
+        if ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(r), 0):  # SPI_GETWORKAREA
+            left, top, right, bottom = r.left, r.top, r.right, r.bottom
+    except Exception:
+        pass
+    title_h, border = 32, 8                        # sarlavha paneli va ramka (geometry ularni o'z ichiga olmaydi)
+    w = min(want_w, right - left - 2 * border)
+    h = min(want_h, bottom - top - title_h - border)
+    x = left + (right - left - w) // 2
+    y = top + max(0, (bottom - top - h - title_h) // 2)
+    window.geometry(f"{w}x{h}+{x}+{y}")
 
 
 def open_window(parent=None, on_import_callback=None):
@@ -300,7 +322,7 @@ def open_window(parent=None, on_import_callback=None):
 
     window = tk.Toplevel(parent)
     window.title("Gematologiya - BC-20S RAW Ma'lumotlar")
-    window.geometry("1800x900")
+    _center_on_work_area(window, 1800, 900)
 
     # ── Closure state ────────────────────────────────────────────────
     patients_data    = {}     # {sample_id: patient_info}
@@ -403,6 +425,8 @@ def open_window(parent=None, on_import_callback=None):
     def _apply_filter(*_):
         """Fayllarni qayta o'qimasdan ro'yxatni filtr/saralash bo'yicha qayta chizish."""
         results_tree.delete(*results_tree.get_children())
+        hist_current[0] = None
+        _redraw_histograms()
         n = populate_patient_tree(patient_tree, patients_data, _filters(), sort_state[0])
         total = len(patients_data)
         status_var.set(f"Ko'rsatildi: {n} / {total} ta bemor" if n != total else f"Yuklandi: {total} ta bemor")
@@ -465,6 +489,27 @@ def open_window(parent=None, on_import_callback=None):
                                              font=("Arial", 9, "bold"))
     patient_tree.tag_configure("crit_patient", background="#ffe0e0", foreground="#a00000")
     _alerted_sids = set()   # takror ovoz bermaslik uchun
+
+    # ── Gistogrammalar (WBC / RBC / PLT) — natijalar ostida; birinchi pack → joyi kafolatlangan ──
+    hist_frame = tk.Frame(right_panel, bg=_gh.BG, height=170)
+    hist_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(6, 0))
+    hist_frame.pack_propagate(False)
+    hist_canvases = {}
+    for _k in _gh.HIST_ORDER:
+        _cv = tk.Canvas(hist_frame, bg=_gh.BG, width=1, height=1,   # width=1 → 3 panel teng bo'linadi
+                        highlightthickness=1, highlightbackground="#444444")
+        _cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=1, pady=1)
+        hist_canvases[_k] = _cv
+    hist_current = [None]   # joriy bemorning histograms lug'ati
+
+    def _redraw_histograms(*_):
+        h = hist_current[0] or {}
+        for k, cv in hist_canvases.items():
+            _gh.draw_histogram(cv, k, h.get(k))
+
+    for _k, _cv in hist_canvases.items():
+        _cv.bind("<Configure>", lambda e, k=_k: _gh.draw_histogram(
+            hist_canvases[k], k, (hist_current[0] or {}).get(k)))
 
     results_scrollbar = ttk.Scrollbar(right_panel, orient=tk.VERTICAL, command=results_tree.yview)
     results_tree.configure(yscrollcommand=results_scrollbar.set)
@@ -542,16 +587,21 @@ def open_window(parent=None, on_import_callback=None):
     # ══════════════════════════════════════════════════════════════════
     def _show_results_local(event=None):
         results_tree.delete(*results_tree.get_children())
+        hist_current[0] = None
         sel = patient_tree.selection()
         if not sel:
             current_sid[0] = None
+            _redraw_histograms()
             return
         sample_id         = _row_key(patient_tree, sel[0])
         current_sid[0]    = sample_id
         if not sample_id or sample_id not in patients_data:
+            _redraw_histograms()
             return
 
         pinfo  = patients_data[sample_id]
+        hist_current[0] = pinfo.get('histograms')
+        _redraw_histograms()
         tests  = pinfo.get('tests', {})
         edits  = edited_values.get(sample_id, {})
         age    = pinfo.get('age', '')
@@ -1010,6 +1060,8 @@ def open_window(parent=None, on_import_callback=None):
             patient_tree.delete(sel[0])
         results_tree.delete(*results_tree.get_children())
         current_sid[0] = None
+        hist_current[0] = None
+        _redraw_histograms()
 
     def _save_to_txt():
         """Tahrirlangan bemor ma'lumotlarini TXT faylga saqlash."""
@@ -1306,6 +1358,38 @@ def open_csv_import_dialog(parent, date_from_var=None, date_to_var=None, on_done
     ttk.Button(bottom, text="📥 Import", command=_run).pack(side=tk.RIGHT, padx=4)
     ttk.Button(bottom, text="🔍 Ko'rish", command=_preview).pack(side=tk.RIGHT, padx=4)
     return win
+
+
+def find_histograms_by_sid(sample_id, max_months=3) -> dict:
+    """Eski natijalar uchun (CBC JSON da gistogramma yo'q): TXT fayllardan Sample ID bo'yicha
+    gistogrammani topish. Sample ID = YYMMDD... bo'lsa shu oy papkasidan boshlanadi.
+    Qaytaradi: {"WBC": {"data", "lines", "flags"}, ...} yoki {}."""
+    sid = str(sample_id or "").strip()
+    if not sid or sid.startswith("NOBC_") or not os.path.isdir(BC20S_DAT_BASE):
+        return {}
+    months = []
+    m = re.match(r"^(\d{2})(\d{2})\d{2}", sid)
+    if m and 1 <= int(m.group(2)) <= 12:
+        months.append(f"20{m.group(1)}{m.group(2)}")
+    y, mo = datetime.now().year, datetime.now().month
+    for _ in range(max_months):
+        ym = f"{y:04d}{mo:02d}"
+        if ym not in months:
+            months.append(ym)
+        y, mo = (y - 1, 12) if mo == 1 else (y, mo - 1)
+    for ym in months:
+        files = sorted(glob.glob(os.path.join(BC20S_DAT_BASE, ym, "BC-20s_*.txt")), reverse=True)
+        for fp in files:
+            try:
+                with open(fp, "r", encoding="utf-8", errors="ignore") as fh:
+                    if sid not in fh.read():
+                        continue
+            except Exception:
+                continue
+            for p in _parse_cached(fp).values():
+                if str(p.get("sample_id", "")).strip() == sid and p.get("histograms"):
+                    return p["histograms"]
+    return {}
 
 
 def get_current_month_folder():
@@ -1978,6 +2062,7 @@ def _do_save_patient(patient_info, status_var, silent=False):
                         'source': 'BC-20S', 'sid': sample_id,
                         'patient_age':    patient_info.get('age', ''),
                         'patient_gender': patient_info.get('gender', ''),
+                        'histograms':     _gh.pack_histograms(patient_info.get('histograms')),
                         **all_vals
                     }, ensure_ascii=False)
                     for _nm in cbc_names:

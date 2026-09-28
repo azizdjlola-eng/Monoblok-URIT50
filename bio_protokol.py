@@ -58,7 +58,11 @@ CANONICAL_TESTS = {
     "296": ("Magniy", 51, ["MG", "MAGNESIUM", "MAGNIY", "MG++"]),
     "297": ("Natriy", 52, ["NA", "NA+", "SODIUM", "NATRIY"]),
     "267": ("Temir", 49, ["FE", "IRON", "TEMIR", "SI"]),
-    "237": ("Alfa-amilaza", 56, ["AMY", "AMYL", "AMYLASE", "A-AMILAZA", "AMILAZA", "ALPHA-AMYLASE", "A-PANKRIAT"]),
+    # 237 = analizatordagi A-PANKRIAT — PANKREATIK amilaza (LIMS 57), umumiy "Alfa-amilaza"
+    # (LIMS 56) EMAS. 28.09.2026: 56 shu kod bilan ketib, analizator pankreatik amilazani
+    # o'lchagan (norma 13-53 o'rniga 28-100 li tahlilga). Umumiy amilaza (AMY) kanali BK-280
+    # da yo'q — shuning uchun umumiy "AMY/AMYLASE" taxalluslari bu yerda YO'Q.
+    "237": ("Alfa-amilaza pankreaticheskiy", 57, ["A-PANKRIAT", "P-AMY", "PAMY", "AMY-P", "PANCREATIC AMYLASE", "AMILAZA PANKREAT"]),
     "305": ("R faktor", 59, ["RF", "R FAKTOR", "RHEUMATOID", "REVMATOID"]),
     "245": ("ASO", 61, ["ASO", "ASLO", "ASL", "ANTISTREPTOLIZIN", "ANTISTREPTOLYSIN"]),
     "322": ("CRB", 60, ["CRP", "CRB", "SRB", "HSCRP", "HS-CRP", "C-REAKTIV", "S-REAKTIV"]),
@@ -73,6 +77,12 @@ WORKLIST_EXPAND = {
     58:  ["305", "245", "322"],          # REVMOPROBA to'liq (avtomat)
     126: ["254", "308", "277", "289"],   # LIPID SPEKTRI
     127: ["313", "323", "233", "310"],   # BUYRAK PANELI
+}
+
+# Nomi o'xshash, lekin BOSHQA tahlil — bu kanal kodi ularga HECH QACHON bog'lanmasin
+# (na worklistda, na natija importida). {kanonik_kod: {LIMS tahlil_id, ...}}
+CODE_EXCLUDE_TAHLIL = {
+    "237": {56},     # pankreatik amilaza ≠ umumiy Alfa-amilaza
 }
 
 _ALIAS_INDEX = {}
@@ -154,6 +164,92 @@ def worklist_channels() -> set:
         return {str(c) for c in chosen}
     extra = _tune("extra_channels", []) or []
     return set(SUPPORTED_CHANNELS) | {str(x) for x in extra}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  QAYTA O'LCHOV NAVBATI (LIS orqali, YANGI namuna bilan)
+# ─────────────────────────────────────────────────────────────────────────────
+# 28.09.2026: BK-280 (CRYSTAL) da qayta o'lchov (Правка / "Сохраните и повторите
+# тестирование") namunaga 2-qator qo'shadi, keyingi LIS yuklashda esa analizatorning
+# buzuq Command.delete_repeat() SQL i shu tahlilni KUN BO'YI barcha kutilayotgan
+# namunalardan o'chiradi. Yechim: qayta o'lchovni analizatorda YANGI namuna sifatida
+# ochish. Laborant RAW oynada "Qayta o'lchov" ni belgilaydi → keyingi shu barkod
+# so'rovida DSR ga FAQAT belgilangan tahlillar ketadi (bir marta, ACK kelgach o'chadi).
+RETEST_TTL_HOURS = 24
+
+
+def _retest_path() -> str:
+    base = os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), "AzizMedLine", "BK280")
+    os.makedirs(base, exist_ok=True)
+    return os.path.join(base, "retest_queue.json")
+
+
+def retest_queue_load() -> dict:
+    """{barcode: {"codes": [...], "names": [...], "created": "YYYY-mm-dd HH:MM:SS"}} — eskilari tashlanadi."""
+    try:
+        with open(_retest_path(), "r", encoding="utf-8") as f:
+            d = json.load(f)
+        if not isinstance(d, dict):
+            return {}
+    except Exception:
+        return {}
+    now = datetime.now()
+    out = {}
+    for bc, e in d.items():
+        try:
+            age = (now - datetime.strptime(e.get("created", ""), "%Y-%m-%d %H:%M:%S")).total_seconds()
+        except Exception:
+            age = 0
+        if age <= RETEST_TTL_HOURS * 3600 and e.get("codes"):
+            out[str(bc)] = e
+    return out
+
+
+def _retest_save(d: dict) -> bool:
+    try:
+        tmp = _retest_path() + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, _retest_path())
+        return True
+    except Exception as e:
+        print(f"[XATO] retest_queue saqlanmadi: {e}")
+        return False
+
+
+def retest_queue_set(barcode: str, codes, names=None) -> bool:
+    d = retest_queue_load()
+    codes = [str(c) for c in codes if str(c).strip()]
+    if not codes:
+        d.pop(str(barcode), None)
+    else:
+        d[str(barcode)] = {"codes": codes, "names": list(names or []),
+                           "created": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+    return _retest_save(d)
+
+
+def retest_queue_get(barcode: str):
+    """Shu barkod uchun qayta o'lchov kodlari (set) yoki None."""
+    e = retest_queue_load().get(str(barcode or "").strip())
+    return set(e["codes"]) if e else None
+
+
+def retest_queue_remove(barcode: str) -> bool:
+    d = retest_queue_load()
+    if str(barcode) in d:
+        d.pop(str(barcode), None)
+        return _retest_save(d)
+    return False
+
+
+def lis_manual_channels() -> set:
+    """Analizatorda o'lchanadigan, lekin LIS (DSR) orqali YUBORILMAYDIGAN kanallar —
+    laborant analizatorda qo'lda qo'shadi. 28.09.2026: BK-280 (CRYSTAL) LIS dan kelgan
+    317 Oqsil / 323 Kreatinin / 252 Kalsiy / 254 Xolesterinni ko'pincha namunaga
+    qo'shmay qo'yadi va keyin qo'lda qo'shishga ham yo'l bermaydi. Sozlama:
+    analizator_config.json → bioximiya.lis_manual_channels (bo'sh = hammasi LIS bilan).
+    RAW oyna bu tahlillarni baribir "kutilmoqda" (✋ qo'lda qo'shing) deb ko'rsatadi."""
+    return {str(c) for c in (_tune("lis_manual_channels", []) or [])}
 
 
 def is_supported_channel(code: str) -> bool:
@@ -287,6 +383,8 @@ def worklist_codes_for_tahlil(tahlil_id: int, tahlil_nomi: str = "") -> list:
         if tid == tahlil_id and tahlil_id is not None:
             return [code]
     g = guess_canonical("", tahlil_nomi)
+    if g and tahlil_id in CODE_EXCLUDE_TAHLIL.get(g, ()):
+        return []          # nomi o'xshaydi, lekin boshqa tahlil (masalan umumiy amilaza)
     return [g] if g else []
 
 
@@ -623,13 +721,17 @@ def lookup_order(sample_id: str):
         raise LookupUnavailable(str(e))
 
 
-def worklist_items(order_data: dict, model: str, code_map: dict = None, skipped_out: list = None) -> list:
-    """Buyurtma tahlillari → [(analizator_kodi, nom, birlik, norma)] — faqat bioximiya, kanal kodi bilan."""
+def worklist_items(order_data: dict, model: str, code_map: dict = None, skipped_out: list = None,
+                   only_codes=None) -> list:
+    """Buyurtma tahlillari → [(analizator_kodi, nom, birlik, norma)] — faqat bioximiya, kanal kodi bilan.
+    only_codes — berilsa, faqat shu kanonik kodlar (qayta o'lchov navbati uchun)."""
     cm = code_map if code_map is not None else load_code_map()
     seen, out, skipped = set(), [], []
     for t in (order_data or {}).get("tests", []):
         tid = t.get("test_id")
         for canon in worklist_codes_for_tahlil(tid, t.get("nomi", "")):
+            if only_codes is not None and str(canon) not in only_codes:
+                continue
             for acode in analyzer_codes_for(model, canon, cm):
                 if acode in seen:
                     continue
@@ -637,13 +739,16 @@ def worklist_items(order_data: dict, model: str, code_map: dict = None, skipped_
                 if not is_supported_channel(acode):
                     skipped.append(f"{acode}({canonical_name(canon)})")
                     continue
+                if str(acode) in lis_manual_channels():
+                    skipped.append(f"{acode}({canonical_name(canon)}) — QO'LDA")
+                    continue
                 unit, ref = channel_unit_ref(acode)
                 nm = CHANNEL_NAME.get(str(acode)) or canonical_name(canon)
                 out.append((acode, nm, unit, ref))
     if skipped_out is not None:
         skipped_out.extend(skipped)
     if skipped:
-        print(f"[bio_protokol] Worklistdan chiqarildi (analizator taniydigan kanal emas): {skipped}")
+        print(f"[bio_protokol] Worklistdan chiqarildi (kanal yo'q yoki QO'LDA qo'shiladi): {skipped}")
     return out
 
 
@@ -817,7 +922,7 @@ def build_qck(q: dict, found: bool, err_code: str = "") -> str:
             f"MSA|AA|{ctrl}|Message accepted|||0|\rERR|0|\rQAK|SR|{'OK' if found else 'NF'}|\r")
 
 
-def build_dsr(q: dict, order_data: dict, model: str, code_map: dict = None) -> str:
+def build_dsr(q: dict, order_data: dict, model: str, code_map: dict = None, only_codes=None) -> str:
     """DSR^Q03 — Mindray/Biobase andozasi: 29 ta DSP + har tahlil uchun DSP 'kanal^nom^birlik^norma'."""
     ts = datetime.now().strftime("%Y%m%d%H%M%S")
     msh = q.get("msh", {})
@@ -868,7 +973,7 @@ def build_dsr(q: dict, order_data: dict, model: str, code_map: dict = None) -> s
             continue
         segs.append(f"DSP|{i}||{v}|||")
     i = len(dsp) + 1
-    for acode, nm, unit, norma in worklist_items(order_data, model, code_map):
+    for acode, nm, unit, norma in worklist_items(order_data, model, code_map, only_codes=only_codes):
         # Tahlil qatori formati. Appendix E ning 32-betdagi MISOLI:
         #     DSP|29||1^^^|||      (faqat kod, nom/birlik/norma BO'SH)
         # Jadval matnida "Test ID ^ Test Name ^ Unit ^ Normal Range" deyilgan va biz

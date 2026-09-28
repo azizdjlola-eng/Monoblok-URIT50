@@ -73,6 +73,7 @@ LIS_TO_TAHLIL_ID = {
     '253': 128,  # Xolinesteraza (CHE)
     # Boshqa asosiy tahlillar
     '272': 37,   # Glyukoza
+    '237': 57,   # A-PANKRIAT = Alfa-amilaza PANKREATIK (56 umumiy amilaza EMAS — analizatorda yo'q)
     # Qolganlar load_db_names() da DB dan avtomatik to'ldiriladi
 }
 
@@ -110,7 +111,7 @@ LIS_CODE_MAP = {
     '296': 'Magniy',
     '297': 'Natriy',
     '267': 'Temir',
-    '237': 'Alfa-amilaza',
+    '237': 'Alfa-amilaza pankreaticheskiy',
     '305': 'R faktor',
     '245': 'ASO',
     '322': 'CRB',
@@ -194,7 +195,7 @@ ANALYZER_TO_DB = {
     'SODIUM':           'Natriy',
     'TEMIR':            'Temir',
     'IRON':             'Temir',
-    'A-PANKRIAT':       'Alfa-amilaza',
+    'A-PANKRIAT':       'Alfa-amilaza pankreaticheskiy',
     'AMYLASE':          'Alfa-amilaza',
     'LDGFERMENT':       'LDG',
     'LDH':              'LDG',
@@ -415,6 +416,68 @@ def _lookup_patient_jins_yosh(sample_id):
     return '', None
 
 
+# ── BUYURTMA QILINGAN, LEKIN HALI KELMAGAN TAHLILLAR ─────────────────────────
+# 28.09.2026: "kreatinin va umumiy oqsil kirmay qolyapti" — aslida BK-280 ularni
+# boshqa tahlillardan ~1 SOAT KEYIN o'lchab yubordi (Botayev: 9 ta tahlil 09:45 da,
+# oqsil+kreatinin 10:55 da; Ostonova kreatinini ham 10:55 da). Bu analizator
+# tomonida (reagent/navbat), natija yo'qolmaydi. Lekin RAW oyna o'zi yangilanmas
+# va yetishmayotgan tahlilni ko'rsatmas edi — laborant 9 tasini qo'shib, oynani
+# yopardi, kech kelgan 2 tasi esa blankaga tushmay qolardi.
+# Endi: buyurtmada bor va analizatorga worklist bilan ketadigan (DSR dagi) tahlil
+# hali kelmagan bo'lsa — "⏳ kutilmoqda" qatori, ro'yxatda ⏳ belgisi va import
+# oldidan ogohlantirish chiqadi.
+_EXPECTED_CACHE = {}
+_EXPECTED_DB_DOWN_UNTIL = [0.0]
+# Bir tahlilning ikki xil LIS kodi (qaysi biri kelsa ham — keldi hisoblanadi)
+_CODE_EQUIV = {'310': {'316'}, '316': {'310'}, '322': {'271'}, '271': {'322'}}
+
+
+def expected_lis_codes(sample_id, use_cache=True):
+    """Barkod → {kanonik_LIS_kod: tahlil_nomi} — buyurtmadagi, analizator worklistiga
+    ketadigan (ya'ni avtomatda o'lchanadigan) tahlillar. DSR bilan bir xil manba
+    (bio_protokol.worklist_codes_for_tahlil + worklist kanallari), shuning uchun
+    yarim avtomatda o'lchanadigan K/Mg/Na kabi tahlillar "kutilmoqda" bo'lib qolmaydi.
+    Baza javob bermasa None (keshlanmaydi, 60 s qayta urinilmaydi — oyna qotmasin)."""
+    import time as _t
+    sid = (sample_id or '').strip()
+    if not sid or '|' in sid or not DB_AVAILABLE:
+        return None
+    if use_cache and sid in _EXPECTED_CACHE:
+        return _EXPECTED_CACHE[sid]
+    if _t.time() < _EXPECTED_DB_DOWN_UNTIL[0]:
+        return None
+    try:
+        od = _bp.lookup_order(sid)
+    except Exception:
+        _EXPECTED_DB_DOWN_UNTIL[0] = _t.time() + 60
+        return None
+    out = {}
+    if od:
+        model = (_bio_cfg_cached() or {}).get('model') or _bp.DEFAULT_MODEL
+        cm = _bp.load_code_map()
+        for t in od.get('tests', []):
+            for canon in _bp.worklist_codes_for_tahlil(t.get('test_id'), t.get('nomi', '')):
+                canon = str(canon)
+                if canon in out:
+                    continue
+                if not any(_bp.is_supported_channel(a) for a in _bp.analyzer_codes_for(model, canon, cm)):
+                    continue
+                out[canon] = LIS_CODE_MAP.get(canon) or _bp.canonical_name(canon)
+    _EXPECTED_CACHE[sid] = out
+    return out
+
+
+def pending_tests(sample_id, tests):
+    """Buyurtmada bor, lekin analizatordan HALI KELMAGAN tahlillar: [(kod, nom), ...]."""
+    exp = expected_lis_codes(sample_id)
+    if not exp:
+        return []
+    got = set(str(k) for k in (tests or {}))
+    for k in list(got):
+        got |= _CODE_EQUIV.get(k, set())
+    return [(c, n) for c, n in exp.items() if c not in got]
+
+
 _LAB_NORMA_CACHE = {}
 
 def _lookup_lab_norma(tahlil_id, jins='', yosh=None):
@@ -526,6 +589,10 @@ def open_window(parent=None, on_import_callback=None):
     # Kritik natija — qizil fon
     rtree.tag_configure("critical",   background="#ffcccc", foreground="#a00000",
                                       font=("Arial", 9, "bold"))
+    # Buyurtmadagi tahlil analizatordan hali kelmagan (kech o'lchanadi)
+    rtree.tag_configure("pending",    foreground="#b36b00",
+                                      font=("Arial", 9, "italic"))
+    ptree.tag_configure("pending_patient", foreground="#b36b00")
     ptree.tag_configure("crit_patient", background="#ffe0e0", foreground="#a00000")
     # Ismi analizatorda emas, barkod orqali LIS bazasidan topilgan bemor
     ptree.tag_configure("name_from_db", foreground="#0055aa")
@@ -557,6 +624,8 @@ def open_window(parent=None, on_import_callback=None):
         row_id = rtree.identify_row(event.y)
         if not row_id:
             return
+        if "pending" in rtree.item(row_id, "tags"):
+            return            # natija hali kelmagan — tahrirlanadigan qiymat yo'q
         bbox = rtree.bbox(row_id, "#3")
         if not bbox:
             return
@@ -663,6 +732,19 @@ def open_window(parent=None, on_import_callback=None):
                 ref, flag
             ), tags=(row_tag,))
 
+        # Buyurtmada bor, analizatordan hali kelmagan tahlillar
+        try:
+            _manual = _bp.lis_manual_channels()
+        except Exception:
+            _manual = set()
+        for code, nm in pending_tests(patients_data[sid].get('sample_id') or sid, tests):
+            if code in _manual:
+                # LIS orqali yuborilmaydi — laborant analizatorda qo'lda qo'shishi kerak
+                vals = (code, nm, "✋ qo'lda qo'shing", "", "LIS yubormaydi — analizatorda qo'shing", "")
+            else:
+                vals = (code, nm, "⏳ kutilmoqda", "", "analizatordan hali kelmadi", "")
+            rtree.insert("", tk.END, values=vals, tags=("pending",))
+
     # ══════════════════════════════════════════════════════════════════
     #  NATIJANI QO'SHISH — asosiy oynaga o'tkazish
     # ══════════════════════════════════════════════════════════════════
@@ -686,6 +768,24 @@ def open_window(parent=None, on_import_callback=None):
             messagebox.showwarning("Diqqat", "Bemor ma'lumotlari topilmadi!")
             return
 
+        # ── Buyurtmadagi ba'zi tahlillar hali kelmagan bo'lsa — ogohlantirish ──
+        # (BK-280 kreatinin/oqsilni ba'zan ~1 soat keyin yuboradi; laborant
+        # bilmasdan qisman qo'shib, qolganini blankaga tushirmay qo'yardi)
+        pend = pending_tests(patients_data[sid].get('sample_id') or sid,
+                             patients_data[sid].get('tests', {}))
+        if pend:
+            if not messagebox.askyesno(
+                    "⏳ Natija hali to'liq emas",
+                    f"Bemor: {patients_data[sid].get('name', sid)}\n\n"
+                    f"Buyurtmadagi quyidagi tahlillar analizatordan HALI KELMADI:\n" +
+                    "\n".join(f"   • {nm}  (LIS {c})" for c, nm in pend) +
+                    "\n\nAnalizator ularni keyinroq yuboradi — bu oyna o'zi yangilanadi.\n\n"
+                    "HA — hozir kelganlarini qo'shish (qolganlari kelgach\n"
+                    "        yana «Natijani qo'shish» ni bosing)\n"
+                    "YO'Q — kutish",
+                    icon="warning", default="no", parent=window):
+                return
+
         pinfo = copy.deepcopy(patients_data[sid])
         edits = edited_values.get(sid, {})
         for lis_code, new_val in edits.items():
@@ -705,6 +805,12 @@ def open_window(parent=None, on_import_callback=None):
         try:
             count = on_import_callback(sid, pinfo)
             name  = pinfo.get('name', sid)
+            if not count:
+                # Bekor qilindi (Sample ID mos emas / "ustiga yozilsinmi?" → Yo'q)
+                # yoki buyurtmada mos tahlil yo'q — "o'tkazildi" deb yolg'on
+                # aytmaymiz va oynani yopmaymiz (boshqa bemorni tanlash mumkin).
+                status_var.set(f"Natija qo'shilmadi: {name}")
+                return
             msg   = f"\u2705 Natijalar asosiy oynaga o'tkazildi!\n\nBemor: {name}"
             if count:
                 msg += f"\nO'tkazilgan natijalar: {count} ta"
@@ -902,11 +1008,138 @@ def open_window(parent=None, on_import_callback=None):
                 all_alerts.extend(al)
             critical_alert.notify(window, names, all_alerts)
 
-    def do_refresh():
-        refresh_patient_list(ptree, rtree, status_var, date_from_var, date_to_var, patients_data)
+    def _reload(quiet):
+        """Ro'yxatni qayta yuklash — tanlangan bemor va aylantirish joyi saqlanadi."""
+        keep_sid = current_sid[0]
+        yv = ptree.yview()[0] if ptree.get_children() else 0.0
+        refresh_patient_list(ptree, rtree, status_var, date_from_var, date_to_var,
+                             patients_data, quiet=quiet)
+        if keep_sid:
+            for item in ptree.get_children():
+                vals = ptree.item(item, 'values')
+                if vals and len(vals) > 1 and str(vals[1]) == keep_sid:
+                    ptree.selection_set(item)      # → do_show_full
+                    break
+        try:
+            ptree.yview_moveto(yv)
+        except Exception:
+            pass
         _scan_criticals(play=True)
 
+    def do_refresh():
+        _EXPECTED_CACHE.clear()     # buyurtmaga tahlil qo'shilgan bo'lishi mumkin
+        _reload(quiet=False)
+
     ttk.Button(lc, text="\U0001f504 Yangilash", command=do_refresh).pack(side=tk.LEFT, padx=5)
+
+    # ── Qayta o'lchov (LIS orqali, YANGI namuna bilan) ────────────────
+    # BK-280 da qayta o'lchovni analizatorning o'zida qo'yish (Правка / "Сохраните и
+    # повторите тестирование") LIS bilan birga ishlatilganda shu tahlilni KUN BO'YI
+    # boshqa namunalardan o'chirib yuboradi (analizator delete_repeat xatosi, 28.09.2026).
+    # Shuning uchun: bu yerda tahlilni belgilaymiz → analizatorda YANGI namuna ochib
+    # shu barkodni skanerlab LIS bosiladi → faqat belgilangan tahlillar tushadi.
+    def open_retest_dialog():
+        sid, pinfo = _get_selected_patient()
+        if not pinfo:
+            messagebox.showwarning("Qayta o'lchov", "Avval bemorni tanlang.", parent=window)
+            return
+        barcode = (pinfo.get('sample_id') or '').strip()
+        if not barcode or '|' in sid:
+            messagebox.showwarning("Qayta o'lchov",
+                                   "Bu namunada shtrix-kod yo'q — qayta o'lchovni analizatorda\n"
+                                   "YANGI namuna sifatida qo'lda kiriting.", parent=window)
+            return
+        # Tanlash ro'yxati: buyurtmadagi (analizatorga ketadigan) tahlillar + kelgan natijalar
+        cand = dict(expected_lis_codes(barcode, use_cache=False) or {})
+        for code, t in (pinfo.get('tests') or {}).items():
+            cand.setdefault(str(code), t.get('name', str(code)))
+        if not cand:
+            messagebox.showwarning("Qayta o'lchov", "Bu bemor uchun tahlil topilmadi.", parent=window)
+            return
+        try:
+            current = _bp.retest_queue_get(barcode) or set()
+        except Exception:
+            current = set()
+
+        dlg = tk.Toplevel(window)
+        dlg.title("Qayta o'lchov (LIS orqali)")
+        dlg.transient(window)
+        dlg.grab_set()
+        tk.Label(dlg, text=f"{pinfo.get('name', '')}   —   {barcode}",
+                 font=("Arial", 11, "bold")).pack(anchor=tk.W, padx=12, pady=(10, 2))
+        tk.Label(dlg, justify=tk.LEFT, fg="#7a4a00", wraplength=460,
+                 text="Qayta o'lchanadigan tahlillarni belgilang.\n"
+                      "Keyin ANALIZATORDA: YANGI namuna oching → shu barkodni skanerlang → "
+                      "o'ng tugma → LIS. Faqat belgilangan tahlillar tushadi.\n"
+                      "Eski namunada qayta o'lchov (Правка / «Сохраните и повторите тестирование») "
+                      "QO'YMANG — analizator shu tahlilni kun bo'yi boshqa bemorlardan o'chiradi."
+                 ).pack(anchor=tk.W, padx=12, pady=(0, 8))
+        box = ttk.Frame(dlg)
+        box.pack(fill=tk.BOTH, expand=True, padx=12)
+        vars_ = {}
+        for i, code in enumerate(sorted(cand, key=lambda c: int(c) if str(c).isdigit() else 9999)):
+            v = tk.BooleanVar(value=(code in current))
+            vars_[code] = v
+            ttk.Checkbutton(box, variable=v, text=f"{code}  —  {cand[code]}").grid(
+                row=i // 2, column=i % 2, sticky=tk.W, padx=4, pady=1)
+
+        def _save():
+            codes = [c for c, v in vars_.items() if v.get()]
+            ok = _bp.retest_queue_set(barcode, codes, [cand[c] for c in codes])
+            dlg.destroy()
+            if not ok:
+                messagebox.showerror("Qayta o'lchov", "Saqlab bo'lmadi.", parent=window)
+                return
+            if codes:
+                status_var.set(f"\U0001f501 Qayta o'lchov navbatida: {pinfo.get('name', '')} — "
+                               f"{', '.join(cand[c] for c in codes)}")
+                messagebox.showinfo(
+                    "Qayta o'lchov",
+                    "Saqlandi.\n\nAnalizatorda:\n"
+                    "  1) «Вступление в проект» → YANGI namuna raqami\n"
+                    f"  2) Shtrix-kod: {barcode}  → Спасать\n"
+                    "  3) Namunani tanlab o'ng tugma → LIS\n\n"
+                    "Faqat belgilangan tahlillar tushadi. Natija shu bemorga qo'shiladi.",
+                    parent=window)
+            else:
+                status_var.set(f"Qayta o'lchov bekor qilindi: {pinfo.get('name', '')}")
+            _reload(quiet=True)
+
+        bb = ttk.Frame(dlg)
+        bb.pack(fill=tk.X, padx=12, pady=10)
+        ttk.Button(bb, text="Saqlash", command=_save).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(bb, text="Bekor", command=dlg.destroy).pack(side=tk.RIGHT, padx=4)
+
+    tk.Button(lc, text="\U0001f501 Qayta o'lchov", command=open_retest_dialog,
+              bg="#fff4e0", fg="#7a4a00", font=("Arial", 9, "bold"),
+              relief=tk.RAISED, padx=8, pady=2, cursor="hand2").pack(side=tk.LEFT, padx=3)
+
+    # ── Avtomatik yangilash ────────────────────────────────────────────
+    # Analizator natijani tahlil-ma-tahlil (~20 s da bittadan) yuboradi, ba'zilarini
+    # esa (kreatinin/oqsil) soatlab keyin. Oyna ochiq turganda yangi fayl kelsa —
+    # ro'yxat o'zi yangilanadi (qo'lda "Yangilash" ni bosish shart emas).
+    auto_var = tk.BooleanVar(value=True)
+    ttk.Checkbutton(lc, text="Avto (5s)", variable=auto_var).pack(side=tk.LEFT, padx=5)
+    _last_sig = [None]
+
+    def _auto_tick():
+        try:
+            if not window.winfo_exists():
+                return
+        except Exception:
+            return
+        try:
+            if auto_var.get() and result_entry_ref[0] is None:   # tahrir paytida tegmaymiz
+                sig = _raw_signature(date_from_var.get().strip(), date_to_var.get().strip())
+                if sig is not None and _last_sig[0] is not None and sig != _last_sig[0]:
+                    _reload(quiet=True)
+                    status_var.set(status_var.get() +
+                                   f"  • yangi natija {datetime.now().strftime('%H:%M:%S')}")
+                if sig is not None:
+                    _last_sig[0] = sig
+        except Exception as e:
+            print(f"[BIO] avto-yangilash: {e}")
+        window.after(5000, _auto_tick)
     tk.Button(lc, text="o'chirish", command=_delete_patient,
               bg="#dc3545", fg="white", font=("Arial", 9, "bold"),
               relief=tk.RAISED, padx=8, pady=2, cursor="hand2").pack(side=tk.LEFT, padx=3)
@@ -923,6 +1156,8 @@ def open_window(parent=None, on_import_callback=None):
     # Dastlabki yuklash — kritiklarni belgilaymiz, lekin ochilishda ovoz/popup bermaymiz
     refresh_patient_list(ptree, rtree, status_var, date_from_var, date_to_var, patients_data)
     _scan_criticals(play=False)
+    _last_sig[0] = _raw_signature(date_from_var.get().strip(), date_to_var.get().strip())
+    window.after(5000, _auto_tick)
     return window
 
 
@@ -940,8 +1175,11 @@ def load_raw_files(date_from=None, date_to=None):
         all_files += glob.glob(os.path.join(root, "**", "*.txt"), recursive=True)
         all_files += glob.glob(os.path.join(root, "*.txt"))
 
-    # Bir xil fayl ikki marta kelmasin (rekursiv + to'g'ridan qidiruv ustma-ust tushishi mumkin)
-    all_files = list(dict.fromkeys(all_files))
+    # Bir xil fayl ikki marta kelmasin (rekursiv + to'g'ridan qidiruv ustma-ust tushishi mumkin).
+    # QUERY/ papkasidagi shtrix-kod so'rovi/javob (QRY/QCK/DSR) fayllari natija EMAS —
+    # ular faqat diagnostika uchun; har yuklashda bekorga parse qilinardi.
+    all_files = [f for f in dict.fromkeys(all_files)
+                 if not os.path.basename(f).lower().startswith('qry_')]
 
     if not all_files:
         return []
@@ -976,6 +1214,31 @@ def load_raw_files(date_from=None, date_to=None):
 
     files.sort(key=os.path.getmtime, reverse=True)
     return files[:1000]
+
+
+def _raw_signature(date_from, date_to):
+    """Avto-yangilash uchun arzon "o'zgardimi?" belgisi: sana oralig'idagi oylik
+    papkalardagi RAW fayllar soni + eng oxirgi o'zgarish vaqti (rekursiv qidiruvsiz).
+    Sana noto'g'ri bo'lsa None."""
+    try:
+        d1 = datetime.strptime(date_from, "%d.%m.%Y").date()
+        d2 = datetime.strptime(date_to, "%d.%m.%Y").date()
+    except Exception:
+        return None
+    months, y, m = [], d1.year, d1.month
+    while (y, m) <= (d2.year, d2.month) and len(months) < 24:
+        months.append(f"{y:04d}{m:02d}")
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    count, newest = 0, 0.0
+    for root in BK280_RAW_PATHS:
+        for mm in months:
+            for fp in glob.glob(os.path.join(root, mm, "bk280_raw_*.txt")):
+                count += 1
+                try:
+                    newest = max(newest, os.path.getmtime(fp))
+                except OSError:
+                    pass
+    return (count, newest)
 
 
 def _get_file_date_from_content(fp):
@@ -1128,7 +1391,8 @@ def _bio_cfg_cached():
 
 
 def refresh_patient_list(ptree, rtree, status_var,
-                         date_from_var, date_to_var, patients_data):
+                         date_from_var, date_to_var, patients_data, quiet=False):
+    """quiet=True — avto-yangilash: fayl topilmasa oyna (messagebox) chiqarmaydi."""
     status_var.set("Yuklanmoqda...")
     ptree.delete(*ptree.get_children())
     rtree.delete(*rtree.get_children())
@@ -1142,9 +1406,10 @@ def refresh_patient_list(ptree, rtree, status_var,
 
     if not files:
         status_var.set("Fayllar topilmadi")
-        messagebox.showinfo("Ma'lumot",
-            "BK-280 RAW fayllari topilmadi.\n\nQidirilgan papkalar:\n" +
-            "\n".join(f"  • {p}" for p in BK280_RAW_PATHS))
+        if not quiet:
+            messagebox.showinfo("Ma'lumot",
+                "BK-280 RAW fayllari topilmadi.\n\nQidirilgan papkalar:\n" +
+                "\n".join(f"  • {p}" for p in BK280_RAW_PATHS))
         return
 
     patients_data.clear()
@@ -1204,6 +1469,11 @@ def refresh_patient_list(ptree, rtree, status_var,
             p['order_id'] = info['order_id']
 
     # Eng yangi yuqorida bo'lishi uchun position=0 ga qo'shamiz (stack usuli)
+    n_pending = 0
+    try:
+        _retest_q = _bp.retest_queue_load()
+    except Exception:
+        _retest_q = {}
     for sid in sorted_sids:
         p = patients_data[sid]
         nm = p.get('name', '')
@@ -1211,13 +1481,23 @@ def refresh_patient_list(ptree, rtree, status_var,
         if p.get('name_src') == 'db':
             nm = f"{nm}  ⟵ barkod"      # ism qayerdan kelgani ko'rinib tursin
             tags = ("name_from_db",)
+        # Buyurtmadagi tahlillardan hali kelmaganlari bor — ⏳ N
+        pend = pending_tests(p.get('sample_id') or sid, p.get('tests', {}))
+        if pend:
+            n_pending += 1
+            nm = f"{nm}  ⏳{len(pend)}"
+            tags = ("pending_patient",)
+        if (p.get('sample_id') or sid) in _retest_q:
+            nm = f"{nm}  \U0001f501"          # qayta o'lchov navbatida (LIS yangi namuna kutmoqda)
         ptree.insert("", 0, values=(
             p['time'], sid, nm,
             p['_display_num']
         ), tags=tags)
 
-
-    status_var.set(f"Yuklandi: {len(patients_data)} ta bemor ({len(files)} ta fayl)")
+    msg = f"Yuklandi: {len(patients_data)} ta bemor ({len(files)} ta fayl)"
+    if n_pending:
+        msg += f"  |  ⏳ {n_pending} ta bemorda natija hali to'liq emas"
+    status_var.set(msg)
 
 
 def show_patient_results(ptree, rtree, event, patients_data):

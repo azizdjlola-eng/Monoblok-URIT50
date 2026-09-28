@@ -1,0 +1,54 @@
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta charset="utf-8">
+<meta name="ProgId" content="Word.Document">
+<title>BK-280 Retest Bug</title>
+<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]-->
+<style>
+@page Section1 { size: 21.0cm 29.7cm; margin: 2cm; }
+div.Section1 { page: Section1; }
+body { font-family: Calibri, Arial, sans-serif; font-size: 11pt; }
+h1 { font-size: 15pt; color: #1F3864; margin: 0 0 8pt 0; }
+p { margin: 0 0 6pt 0; line-height: 115%; }
+pre { font-family: Consolas, "Courier New", monospace; font-size: 9pt; background: #F2F2F2; border: 0.75pt solid #A6A6A6; padding: 5pt; white-space: pre-wrap; }
+ol, ul { margin-top: 0; margin-bottom: 6pt; }
+li { margin-bottom: 3pt; }
+</style>
+</head>
+<body><div class="Section1">
+
+<h1>BK-280 &mdash; after a retest, the same test is never added or tested again when LIS is used</h1>
+
+<p>Dear BIOBASE Engineering Team,</p>
+
+<p>We use a BK-280 (CRYSTAL software, Version V1) with LIS over TCP/IP (barcode query QRY^Q02 &rarr; DSR^Q03).</p>
+
+<p><b>Problem:</b> after we retest a test on any sample, that test is no longer added to any other sample on the same day, and it is not measured. This happens both when the test comes from LIS and when we add it manually. Before we started using LIS, retests worked normally.</p>
+
+<p><b>How to reproduce (tested on 28 Sep 2026):</b></p>
+<ol>
+<li>Sample No. 21: we set a retest for <b>ALBUMIN</b> (Data Processing &rarr; &ldquo;Save Retest&rdquo;).</li>
+<li>We sent an LIS barcode query for a new sample that includes ALBUMIN.<br>
+&rarr; The analyzer answered &ldquo;Message accepted&rdquo;, the patient appeared, but <b>ALBUMIN was missing</b> from the test list.</li>
+<li>We deleted sample No. 21 and sent the same LIS query again.<br>
+&rarr; <b>ALBUMIN appeared</b> and was measured normally.</li>
+</ol>
+<p>The same happened with KREATININ, OQSIL, XOLESTERIN and CA after they were retested.</p>
+
+<p><b>Cause (found in your code):</b> after every LIS download the software runs <span style="font-family:Consolas">Command.delete_repeat()</span>:</p>
+<pre>delete from sampleprogram a
+ where (a.programNo) in (select programNo from sampleprogram
+                         group by programNo, sampleInfoID having count(*) &gt; 1)
+   and a.sampleProgramID not in (select min(sampleProgramID) from sampleprogram
+                         group by programNo, sampleInfoID having count(*) &gt; 1)
+   and a.stateID = 1</pre>
+<p>A retest adds a second row of the same test to the sample. The first sub-query is not limited to that sample (sampleInfoID). So this test is deleted from <b>all</b> pending samples of the day, and often the retest row itself is deleted as well.</p>
+
+<p><b>Request:</b> please fix this query so that it only removes duplicates inside the same sample and never removes retest rows, and send us an updated software version.</p>
+
+<p>We can send the analyzer database copy and full LIS logs if needed.</p>
+
+<p style="margin-top:12pt">Best regards,<br><b>AzizMedLine laboratory</b><br>
+Contact: ____________________ &nbsp; Phone / WeChat: ____________________ &nbsp; Analyzer S/N: ____________________</p>
+
+</div></body></html>

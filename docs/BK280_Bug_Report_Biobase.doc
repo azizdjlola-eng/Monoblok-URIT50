@@ -1,0 +1,122 @@
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta charset="utf-8">
+<meta name="ProgId" content="Word.Document">
+<meta name="Generator" content="Microsoft Word 15">
+<title>BK-280 Bug Report: delete_repeat</title>
+<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom><w:DoNotOptimizeForBrowser/></w:WordDocument></xml><![endif]-->
+<style>
+@page Section1 { size: 21.0cm 29.7cm; margin: 2cm 2cm 2cm 2cm; }
+div.Section1 { page: Section1; }
+body { font-family: Calibri, Arial, sans-serif; font-size: 11pt; color: #000; }
+h1 { font-family: Calibri, Arial, sans-serif; font-size: 18pt; color: #1F3864; margin: 0 0 4pt 0; }
+h2 { font-family: Calibri, Arial, sans-serif; font-size: 13.5pt; color: #1F3864; margin: 14pt 0 6pt 0; }
+p { margin: 0 0 6pt 0; line-height: 115%; }
+.meta { color: #595959; font-size: 10pt; border-bottom: 1.5pt solid #1F3864; padding-bottom: 4pt; margin-bottom: 12pt; }
+.mono { font-family: Consolas, "Courier New", monospace; font-size: 9.5pt; }
+pre { font-family: Consolas, "Courier New", monospace; font-size: 8.5pt; background: #F2F2F2; border: 0.75pt solid #A6A6A6; padding: 5pt; margin: 0 0 8pt 0; white-space: pre-wrap; }
+table { border-collapse: collapse; margin: 4pt 0 8pt 0; }
+th, td { border: 0.75pt solid #A6A6A6; padding: 3pt 6pt; font-size: 10pt; text-align: left; vertical-align: top; }
+th { background: #D9E2F3; }
+ul, ol { margin-top: 0; margin-bottom: 6pt; }
+li { margin-bottom: 3pt; }
+.box { border: 1pt solid #C00000; background: #FFF2F2; padding: 6pt; margin: 6pt 0 10pt 0; }
+</style>
+</head>
+<body>
+<div class="Section1">
+
+<h1>BK-280 Software Bug Report</h1>
+<p class="meta">To: BIOBASE Engineering / Technical Support &nbsp;|&nbsp; From: AzizMedLine laboratory &nbsp;|&nbsp; Date: 28 September 2026</p>
+
+<p><b>Subject:</b> BK-280 (CRYSTAL, &ldquo;Version: V1&rdquo;) &mdash; <span class="mono">Command.delete_repeat()</span> deletes pending tests of ALL samples after any retest when LIS is used (LIS-downloaded tests, manually added tests and retests are lost)</p>
+
+<p>Dear BIOBASE Engineering Team,</p>
+
+<p>We found a software defect in the BK-280 CRYSTAL software. When LIS is used, it deletes pending (not yet tested) test items from patient samples, including tests downloaded from LIS (DSR^Q03), tests added manually, and retests. Below is the evidence and the exact cause.</p>
+
+<h2>1. Symptom</h2>
+<ul>
+<li>After an operator creates a <b>retest</b> on a finished sample (log: &ldquo;Добавьте элементы повторного тестирования: KREATININ&rdquo;), the same test item is silently removed from <b>every other sample</b> of the day where it is still pending, as soon as the next LIS barcode query is processed.</li>
+<li>For the rest of that day this item cannot be added to any sample: neither by LIS nor manually. The retest itself also often disappears.</li>
+<li>The analyzer still replies <span class="mono">ACK^Q03 MSA|AA</span> and shows the patient; only the test item disappears. The Start dialog counts samples, but they have no test items, so nothing is measured.</li>
+</ul>
+
+<h2>2. Root cause</h2>
+<p>After LIS download, the software executes <span class="mono">CRYSTAL.Command.delete_repeat()</span> on the daily database:</p>
+<pre>delete from sampleprogram a
+ where (a.programNo) in
+       (select programNo from sampleprogram group by programNo, sampleInfoID having count(*) &gt; 1)
+   and a.sampleProgramID not in
+       (select min(sampleProgramID) from sampleprogram group by programNo, sampleInfoID having count(*) &gt; 1)
+   and a.stateID = 1</pre>
+<div class="box">
+<p><b>Defect:</b> the first sub-query is not correlated with the sample (<span class="mono">sampleInfoID</span>). If <b>any</b> sample of the day contains the same <span class="mono">programNo</span> twice (which every retest creates), then <b>all</b> pending rows (<span class="mono">stateID = 1</span>) with that <span class="mono">programNo</span> in <b>all other samples</b> are deleted. Those rows are not part of any duplicate group, so they are never the <span class="mono">min(sampleProgramID)</span> that is kept.</p>
+</div>
+
+<p><b>Why it appears only with LIS.</b> <span class="mono">Command.delete_repeat()</span> is called only from the LIS download handlers:</p>
+<ul>
+<li><span class="mono">frmSampleInput.ᜁ(String)</span> (TCP);</li>
+<li><span class="mono">frmSampleInput.ᜀ(String)</span>;</li>
+<li><span class="mono">frmSampleInput.ᜀ(Object, SerialDataReceivedEventArgs)</span> (serial).</li>
+</ul>
+<p>Every retest path inserts a <b>second</b> <span class="mono">sampleProgram</span> row with the same programNo and <span class="mono">IsReTested</span>:</p>
+<ul>
+<li>Sample Input edit;</li>
+<li>Data Processing &ldquo;Save Retest&rdquo;;</li>
+<li>automatic retest in <span class="mono">frmSwatchTest</span>.</li>
+</ul>
+<p>Without LIS the duplicate is never &ldquo;cleaned&rdquo;, so retests work. With LIS, the first barcode query after any retest deletes:</p>
+<ol>
+<li>the pending retest row itself, unless its GUID happens to be the <span class="mono">min()</span>, so retests randomly disappear;</li>
+<li>all pending rows of that programNo in every other sample for the rest of the day.</li>
+</ol>
+
+<h2>3. Evidence from our daily database (DataBase\20260928.mdb)</h2>
+<p>Duplicate groups (same sample, same programNo) on 28 Sep 2026:</p>
+<table>
+<tr><th>Sample No.</th><th>Sample</th><th>Duplicated item (programNo)</th><th>Created (operation log)</th></tr>
+<tr><td>1</td><td>QC &ldquo;humon norma&rdquo;</td><td>KREATININ (7) &times;2, OQSIL (8) &times;2</td><td>09:17:23 &ldquo;add retest items&rdquo;</td></tr>
+<tr><td>2</td><td>QC &ldquo;kantrol patalogiya&rdquo;</td><td>XOLESTERIN (10) &times;2</td><td>09:17:35 &ldquo;add retest items&rdquo;</td></tr>
+<tr><td>17</td><td>patient</td><td>CA (13) &times;2</td><td>11:53:22 &ldquo;add retest items&rdquo;</td></tr>
+</table>
+<p>Result, exactly matching the duplicate groups:</p>
+<ul>
+<li>Sample No. 6, LIS download at 08:41 (<b>before</b> 09:17): KREATININ and OQSIL were added and measured normally.</li>
+<li>After 09:17: KREATININ, OQSIL and XOLESTERIN were missing in almost every LIS-downloaded sample (e.g. samples No. 12, 15, 19, 21, 33, 36, 44). The LIS messages were identical to the successful ones.</li>
+<li>After 11:53: CA was also missing (e.g. sample No. 36).</li>
+<li>Manual additions were also lost. For example, KREATININ was added to sample No. 19 at 11:23 and 11:56 (operation log), but no row exists in <span class="mono">sampleProgram</span>.</li>
+<li>Test: an LIS download with only items 317, 254, 323 (18:04) produced an <b>empty</b> test list.</li>
+<li><b>Confirmation:</b> after we deleted the samples containing the duplicate rows (QC samples 1 and 2 and sample 17), LIS download immediately worked again for OQSIL, KREATININ and XOLESTERIN (19:13).</li>
+</ul>
+<p>We verified the LIS side byte by byte. The DSR^Q03 messages are identical for successful and failed cases, pure ASCII, and in the documented format (<span class="mono">DSP|29||323^^^|||</span>). The item mapping is correct: prograM.programID = 317 / 323 / 254 / 252 = &ldquo;LIS No.&rdquo;.</p>
+
+<h2>4. Requested fix</h2>
+<p>Please correlate the delete with the same sample, for example:</p>
+<pre>delete from sampleprogram a
+ where a.stateID = 1
+   and exists (select 1 from sampleprogram b
+                where b.sampleInfoID = a.sampleInfoID
+                  and b.programNo    = a.programNo
+                  and b.sampleProgramID &lt; a.sampleProgramID)</pre>
+<p>Please also make sure that a pending retest row is not deleted as a &ldquo;duplicate&rdquo; of its own finished original, for example by ignoring rows with <span class="mono">IsReTested = True</span> or rows whose partner has <span class="mono">stateID &lt;&gt; 1</span>.</p>
+
+<h2>5. Additional observations (lower priority)</h2>
+<p><b>a) LIS receive (CRYSTAL.Listrans).</b> Each socket read (buffer 1024 bytes) <i>replaces</i> the static receive string instead of appending to it. A chunk is dispatched only if it contains &ldquo;DSC&rdquo;, &ldquo;QCK^Q02&rdquo; or &ldquo;ACK^R01&rdquo;; otherwise it is discarded. After each dispatch the receive thread sleeps 1000 ms. A DSR that arrives in two reads is therefore split, and part of it is lost. The first barcode query also often gets no ACK^Q03 after results have been uploaded on the same connection.</p>
+<p><b>b) Reagent level.</b> Alarms 5577&ndash;5579 &ldquo;No reagent R2 at position 47 / 48 / 49&rdquo; (ASO, RF, CRB) were raised, but these tests had already been run without R2.</p>
+
+<h2>6. Available data</h2>
+<ul>
+<li>Copy of the analyzer database: <span class="mono">ConductorDataBase12.mdb, PerDay.mdb, DataBase\20260928.mdb, Log\202609.log</span></li>
+<li>Full raw LIS communication logs (all QRY / QCK / DSR / ORU messages, byte-exact)</li>
+</ul>
+
+<p style="margin-top:14pt">Thank you very much for your help.</p>
+<p>Best regards,</p>
+<p><b>AzizMedLine laboratory</b></p>
+<p>Contact person: ______________________ &nbsp;&nbsp; Phone / WeChat: ______________________</p>
+<p>Analyzer serial number: ______________________</p>
+
+</div>
+</body>
+</html>

@@ -151,6 +151,7 @@ _threads = []
 _transports = []
 _callback = None
 _last_result_time = None
+_pending_retest_sid = None   # qayta o'lchov DSR i yuborilgan barkod (ACK kutilmoqda)
 _cfg_live = dict(_bio_eff)
 
 
@@ -235,12 +236,25 @@ def _handle_query_hl7_qry(message: str, send):
     # olsa, ularning yig'indisi 1024 baytlik buferiga sig'maydi. Pauza
     # uzunroq bo'lsa u QCK ni o'qib, buferni bo'shatib ulguradi.
     time.sleep(float(_bp._tune("dsr_delay", 0.6)))
+    # Qayta o'lchov navbati: shu barkod uchun laborant RAW oynada tanlagan tahlillar
+    # bo'lsa — FAQAT ular yuboriladi (analizatorda yangi namuna ochilgan bo'ladi).
+    global _pending_retest_sid
+    only = None
+    try:
+        only = _bp.retest_queue_get(sid)
+    except Exception as e:
+        _log(f"[OGOHLANTIRISH] qayta o'lchov navbati o'qilmadi: {e}")
     skipped = []
-    items = _bp.worklist_items(od, model, skipped_out=skipped)
+    items = _bp.worklist_items(od, model, skipped_out=skipped, only_codes=only)
     if skipped:
         _log(f"  [DIQQAT] Analizator taniymaydigan tahlil worklistga qo'shilmadi: {skipped} "
              f"— bu tahlilni analizatorda QO'LDA tanlang")
-    dsr = _bp.build_dsr(q, od, model)
+    if only is not None:
+        _log(f"  [QAYTA O'LCHOV] {sid}: faqat {sorted(only)} yuboriladi (yangi namuna)")
+        _pending_retest_sid = sid
+    else:
+        _pending_retest_sid = None
+    dsr = _bp.build_dsr(q, od, model, only_codes=only)
     send(_bp.wrap_mllp(dsr, ENCODING))
     save_query_raw("out_dsr", dsr)
     _log(f"  -> DSR^Q03: {od['patient'].get('fish')} | tahlillar: {[a for a, *_ in items]} "
@@ -295,7 +309,20 @@ def _handle_message(message: str, send):
     elif kind == "astm_query":
         _handle_query_astm(message, send)
     elif kind == "ack":
-        _log("◄ ACK (analizator tasdiqladi)")
+        # MSA qatori ham yoziladi: shtrix-kod so'rovi 1-urinishda o'tmay qolganda
+        # (28.09.2026 — ~50% holatda ACK umuman kelmadi) analizator AE/AR bilan
+        # rad etdimi yoki umuman javob bermadimi — shundan ajratiladi.
+        msa = next((ln.strip() for ln in re.split(r"[\r\n]+", message) if ln.strip().startswith("MSA|")), "")
+        _log(f"◄ ACK (analizator tasdiqladi) {msa[:80]}")
+        # Qayta o'lchov DSR i qabul qilindi — navbatdan olib tashlaymiz (bir martalik)
+        global _pending_retest_sid
+        if _pending_retest_sid and "|AA|" in msa:
+            try:
+                _bp.retest_queue_remove(_pending_retest_sid)
+                _log(f"  [QAYTA O'LCHOV] {_pending_retest_sid}: analizator qabul qildi, navbatdan olindi")
+            except Exception as e:
+                _log(f"[OGOHLANTIRISH] qayta o'lchov navbatidan o'chirilmadi: {e}")
+            _pending_retest_sid = None
     else:
         _log(f"  Noma'lum xabar: {message[:80]!r}")
         try:

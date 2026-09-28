@@ -57,6 +57,8 @@ TARJIMA = {
     "Norma (Erkak)": "Норма (муж.)",
     "Namuna olingan vaqt": "Время сбора",
     "Siydik miqdori (ml)": "Количество мочи (мл)",
+    "Gistogrammalar — hujayralarning hajm (fL) bo'yicha taqsimoti":
+        "Гистограммы — распределение клеток по объёму (фл)",
     "Solishtirma og'irligi": "Удельный вес",
 
     # ── Bemor ma'lumotlari / poy ───────────────────────────────────────────

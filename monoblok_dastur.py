@@ -3512,6 +3512,48 @@ def create_hematology_cbc_table_in_doc(doc: Document, result_data, order_info: d
             _add_run_tnr(p, txt, 11, bold=(i == 2 and natija_str != '-' and bool(natija_str)),
                          color_rgb=color if i == 2 else None)
 
+    _add_hema_histograms_to_doc(doc, rd, rd.get('sid') or rd.get('sno') or order_info.get('sample_id', ''))
+
+
+# Blankadagi gistogramma o'lchami (sm). Balandlikni o'zgartirish uchun faqat shu qatorni tahrirlang.
+HEMA_HIST_WIDTH_CM = 18.0
+HEMA_HIST_HEIGHT_CM = 2.5
+
+
+def _add_hema_histograms_to_doc(doc: Document, rd: dict, sample_id):
+    """CBC jadvali ostiga WBC/RBC/PLT gistogrammalari (oq fon, rangli chiziq).
+    Manba: CBC JSON dagi 'histograms'; yo'q bo'lsa (eski natija) — BC-20S TXT dan Sample ID bo'yicha."""
+    try:
+        import io
+        import gemo_histogram as _gh
+        hist = _gh.unpack_histograms(rd.get('histograms'))
+        if not hist and sample_id:
+            try:
+                from hematology_window import find_histograms_by_sid
+                hist = find_histograms_by_sid(sample_id)
+            except Exception:
+                hist = {}
+        if not hist:
+            return
+        buf = io.BytesIO()
+        _w_px = 1800
+        _h_px = int(round(_w_px * HEMA_HIST_HEIGHT_CM / HEMA_HIST_WIDTH_CM))
+        if not _gh.render_print_png(hist, buf, width_px=_w_px, height_px=_h_px):
+            return
+        buf.seek(0)
+        cap = doc.add_paragraph()
+        cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(cap, 2, 0, line_spacing=1.0)
+        cap.paragraph_format.keep_with_next = True
+        _add_run_tnr(cap, "Gistogrammalar — hujayralarning hajm (fL) bo'yicha taqsimoti", 8, bold=True)
+        pic = doc.add_paragraph()
+        pic.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(pic, 0, 0, line_spacing=1.0)
+        pic.add_run().add_picture(buf, width=Cm(HEMA_HIST_WIDTH_CM), height=Cm(HEMA_HIST_HEIGHT_CM))
+    except Exception as e:
+        print(f"[OGOHLANTIRISH] Gistogramma blankaga qo'shilmadi: {e}")
+
+
 def create_urine_full_table_in_doc(doc: Document, result_data, order_info: dict):
     """Siydik tahlili — Kimyoviy tahlil (URIT-50) + Cho'kma mikroskopiyasi. Rang: norma=qora, past=ko'k, yuqori=qizil."""
     rd = {}
@@ -22177,6 +22219,14 @@ Sana: {_sana_fmt}"""
                             'patient_age': patient_info.get('age', ''),
                             'patient_gender': patient_info.get('gender', ''),
                             **all_vals}
+                # WBC/RBC/PLT gistogrammalari (blankada chiziladi)
+                try:
+                    import gemo_histogram as _gh
+                    _hp = _gh.pack_histograms(patient_info.get('histograms'))
+                    if _hp:
+                        cbc_data['histograms'] = _hp
+                except Exception:
+                    pass
                 plan.append((test['id'], test.get('nomi', ''),
                              json.dumps(cbc_data, ensure_ascii=False)))
 
@@ -22239,6 +22289,29 @@ Sana: {_sana_fmt}"""
         tests = patient_info.get('tests', {})
         if not tests:
             return 0
+
+        # ── XAVFSIZLIK: BOSHQA bemorning natijasi biriktirilmasin ────────────
+        # (gematologiyadagi himoya bilan bir xil). 28.09.2026: RAW oyna endi
+        # avto-yangilanadi va kech kelgan tahlillar uchun qayta-qayta ochiladi —
+        # ro'yxatda qo'shni qatorni tanlab yuborish xavfi oshdi.
+        bd = self.current_bemor_data or {}
+        cur_sid = str(bd.get('sample_id') or '').strip()
+        alt_ids = {str(bd.get(k) or '').strip() for k in ('natija_kodi', 'kod_yollanma')} - {''}
+        res_sid = str(patient_info.get('sample_id') or '').strip()
+        if res_sid and cur_sid and res_sid != cur_sid and res_sid not in alt_ids:
+            if not messagebox.askyesno(
+                    "⚠ BOSHQA BEMORNING NATIJASI!",
+                    f"Tanlangan natija — Sample ID: {res_sid}\n"
+                    f"    Analizatorda: {patient_info.get('name', '?')}, {patient_info.get('time', '')}\n\n"
+                    f"Hozirgi buyurtma — Sample ID: {cur_sid}\n"
+                    f"    Bemor: {bd.get('fish', '?')}\n\n"
+                    "Sample ID lar MOS EMAS — bu BOSHQA bemorning bioximiya natijasi bo'lishi mumkin!\n"
+                    "Natija haqiqatan shu bemorniki ekaniga ishonchingiz komil bo'lmasa, YO'Q ni bosing.\n\n"
+                    "Baribir shu bemorga qo'shilsinmi?",
+                    icon="warning", default="no", parent=self.root):
+                self.status_var.set(
+                    f"[BEKOR] Sample ID mos emas ({res_sid} ≠ {cur_sid}) — natija qo'shilmadi")
+                return 0
 
         # === Multi-komponent testlar: Bilirubin va Revmoproba avtomat ===
         # Bu LIS code larni asosiy loopda o'tkazib yuborish
@@ -22524,6 +22597,14 @@ Sana: {_sana_fmt}"""
         # Belgisiz kesh ham saqlaymiz
         norm_to_test = {_normalize(nm): t for nm, t in name_to_test.items()}
 
+        # ID bo'yicha kesh — LIS kod → LIMS tahlil_id aniq ma'lum bo'lsa, nomga qaramaymiz
+        id_to_test = {t.get('id'): t for t in self.current_tests if t.get('id') is not None}
+        # Nomi o'xshash, lekin BOSHQA tahlil (237 pankreatik amilaza ≠ 56 umumiy amilaza)
+        try:
+            from bio_protokol import CODE_EXCLUDE_TAHLIL as _code_excl
+        except Exception:
+            _code_excl = {"237": {56}}
+
         for code, tdata in tests.items():
             # Multi-komponent sifatida qayta ishlangan LIS kodlarini o'tkazib yuborish
             if code in handled_keys:
@@ -22538,8 +22619,12 @@ Sana: {_sana_fmt}"""
             db_upper = db_name.upper()
             db_norm  = _normalize(db_name)
 
+            # 0) LIMS tahlil ID bo'yicha (eng ishonchli)
+            matched = id_to_test.get(tdata.get('tahlil_id')) if tdata.get('tahlil_id') else None
+
             # 1) To'liq moslik
-            matched = name_to_test.get(db_upper)
+            if not matched:
+                matched = name_to_test.get(db_upper)
 
             # 2) Belgisiz to'liq moslik (apostropf, defis, bo'shliq e'tiborga olinmaydi)
             if not matched:
@@ -22573,6 +22658,11 @@ Sana: {_sana_fmt}"""
                             matched = test
                             print(f"[BIO-IMPORT] 1-segment moslik: '{db_name}' → '{test.get('nomi','')}'")
                             break
+
+            if matched and matched.get('id') in _code_excl.get(str(tdata.get('lis_code', code)), ()):
+                print(f"[BIO-IMPORT] Rad etildi: LIS {tdata.get('lis_code', code)} ('{db_name}') "
+                      f"→ '{matched.get('nomi', '')}' boshqa tahlil (nomi o'xshash)")
+                matched = None
 
             if not matched:
                 print(f"[BIO-IMPORT] Mos topilmadi: '{db_name}' (LIS:{tdata.get('lis_code','')})")

@@ -365,6 +365,80 @@ def _add_test(patient: dict, key: str, name: str, value: str, unit: str, ref: st
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+#  GISTOGRAMMA (Mindray BC-20S: OBX 15000-15200)
+#    ED  15000 / 15050 / 15100 — WBC / RBC / PLT: Base64 → 128 bayt (Y 0-255)
+#    NM  15010-15013 / 15051-15052 / 15111-15112 — ajratuvchi chiziqlar (256 kanal shkalasida)
+#  Natija: patient["histograms"] = {"WBC": {"data": [128 int], "lines": [kanal...], "flags": ["R1"]}, ...}
+# ─────────────────────────────────────────────────────────────────────────────
+_HIST_ED_CODES = {"15000": "WBC", "15050": "RBC", "15100": "PLT"}
+_HIST_LINE_CODES = {"15010": ("WBC", 0), "15011": ("WBC", 1), "15012": ("WBC", 2), "15013": ("WBC", 3),
+                    "15051": ("RBC", 0), "15052": ("RBC", 1),
+                    "15111": ("PLT", 0), "15112": ("PLT", 1)}
+
+
+def _hist_kind(code: str, name: str) -> str:
+    if code in _HIST_ED_CODES:
+        return _HIST_ED_CODES[code]
+    u = (name or "").upper()
+    for k in ("WBC", "RBC", "PLT"):
+        if k in u:
+            return k
+    return ""
+
+
+def _collect_histogram(p: dict, vtype: str, code: str, name: str, raw: str):
+    """Gistogramma OBX ni p["histograms"] ga yig'adi (xato bo'lsa jim o'tkazadi)."""
+    try:
+        if vtype == "ED":
+            kind = _hist_kind(code, name)
+            b64 = raw.split("^")[-1].strip()
+            if not kind or not b64:
+                return
+            import base64
+            data = list(base64.b64decode(b64 + "=" * (-len(b64) % 4)))
+            if data:
+                p.setdefault("histograms", {}).setdefault(kind, {})["data"] = data
+        elif code in _HIST_LINE_CODES:
+            kind, idx = _HIST_LINE_CODES[code]
+            lines = p.setdefault("histograms", {}).setdefault(kind, {}).setdefault("lines", {})
+            lines[idx] = int(float(raw.strip()))
+    except Exception:
+        pass
+
+
+def _region_flag(name: str) -> str:
+    """'Lym left region alert' → 'R1' (Mindray WBC hudud belgilari R1..R4)."""
+    u = (name or "").lower().replace("-", " ")
+    if "region" not in u:
+        return ""
+    if "lym left" in u:
+        return "R1"
+    if "lym mid" in u:
+        return "R2"
+    if "mid gran" in u:
+        return "R3"
+    if "gran right" in u:
+        return "R4"
+    return ""
+
+
+def _finalize_histograms(p: dict):
+    """lines {idx: kanal} → tartiblangan ro'yxat; ma'lumotsiz gistogrammalarni olib tashlash."""
+    h = p.get("histograms")
+    if not h:
+        return
+    for kind in list(h):
+        e = h[kind]
+        ln = e.get("lines")
+        if isinstance(ln, dict):
+            e["lines"] = [ln[i] for i in sorted(ln)]
+        if not e.get("data"):
+            del h[kind]
+    if not h:
+        p.pop("histograms", None)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 #  PARSER: HL7 ORU^R01
 # ─────────────────────────────────────────────────────────────────────────────
 def parse_hl7_oru(message: str) -> dict:
@@ -426,7 +500,14 @@ def parse_hl7_oru(message: str) -> dict:
                     p["gender"] = _gender(value)
                 continue
             if vtype == "ED" or (code.isdigit() and 15000 <= int(code) <= 15200):
+                _collect_histogram(p, vtype, code, name, f[5])
                 continue
+            # WBC hudud ogohlantirishi (R1..R4) — gistogramma panelida ko'rsatiladi
+            if vtype == "IS" and value.upper() == "T":
+                rf = _region_flag(name)
+                if rf:
+                    p.setdefault("histograms", {}).setdefault("WBC", {}).setdefault("flags", []).append(rf)
+                    continue
             key = normalize_param(code, name)
             if key is None:
                 if vtype in ("NM", "ST", "") and value:
@@ -435,6 +516,7 @@ def parse_hl7_oru(message: str) -> dict:
             _add_test(p, key, name, value, unit, ref, flag)
     if extra:
         p["_extra"] = extra
+    _finalize_histograms(p)
     p["_raw_hl7"] = message
     p["_format"] = "hl7"
     return _finalize(p)
