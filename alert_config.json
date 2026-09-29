@@ -120,11 +120,41 @@
         "exclude": [
           "revmoproba"
         ],
+        "low": 1,
+        "low_inclusive": true,
+        "neg": true,
+        "low_level": "critical",
+        "low_msg": "juda past — R2 reagent (qizdirishdan qaytarilmagan yoki tugagan) shubhasi; reagentni tekshirib QAYTA O'LCHANG yoki mas'uldan so'rang"
+      },
+      {
+        "key": "rf",
+        "match": [
+          "revmatoid",
+          "r faktor"
+        ],
+        "exclude": [
+          "revmoproba"
+        ],
         "low": 2,
         "low_inclusive": true,
         "neg": true,
-        "low_level": "warn",
-        "low_msg": "juda past — namuna/reagentni tekshiring, kerak bo'lsa qayta o'lchang"
+        "low_level": "critical",
+        "low_msg": "juda past — R2 reagent (qizdirishdan qaytarilmagan yoki tugagan) shubhasi; reagentni tekshirib QAYTA O'LCHANG yoki mas'uldan so'rang"
+      },
+      {
+        "key": "aslo",
+        "match": [
+          "antistreptolizin",
+          "aslo"
+        ],
+        "exclude": [
+          "revmoproba"
+        ],
+        "low": 10,
+        "low_inclusive": true,
+        "neg": true,
+        "low_level": "critical",
+        "low_msg": "juda past — R2 reagent (qizdirishdan qaytarilmagan yoki tugagan) shubhasi; reagentni tekshirib QAYTA O'LCHANG yoki mas'uldan so'rang"
       },
       {
         "key": "kaliy",
