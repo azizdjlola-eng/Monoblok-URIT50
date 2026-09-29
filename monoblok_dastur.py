@@ -4742,10 +4742,12 @@ def _is_revmoproba_full_auto_test(test_name: str) -> bool:
     return 'revmoproba' in tn and 'avtomat' in tn
 
 
-# ── QUYI O'LCHASH CHEGARASI: "0" o'rniga "< chegara" (2026-09-29) ─────────
-# Analizator RF/CRP/ASLO ni juda past bo'lsa 0 (yoki 0.4 kabi) beradi. Blankada
-# "0" chiqishi o'rniga laboratoriya amaliyotidagidek "< 2" yoziladi — bu
+# ── QUYI O'LCHASH CHEGARASI: "0" o'rniga "5 dan kam" (2026-09-29) ─────────
+# Analizator RF/CRP/ASLO ni o'lchay olmaydigan darajada past bo'lsa 0 beradi.
+# Blankada "0" o'rniga "2 dan kam" / "5 dan kam" / "50 dan kam" yoziladi — bu
 # HAQIQATGA mos (natija chegaradan past), talqin o'zgarmaydi (norma ichida).
+# 0 dan katta o'lchangan son (1.0, 0.4, 39...) o'zgarmay yoziladi. "< 5"
+# belgisi ishlatilmaydi — egasi fikricha vrachlar tushunmay so'raydi.
 # Bazadagi asl qiymat O'ZGARMAYDI — faqat blankadagi ko'rinish.
 # Chegaralar analizator_config.json da: "quyi_chegara": {"crp": 2, "rf": 5, "aslo": 50}
 # (reagent yo'riqnomasidagi o'lchash oralig'i boshlanishiga moslab o'zgartiring).
@@ -4785,11 +4787,12 @@ def _revmo_komponent(test_name: str, tahlil_id=None):
 
 
 def _quyi_chegara_matn(komponent, value):
-    """Qiymat chegaradan PAST bo'lsa "< chegara" matni, aks holda asl qiymat (o'zgarmaydi)."""
+    """Analizator 0 (yoki manfiy) bergan bo'lsa — "5 dan kam" matni; boshqa
+    har qanday qiymat (0 dan katta son, matn) o'zgarmay qaytadi."""
     if not komponent or value is None:
         return value
     s = str(value).strip()
-    if not s or s.startswith('<'):
+    if not s or s.startswith('<') or 'kam' in s:
         return value
     m = re.match(r'^\s*([-+]?\d+(?:[.,]\d+)?)\s*$', s)
     if not m:
@@ -4799,9 +4802,9 @@ def _quyi_chegara_matn(komponent, value):
     except ValueError:
         return value
     chegara = _quyi_chegaralar().get(komponent)
-    if chegara is None or son >= chegara:
-        return value
-    return f"< {chegara:g}"
+    if chegara is None or son > 0:
+        return value                  # haqiqiy o'lchangan son — o'zi yoziladi
+    return f"{chegara:g} dan kam"
 
 def _create_bilirubin_section(doc, bili_tests: list, test_results: dict, order_info: dict):
     """BILIRUBIN (umumiy, bog'langan, erkin) bo'limini alohida jadval bilan yaratish."""
@@ -5368,7 +5371,7 @@ def _create_revmoproba_auto_section(doc, revmo_tests: list, test_results: dict, 
         rf_n = comp_normas.get('rf', {})
         crp_n = comp_normas.get('crp', {})
         aslo_n = comp_normas.get('aslo', {})
-        # Chegaradan past natija "< chegara" bo'lib chiqadi (_quyi_chegara_matn ga qarang)
+        # 0 natija "5 dan kam" bo'lib chiqadi (_quyi_chegara_matn ga qarang)
         _add_revmo_row_to_table(table, "CRP (S-reaktivniy belok) avtomat",
                                 _quyi_chegara_matn('crp', rd.get('crp', '')),
                                 crp_n.get('norma', '-'), crp_n.get('unit', 'mg/l'), jins)
@@ -5649,7 +5652,7 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
                 result_value = _round_result_to_norma(result_value, norma_text_for_color)
             elif result_value and analyzer_ref:
                 result_value = _round_result_to_norma(result_value, analyzer_ref)
-            # RF/CRP/ASLO avtomat: chegaradan past → "< chegara" (bazadagi qiymat o'zgarmaydi)
+            # RF/CRP/ASLO avtomat: 0 → "5 dan kam" (bazadagi qiymat o'zgarmaydi)
             result_value = _quyi_chegara_matn(
                 _revmo_komponent(test_name, test.get('tahlil_id')), result_value)
             # IFA guruhidagi testlarning ko'pi (Ferritin, Vitamin D/B12, TSH,
@@ -5787,7 +5790,7 @@ def create_simple_table_for_tests(doc: Document, tests: list, order_info: dict, 
             if test_results and test_id in test_results:
                 raw_val = test_results[test_id]
                 result_value = _format_result_value(raw_val)
-            # RF/CRP/ASLO avtomat: chegaradan past → "< chegara" (bazadagi qiymat o'zgarmaydi)
+            # RF/CRP/ASLO avtomat: 0 → "5 dan kam" (bazadagi qiymat o'zgarmaydi)
             result_value = _quyi_chegara_matn(
                 _revmo_komponent(test_name, test.get('tahlil_id')), result_value)
 

@@ -437,6 +437,8 @@ NORMA_SOZLAR = [
     (r"(\d+(?:\s*-\s*\d+)?)\s+Hafta", "{1} нед."),
     (r"(\d+[ab]?)\s*-\s*bosqich", "стадия {1}"),
     (r"(\d[\d.,]*)\s*gacha", "до {1}"),
+    # RF/CRP/ASLO 0 natija: "5 dan kam" (monoblok _quyi_chegara_matn)
+    (r"(\d[\d.,]*)\s+dan\s+kam", "менее {1}"),
     (r"(\d+)\s*soatdan\s+keyin\s+takrorlash", "повторить через {1} ч"),
     # Toifalar
     ("Emizikli yosh", "лактация"),
