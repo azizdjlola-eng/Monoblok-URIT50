@@ -491,7 +491,7 @@ def open_window(parent=None, on_import_callback=None):
     _alerted_sids = set()   # takror ovoz bermaslik uchun
 
     # ── Gistogrammalar (WBC / RBC / PLT) — natijalar ostida; birinchi pack → joyi kafolatlangan ──
-    hist_frame = tk.Frame(right_panel, bg=_gh.BG, height=170)
+    hist_frame = tk.Frame(right_panel, bg=_gh.BG, height=140)
     hist_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(6, 0))
     hist_frame.pack_propagate(False)
     hist_canvases = {}
@@ -505,8 +505,10 @@ def open_window(parent=None, on_import_callback=None):
     # ── Gistogramma IZOHI — har gistogramma tepasida (faqat oynada, blankaga chiqmaydi) ──
     # Egasi talabi (2026-09-29): gistogrammadan laborantga foydali xulosa — nimaga
     # e'tibor berish kerak (surtma, qayta o'lchash). Mantiq: gemo_histogram.histogram_izoh
-    izoh_frame = tk.Frame(right_panel, height=165)
-    izoh_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(6, 0))
+    # Eng PASTDA (gistogrammalar ostida) — natijalar jadvali to'liq ko'rinsin (egasi talabi).
+    # Matn sig'masa sichqoncha g'ildiragi bilan aylantiriladi / oynani kattalashtirish mumkin.
+    izoh_frame = tk.Frame(right_panel, height=125)
+    izoh_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(3, 0), before=hist_frame)
     izoh_frame.pack_propagate(False)
     izoh_texts = {}
     for _k in _gh.HIST_ORDER:
