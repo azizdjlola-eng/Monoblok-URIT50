@@ -508,11 +508,6 @@ def parse_hl7_oru(message: str) -> dict:
                 if rf:
                     p.setdefault("histograms", {}).setdefault("WBC", {}).setdefault("flags", []).append(rf)
                     continue
-                # Boshqa analizator belgilari (Microcytes, PLT Abnormal Distribution,
-                # Plt rbc boundary blur ...) — gemotologiya oynasidagi gistogramma
-                # izohi uchun saqlanadi (gemo_histogram.histogram_izoh). Ilgari tashlanardi.
-                p.setdefault("is_flags", []).append({"code": code, "name": name})
-                continue
             key = normalize_param(code, name)
             if key is None:
                 if vtype in ("NM", "ST", "") and value:
