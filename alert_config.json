@@ -110,6 +110,23 @@
         "low_msg": "past — gipokalsiemiya yoki namuna xatosi, qayta tekshiring"
       },
       {
+        "key": "crp",
+        "match": [
+          "s-reaktiv",
+          "crp",
+          "crb",
+          "srb"
+        ],
+        "exclude": [
+          "revmoproba"
+        ],
+        "low": 2,
+        "low_inclusive": true,
+        "neg": true,
+        "low_level": "warn",
+        "low_msg": "juda past — namuna/reagentni tekshiring, kerak bo'lsa qayta o'lchang"
+      },
+      {
         "key": "kaliy",
         "match": [
           "kaliy"

@@ -66,6 +66,12 @@ DEFAULT_CONFIG = {
             {"key": "kalsiy",           "match": ["kalsiy"],                           "low": 1.8, "high": 2.7,  "zero": True,
              "high_level": "critical",
              "low_msg": "past — gipokalsiemiya yoki namuna xatosi, qayta tekshiring"},
+            # CRP 0–2 (2 ham) — egasi talabi (2026-09-29): analizator tez-tez 0 beradi,
+            # laborant namuna/reagentni tekshirsin. 'warn' — ko'k signal, importni to'smaydi.
+            {"key": "crp",              "match": ["s-reaktiv", "crp", "crb", "srb"],
+             "exclude": ["revmoproba"], "low": 2, "low_inclusive": True, "neg": True,
+             "low_level": "warn",
+             "low_msg": "juda past — namuna/reagentni tekshiring, kerak bo'lsa qayta o'lchang"},
             {"key": "kaliy",            "match": ["kaliy"],                            "low": 2.0, "high": 7.0,  "zero": True},
             {"key": "natriy",           "match": ["natriy"],                           "low": 110, "high": 170,  "zero": True},
             {"key": "magniy",           "match": ["magniy"],                           "low": 0.5, "high": 5.0,  "zero": True},
@@ -248,10 +254,12 @@ def check_biochemistry_detail(rows, cfg=None):
                 alerts.append({"level": "critical", "msg": f"{name} = {val:g} — manfiy (xato)"})
                 offending.add(name)
                 dirs[name] = "high"
-            elif low is not None and val < low:
+            elif low is not None and (val < low or (rule.get("low_inclusive") and val <= low)):
                 sabab = rule.get("low_msg") or "juda past, reagent/zardob shubhasi"
+                oraliq = (f"0–{low:g} oralig'ida" if rule.get("low_inclusive")
+                          else f"{low:g} dan past")
                 alerts.append({"level": rule.get("low_level", "critical"),
-                               "msg": f"{name} = {val:g} — {sabab} ({low:g} dan past)"})
+                               "msg": f"{name} = {val:g} — {sabab} ({oraliq})"})
                 offending.add(name)
                 dirs[name] = "low"
             elif high is not None and val > high:
