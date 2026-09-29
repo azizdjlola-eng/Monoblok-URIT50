@@ -519,7 +519,12 @@ def open_window(parent=None, on_import_callback=None):
 
     window = tk.Toplevel(parent)
     window.title("Bioximiya - BK-280 RAW Ma'lumotlar")
-    window.geometry("1600x800")
+    # Gemotologiya oynasi kabi — ekran ish maydoni markazida, katta
+    try:
+        from hematology_window import _center_on_work_area
+        _center_on_work_area(window, 1800, 900)
+    except Exception:
+        window.geometry("1600x800")
     load_db_names()
 
     # ── Closure state ─────────────────────────────────────────────────
@@ -589,11 +594,16 @@ def open_window(parent=None, on_import_callback=None):
     # Kritik natija — qizil fon
     rtree.tag_configure("critical",   background="#ffcccc", foreground="#a00000",
                                       font=("Arial", 9, "bold"))
+    # Signal chegarasidan PAST (masalan Ca < 1.8) — ko'k fon
+    rtree.tag_configure("crit_low",   background="#cce0ff", foreground="#0033aa",
+                                      font=("Arial", 9, "bold"))
     # Buyurtmadagi tahlil analizatordan hali kelmagan (kech o'lchanadi)
     rtree.tag_configure("pending",    foreground="#b36b00",
                                       font=("Arial", 9, "italic"))
     ptree.tag_configure("pending_patient", foreground="#b36b00")
-    ptree.tag_configure("crit_patient", background="#ffe0e0", foreground="#a00000")
+    # Gemotologiya oynasidagi kabi: ogohlantirishi bor bemor ro'yxatda rangli
+    ptree.tag_configure("crit_patient", background="#ffcccc", foreground="#a00000")
+    ptree.tag_configure("crit_patient_low", background="#cce0ff", foreground="#0033aa")
     # Ismi analizatorda emas, barkod orqali LIS bazasidan topilgan bemor
     ptree.tag_configure("name_from_db", foreground="#0055aa")
     _alerted_sids = set()   # allaqachon ovoz berilgan bemorlar (takror bermaslik)
@@ -688,7 +698,7 @@ def open_window(parent=None, on_import_callback=None):
         _jins, _yosh = _lookup_patient_jins_yosh(sid)
 
         # ── Kritik natija tekshiruvi (nom bo'yicha qizil qilinadigan qatorlar) ──
-        crit_names = set()
+        crit_names, crit_dirs = set(), {}
         if critical_alert is not None:
             try:
                 rows_for_check = []
@@ -696,9 +706,9 @@ def open_window(parent=None, on_import_callback=None):
                     lc = t.get('lis_code', k)
                     val = edits.get(lc, t.get('value', ''))
                     rows_for_check.append((t.get('name', ''), val))
-                _al, crit_names = critical_alert.check_biochemistry(rows_for_check)
+                _al, crit_names, crit_dirs = critical_alert.check_biochemistry_detail(rows_for_check)
             except Exception:
-                crit_names = set()
+                crit_names, crit_dirs = set(), {}
 
         for key in sorted(tests, key=lambda k: int(k) if str(k).isdigit() else 9999):
             t    = tests[key]
@@ -725,7 +735,7 @@ def open_window(parent=None, on_import_callback=None):
             if lab_norma:
                 ref = lab_norma
             if t.get('name', '') in crit_names:
-                row_tag = "critical"
+                row_tag = "crit_low" if crit_dirs.get(t.get('name', '')) == "low" else "critical"
             rtree.insert("", tk.END, values=(
                 lis_code, t.get('name', ''),
                 display_value, t.get('unit', ''),
@@ -978,8 +988,13 @@ def open_window(parent=None, on_import_callback=None):
     ).pack(side=tk.LEFT, padx=(0, 12))
 
     def _scan_criticals(play=True):
-        """Barcha yuklangan bemorlarni tekshirib, kritiklarni qizil belgilash;
-        yangi kritik bemor uchun ovoz + popup berish."""
+        """Barcha yuklangan bemorlarni tekshirib, ogohlantirishi borlarini belgilash
+        (baland/xato — qizil, faqat past — ko'k); yangi bemor uchun ovoz + popup.
+
+        2026-09-29 gacha faqat 'critical' daraja belgilanardi — 'warn' (masalan
+        Kreatinin 1010) ro'yxatda ko'rinmasdi va signal bermasdi. Egasi talabi:
+        gemotologiya kabi — chegaradan chiqqan HAR QANDAY natija signal beradi.
+        """
         if critical_alert is None:
             return
         new_crit = []
@@ -993,11 +1008,12 @@ def open_window(parent=None, on_import_callback=None):
                 continue
             rows = [(t.get('name', ''), t.get('value', '')) for t in pdata.get('tests', {}).values()]
             try:
-                alerts, _ = critical_alert.check_biochemistry(rows)
+                alerts, _names, dirs = critical_alert.check_biochemistry_detail(rows)
             except Exception:
-                alerts = []
-            if critical_alert.has_critical(alerts):
-                ptree.item(item, tags=("crit_patient",))
+                alerts, dirs = [], {}
+            if alerts:
+                faqat_past = dirs and all(d == "low" for d in dirs.values())
+                ptree.item(item, tags=("crit_patient_low" if faqat_past else "crit_patient",))
                 if sid not in _alerted_sids:
                     _alerted_sids.add(sid)
                     new_crit.append((pdata.get('name', sid), alerts))

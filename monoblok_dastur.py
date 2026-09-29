@@ -185,6 +185,16 @@ TEST_GROUPS = ['GEM', 'BIO', 'IFA', 'URINE', 'TEST', 'COAG']
 LIPID_PANEL_MEMBER_IDS = {43, 44, 123, 124}   # TC=43, TG=44, LDL=123, HDL=124
 BUYRAK_PANEL_MEMBER_IDS = {42, 41, 35, 50}    # Mochevina=42, Kreatinin=41, Albumin=35, Siydik kislota=50
 
+# Immunologik tahlillar guruhi (tahlillar.sample = 'IFA'): qidiruvdagi ustun,
+# asosiy oynadagi tugma va kuzatuv oynasi nomi. IXLA analizatori olinsa —
+# analizator_config.json ga  "immuno": {"label": "IXLA"}  yozish kifoya,
+# kodga tegish shart emas. Guruh kodi (IMMUNO_SAMPLE) bazadagi qiymat.
+try:
+    IMMUNO_LABEL = str((load_config().get("immuno") or {}).get("label") or "IFA").strip() or "IFA"
+except Exception:
+    IMMUNO_LABEL = "IFA"
+IMMUNO_SAMPLE = "IFA"
+
 GROUP_NAMES = {
     "GEM": "GEMOTOLOGIK TEKSHIRUVLAR",
     "BIO": "QONNING BIOKIMYOVIY TAHLILI",
@@ -3964,6 +3974,40 @@ def _parse_date_from_sample_id(sample_id) -> str:
     except Exception:
         pass
     return None
+
+
+def _kursor_tugmaga(widget):
+    """Sichqonchani XAVFSIZ tugmaga olib borish — critical_alert.kursor_tugmaga
+    bilan bir xil (ogohlantirish oynalarida "bizning foydamizga" standart)."""
+    try:
+        widget.update_idletasks()
+        import ctypes
+        ctypes.windll.user32.SetCursorPos(
+            int(widget.winfo_rootx() + widget.winfo_width() // 2),
+            int(widget.winfo_rooty() + widget.winfo_height() // 2))
+    except Exception:
+        pass
+
+
+def _center_window_on_work_area(window, want_w, want_h):
+    """Oynani ekranning ISH maydoni (vazifalar paneli chiqarilgan) markaziga
+    joylash — hematology_window._center_on_work_area bilan bir xil usul."""
+    left, top = 0, 0
+    right, bottom = window.winfo_screenwidth(), window.winfo_screenheight() - 40
+    try:
+        import ctypes
+        from ctypes import wintypes
+        r = wintypes.RECT()
+        if ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(r), 0):  # SPI_GETWORKAREA
+            left, top, right, bottom = r.left, r.top, r.right, r.bottom
+    except Exception:
+        pass
+    title_h, border = 32, 8
+    w = min(want_w, right - left - 2 * border)
+    h = min(want_h, bottom - top - title_h - border)
+    x = left + (right - left - w) // 2
+    y = top + max(0, (bottom - top - h - title_h) // 2)
+    window.geometry(f"{w}x{h}+{x}+{y}")
 
 
 def _fmt_tug_sana(val) -> str:
@@ -10822,7 +10866,19 @@ class MonoblokApp:
                 padx=12, pady=3, relief=tk.RAISED, bd=2, cursor="hand2"
             )
             urine_btn.pack(side=tk.RIGHT, padx=3)
-            
+
+            # 4. IFA (keyinchalik IXLA) — bugungi immunologik tahlillar kuzatuvi.
+            # Matni fonda yangilanadi: "IFA 5 · ⏳3"; filialdan yangi IFA kelsa
+            # to'q sariq rangda miltillaydi (_immuno_poll ga qarang).
+            self.immuno_btn = tk.Button(
+                top_bar, text=f"🔬 {IMMUNO_LABEL}",
+                command=self.open_immuno_window,
+                bg=self._IMMUNO_BG, fg="white", font=("Arial", 10, "bold"),
+                padx=12, pady=3, relief=tk.RAISED, bd=2, cursor="hand2"
+            )
+            self.immuno_btn.pack(side=tk.RIGHT, padx=(3, 12))
+            self.root.after(4000, self._immuno_poll)
+
             tk.Label(top_bar, text="Analizatorlar:", bg="#F0F0F0", font=("Arial", 9)).pack(side=tk.RIGHT, padx=5)
             
             # ===== ASOSIY QISM =====
@@ -11167,12 +11223,12 @@ class MonoblokApp:
         """Bemorlarni qidirish oynasini ochish"""
         search_win = tk.Toplevel(self.root)
         search_win.title("Bemorlarni Qidirish")
-        # Ekran o'lchamiga qarab moslash
+        # Gemotologiya oynasi kabi — ekranning ISH maydoni markazida, katta
         sw = search_win.winfo_screenwidth()
         sh = search_win.winfo_screenheight()
-        win_w = min(1520, sw - 40)
-        win_h = min(790, sh - 80)
-        search_win.geometry(f"{win_w}x{win_h}")
+        win_w = min(1800, sw - 60)
+        win_h = min(960, sh - 90)
+        _center_window_on_work_area(search_win, win_w, win_h)
         search_win.transient(self.root)
         search_win.minsize(900, 500)
 
@@ -11222,31 +11278,73 @@ class MonoblokApp:
                            padx=15, pady=5, relief=tk.RAISED, bd=2, cursor="hand2")
         qc_btn.grid(row=3, column=0, columnspan=2, pady=8, sticky=tk.W, padx=5)
 
+        # ── Sana / Tahlil / Filial bo'yicha qidiruv (buyurtmalar rejimi) ──
+        # Laborant ko'pincha bemorni emas, TAHLILNI eslaydi ("kecha kimdir
+        # TORCH topshirgan edi") — shu panel buyurtmalarni sana oralig'i,
+        # tahlil nomi, filial va natija holati bo'yicha ko'rsatadi.
+        self._build_order_filter_panel(search_frame)
+
         # Natijalar jadvali
-        results_frame = ttk.LabelFrame(search_win, text="Qidiruv Natijalari", padding="10")
+        results_frame = ttk.LabelFrame(search_win, text="Qidiruv Natijalari", padding="6")
         results_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
-        columns = ("ID", "F.I.SH", "Yosh", "Jins", "Telefon", "Tug'ilgan sana", "Buyurtma ID", "Sample ID")
-        self.search_results_tree = ttk.Treeview(
-            results_frame, columns=columns, show="headings", height=20)
+        # Qisqa hisobot qatori (bemorlar/tahlillar soni, chiqmaganlar)
+        self._search_summary_var = tk.StringVar(value="")
+        tk.Label(results_frame, textvariable=self._search_summary_var,
+                 font=("Arial", 10, "bold"), fg="#1A5276", anchor="w",
+                 justify=tk.LEFT).pack(fill=tk.X, pady=(0, 4))
 
-        col_widths = {"ID": 65, "F.I.SH": 280, "Yosh": 60, "Jins": 80,
-                      "Telefon": 140, "Tug'ilgan sana": 130, "Buyurtma ID": 110, "Sample ID": 160}
-        for col in columns:
-            self.search_results_tree.heading(col, text=col)
-            self.search_results_tree.column(col, width=col_widths.get(col, 100),
-                                            anchor=tk.CENTER if col in ("ID","Yosh","Jins","Buyurtma ID") else tk.W)
+        self._search_nb = ttk.Notebook(results_frame)
+        self._search_nb.pack(fill=tk.BOTH, expand=True)
+        tab_list = ttk.Frame(self._search_nb)
+        tab_stat = ttk.Frame(self._search_nb)
+        self._search_nb.add(tab_list, text="  👥 Bemorlar / buyurtmalar  ")
+        self._search_nb.add(tab_stat, text="  📊 Tahlillar statistikasi  ")
 
-        scrollbar_y = ttk.Scrollbar(results_frame, orient=tk.VERTICAL,
+        self.search_results_tree = ttk.Treeview(tab_list, show="headings", height=12)
+        self._search_row_meta = {}
+        self._search_set_columns("patient")
+
+        scrollbar_y = ttk.Scrollbar(tab_list, orient=tk.VERTICAL,
                                     command=self.search_results_tree.yview)
-        scrollbar_x = ttk.Scrollbar(results_frame, orient=tk.HORIZONTAL,
+        scrollbar_x = ttk.Scrollbar(tab_list, orient=tk.HORIZONTAL,
                                     command=self.search_results_tree.xview)
         self.search_results_tree.configure(yscrollcommand=scrollbar_y.set,
                                            xscrollcommand=scrollbar_x.set)
 
-        self.search_results_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar_y.pack(side=tk.RIGHT, fill=tk.Y)
         scrollbar_x.pack(side=tk.BOTTOM, fill=tk.X)
+        self.search_results_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self.search_results_tree.tag_configure('chiqmagan', background='#FDEDEC')
+        self.search_results_tree.tag_configure('chiqqan', background='#EAFAF1')
+        self.search_results_tree.tag_configure('filial', foreground='#8E44AD')
+
+        # Tanlangan buyurtmaning TO'LIQ tahlillar ro'yxati (ustunda qirqiladi)
+        self._search_detail_var = tk.StringVar(value="")
+        tk.Label(results_frame, textvariable=self._search_detail_var, anchor="w",
+                 justify=tk.LEFT, fg="#333333", wraplength=win_w - 80
+                 ).pack(fill=tk.X, pady=(4, 0))
+        self.search_results_tree.bind("<<TreeviewSelect>>", self._on_search_row_select)
+
+        # Tahlillar statistikasi jadvali
+        stat_cols = ("Tahlil nomi", "Jami", "Chiqqan", "Chiqmagan", "Filialdan")
+        self._search_stat_tree = ttk.Treeview(tab_stat, columns=stat_cols,
+                                              show="headings", height=12)
+        for col, w in zip(stat_cols, (420, 90, 90, 100, 100)):
+            self._search_stat_tree.heading(
+                col, text=col,
+                command=lambda c=col: self._search_tree_sort(self._search_stat_tree, c))
+            self._search_stat_tree.column(col, width=w,
+                                          anchor=tk.W if col == "Tahlil nomi" else tk.CENTER)
+        self._search_stat_tree.tag_configure('chiqmagan', background='#FDEDEC')
+        stat_sy = ttk.Scrollbar(tab_stat, orient=tk.VERTICAL,
+                                command=self._search_stat_tree.yview)
+        self._search_stat_tree.configure(yscrollcommand=stat_sy.set)
+        stat_sy.pack(side=tk.RIGHT, fill=tk.Y)
+        self._search_stat_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        # Tahlil ustiga 2x bosish → shu tahlilni topshirgan bemorlar ro'yxati
+        self._search_stat_tree.bind("<Double-1>", self._on_stat_tahlil_double_click)
 
         # Amallar qatori
         action_frame = ttk.Frame(search_win)
@@ -11268,7 +11366,8 @@ class MonoblokApp:
         # Yo'riqnoma
         ttk.Label(search_win,
                   text="💡 Bir marta bosish → tanlash  |  Ikki marta bosish → yuklash  |  "
-                       "📋 Tarixni ko'rish → barcha tashriflarni birga ko'rsatish",
+                       "📋 Tarixni ko'rish → barcha tashriflarni birga ko'rsatish  |  "
+                       "📊 Statistikada tahlilga 2x bosish → o'sha tahlil bemorlari",
                   foreground="gray").pack(pady=3)
 
         # Double-click event
@@ -11282,6 +11381,12 @@ class MonoblokApp:
             entry.bind("<Return>", lambda e: self.search_patients())
 
         self.search_ism_entry.focus()
+
+        # Filial va tahlil nomlari ro'yxatini fonda yuklab, darhol BUGUNGI
+        # buyurtmalarni ko'rsatamiz — oyna ochilishi bilan "bugun kim nima
+        # topshirdi, nimasi chiqmagan" ko'rinib tursin.
+        self._load_order_filter_choices()
+        self._set_order_date_range("bugun", run=True)
     
     def open_qc_window(self):
         """Sifat nazorati oynasini ochish"""
@@ -11297,10 +11402,20 @@ class MonoblokApp:
         self.search_tel_entry.delete(0, tk.END)
         self.search_dob_entry.delete(0, tk.END)
         self.search_jins_var.set("")
-        
+        if hasattr(self, "_of_tahlil_var"):
+            self._of_tahlil_var.set("")
+            self._of_filial_var.set("Hammasi")
+            self._of_holat_var.set("Hammasi")
+
         # Jadvalni tozalash
         for item in self.search_results_tree.get_children():
             self.search_results_tree.delete(item)
+        self._search_row_meta = {}
+        if hasattr(self, "_search_stat_tree"):
+            for item in self._search_stat_tree.get_children():
+                self._search_stat_tree.delete(item)
+        if hasattr(self, "_search_summary_var"):
+            self._search_summary_var.set("")
     
     def search_patients(self):
         """[OK] Bemorlarni qidirish - MySQL 8 bilan moslashtirilgan (fon oqimida — UI qotib qolmasligi uchun)"""
@@ -11463,9 +11578,16 @@ class MonoblokApp:
 
         results = outcome["results"]
 
-        # Jadvalni tozalash
-        for item in self.search_results_tree.get_children():
-            self.search_results_tree.delete(item)
+        # Jadvalni bemor rejimiga qaytarish (buyurtmalar rejimidan keyin ham)
+        self._search_set_columns("patient")
+        if hasattr(self, "_search_summary_var"):
+            self._search_summary_var.set(f"👥 Bemor qidiruvi: {len(results)} ta bemor"
+                                         + ("  (eng ko'pi 100 ta ko'rsatiladi)" if len(results) >= 100 else ""))
+        if hasattr(self, "_search_nb"):
+            try:
+                self._search_nb.select(0)
+            except Exception:
+                pass
 
         # Natijalarni ko'rsatish
         if not results:
@@ -11474,34 +11596,44 @@ class MonoblokApp:
             return
 
         for row in results:
-            self.search_results_tree.insert("", tk.END, values=(
-                row.get('id', ''),
+            iid = self.search_results_tree.insert("", tk.END, values=(
+                row.get('sample_id', '') or '',
                 row.get('fish', ''),
                 row.get('yosh', ''),
                 row.get('jins', ''),
                 row.get('telefon', ''),
                 _fmt_tug_sana(row.get('tugilgan_sana', '')),
-                row.get('order_id', ''),
-                row.get('sample_id', '')
             ))
+            self._search_row_meta[iid] = {'order_id': row.get('order_id'),
+                                          'sample_id': row.get('sample_id'),
+                                          'bemor_id': row.get('id'),
+                                          'fish': row.get('fish', '')}
 
         self.status_var.set(f"[OK] {len(results)} ta natija topildi")
-    
+
     def on_search_result_double_click(self, event):
         """Qidirish natijasida double-click qilganda buyurtmani yuklash"""
         selection = self.search_results_tree.selection()
         if not selection:
             return
-        
+
         item = self.search_results_tree.item(selection[0])
         values = item['values']
-        
+
         if not values:
             return
-        
-        # Sample ID yoki order_id bo'yicha qidirish
-        sample_id = values[7] if len(values) > 7 else None
-        order_id = values[6] if len(values) > 6 else None
+
+        # Sample ID yoki order_id bo'yicha qidirish.
+        # Asl qiymat meta dan olinadi: Treeview "00123" kabi sample_id ni
+        # songa aylantirib boshidagi nollarni yo'qotadi.
+        meta = getattr(self, "_search_row_meta", {}).get(selection[0])
+        if meta:
+            sample_id = meta.get('sample_id')
+            order_id = meta.get('order_id')
+        else:
+            cols = list(self.search_results_tree["columns"])
+            sample_id = values[cols.index("Sample ID")] if "Sample ID" in cols else None
+            order_id = values[cols.index("Buyurtma ID")] if "Buyurtma ID" in cols else None
         
         # Avval oyna yopiladi
         search_win = self.search_results_tree.winfo_toplevel()
@@ -11517,7 +11649,1160 @@ class MonoblokApp:
             self.barcode_entry.delete(0, tk.END)
             self.barcode_entry.insert(0, str(order_id))
             self.process_barcode(str(order_id))
-    
+
+    # ── QIDIRUV: SANA / TAHLIL / FILIAL / HOLAT BO'YICHA ─────────────────
+    # "Bemorlarni Qidirish" oynasining o'ng paneli. Bemor-qidiruvdan farqi:
+    # har bir BUYURTMA alohida qator (topshirgan vaqti, filiali, tahlillari,
+    # natija chiqqan-chiqmagani) + tahlillar bo'yicha statistika yorlig'i.
+    # Holat `results.status` dan olinadi (natija_tugallik.py qoidasi):
+    #   open/draft → chiqmagan,  ready/printed → chiqqan.
+    # Bemor ID / Buyurtma ID ko'rsatilmaydi (egasi talabi, 2026-09-29) — faqat
+    # 12 xonali shtrix-kod (Sample ID). Ichki ID lar `_search_row_meta` da.
+
+    _SEARCH_PATIENT_COLS = ("Sample ID", "F.I.SH", "Yosh", "Jins", "Telefon",
+                            "Tug'ilgan sana")
+    _SEARCH_ORDER_COLS = ("Sample ID", "Topshirgan", "F.I.SH", "Yosh", "Jins", "Filial",
+                          "Tahlillar", IMMUNO_LABEL, "Holat", "Chiqqan")
+
+    def _search_set_columns(self, mode):
+        """Qidiruv jadvali ustunlarini rejimga moslash ('patient' / 'order')."""
+        tree = self.search_results_tree
+        cols = self._SEARCH_ORDER_COLS if mode == "order" else self._SEARCH_PATIENT_COLS
+        if tuple(tree["columns"]) != cols:
+            tree.configure(columns=cols, displaycolumns=cols)
+        for item in tree.get_children():
+            tree.delete(item)
+        self._search_row_meta = {}
+        if getattr(self, "_search_detail_var", None) is not None:
+            self._search_detail_var.set("")
+        widths = {"F.I.SH": 250, "Yosh": 45, "Jins": 55, "Telefon": 130,
+                  "Tug'ilgan sana": 120, "Sample ID": 115,
+                  "Topshirgan": 120, "Filial": 125, "Tahlillar": 360,
+                  IMMUNO_LABEL: 230, "Holat": 150, "Chiqqan": 140}
+        center = ("Sample ID", "Yosh", "Jins", "Topshirgan")
+        for col in cols:
+            tree.heading(col, text=("🧪 " + col) if col == IMMUNO_LABEL else col,
+                         command=lambda c=col: self._search_tree_sort(tree, c))
+            tree.column(col, width=widths.get(col, 100), minwidth=40,
+                        stretch=(col in ("F.I.SH", "Tahlillar", IMMUNO_LABEL)),
+                        anchor=tk.CENTER if col in center else tk.W)
+
+    def _search_tree_sort(self, tree, col):
+        """Ustun sarlavhasini bosganda saralash (qayta bosilsa teskari)."""
+        state = getattr(self, "_search_sort_state", {})
+        key = (str(tree), col)
+        reverse = not state.get(key, False)
+        state[key] = reverse
+        self._search_sort_state = state
+
+        def _k(v):
+            s = str(v).strip()
+            try:
+                return (0, float(s.replace(" ", "")), "")
+            except ValueError:
+                pass
+            m = re.match(r"(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2})", s)
+            if m:  # DD.MM.YYYY HH:MM → xronologik
+                d, mo, y, h, mi = m.groups()
+                return (1, 0, f"{y}{mo}{d}{h}{mi}")
+            return (2, 0, s.lower())
+
+        rows = [(_k(tree.set(i, col)), i) for i in tree.get_children("")]
+        rows.sort(reverse=reverse)
+        for idx, (_, i) in enumerate(rows):
+            tree.move(i, "", idx)
+
+    def _build_order_filter_panel(self, parent):
+        box = ttk.LabelFrame(parent, text=" 📅 Sana / Tahlil / Filial bo'yicha ", padding=8)
+        box.grid(row=0, column=4, rowspan=4, sticky="nsew", padx=(25, 5), pady=2)
+
+        today = datetime.now().strftime("%d.%m.%Y")
+        self._of_dan_var = tk.StringVar(value=today)
+        self._of_gacha_var = tk.StringVar(value=today)
+        self._of_tahlil_var = tk.StringVar(value="")
+        self._of_filial_var = tk.StringVar(value="Hammasi")
+        self._of_holat_var = tk.StringVar(value="Hammasi")
+        self._of_filial_map = {"Hammasi": None}
+        self._of_tahlil_all = []
+
+        # 0: sana oralig'i
+        ttk.Label(box, text="Sana:").grid(row=0, column=0, sticky=tk.W, padx=3, pady=3)
+        dfr = ttk.Frame(box)
+        dfr.grid(row=0, column=1, columnspan=3, sticky=tk.W)
+        ttk.Button(dfr, text="◀", width=3,
+                   command=lambda: self._shift_order_dates(-1)).pack(side=tk.LEFT)
+        e_dan = ttk.Entry(dfr, textvariable=self._of_dan_var, width=12, justify=tk.CENTER)
+        e_dan.pack(side=tk.LEFT, padx=2)
+        ttk.Label(dfr, text="—").pack(side=tk.LEFT, padx=2)
+        e_gacha = ttk.Entry(dfr, textvariable=self._of_gacha_var, width=12, justify=tk.CENTER)
+        e_gacha.pack(side=tk.LEFT, padx=2)
+        ttk.Button(dfr, text="▶", width=3,
+                   command=lambda: self._shift_order_dates(1)).pack(side=tk.LEFT)
+        ttk.Label(dfr, text="(KK.OO.YYYY)", foreground="gray").pack(side=tk.LEFT, padx=6)
+
+        # 1: tezkor sana tugmalari
+        qfr = ttk.Frame(box)
+        qfr.grid(row=1, column=1, columnspan=3, sticky=tk.W, pady=(0, 4))
+        for label, kind in (("Bugun", "bugun"), ("Kecha", "kecha"), ("3 kun", "3"),
+                            ("7 kun", "7"), ("Shu oy", "oy"), ("30 kun", "30")):
+            ttk.Button(qfr, text=label, width=7,
+                       command=lambda k=kind: self._set_order_date_range(k, run=True)
+                       ).pack(side=tk.LEFT, padx=1)
+
+        # 2: tahlil nomi (yozib filtrlash mumkin)
+        ttk.Label(box, text="Tahlil:").grid(row=2, column=0, sticky=tk.W, padx=3, pady=3)
+        self._of_tahlil_combo = ttk.Combobox(box, textvariable=self._of_tahlil_var, width=46)
+        self._of_tahlil_combo.grid(row=2, column=1, columnspan=3, sticky=tk.W, padx=3)
+        self._of_tahlil_combo.bind("<KeyRelease>", self._on_of_tahlil_key)
+        self._of_tahlil_combo.bind("<<ComboboxSelected>>", lambda e: self.search_orders())
+
+        # 3: filial + holat
+        ttk.Label(box, text="Filial:").grid(row=3, column=0, sticky=tk.W, padx=3, pady=3)
+        self._of_filial_combo = ttk.Combobox(box, textvariable=self._of_filial_var,
+                                             width=20, state="readonly", values=["Hammasi"])
+        self._of_filial_combo.grid(row=3, column=1, sticky=tk.W, padx=3)
+        self._of_filial_combo.bind("<<ComboboxSelected>>", lambda e: self.search_orders())
+        ttk.Label(box, text="Natija:").grid(row=3, column=2, sticky=tk.E, padx=3)
+        holat_combo = ttk.Combobox(box, textvariable=self._of_holat_var, width=12,
+                                   state="readonly", values=["Hammasi", "Chiqmagan", "Chiqqan"])
+        holat_combo.grid(row=3, column=3, sticky=tk.W, padx=3)
+        holat_combo.bind("<<ComboboxSelected>>", lambda e: self.search_orders())
+
+        # 4: ko'rsatish tugmasi
+        self._of_btn = tk.Button(box, text="📋 Buyurtmalarni ko'rsatish",
+                                 command=self.search_orders, bg="#1E8449", fg="white",
+                                 font=("Arial", 10, "bold"), padx=10, pady=3,
+                                 relief=tk.RAISED, bd=2, cursor="hand2")
+        self._of_btn.grid(row=4, column=1, columnspan=3, sticky=tk.W, padx=3, pady=(6, 0))
+        ttk.Label(box, text="Ism/Telefon/Jins maydonlari ham hisobga olinadi",
+                  foreground="gray").grid(row=5, column=1, columnspan=3, sticky=tk.W, padx=3)
+
+        for w in (e_dan, e_gacha, self._of_tahlil_combo):
+            w.bind("<Return>", lambda e: self.search_orders())
+
+    @staticmethod
+    def _parse_ui_date(s):
+        """'29.09.2026', '29.09.26', '29.09', '2026-09-29' → datetime.date (yoki None)."""
+        from datetime import date
+        s = (s or "").strip().replace("/", ".").replace(",", ".")
+        if not s:
+            return None
+        try:
+            if re.fullmatch(r"\d{4}-\d{1,2}-\d{1,2}", s):
+                y, mo, d = map(int, s.split("-"))
+                return date(y, mo, d)
+            parts = [p for p in s.split(".") if p]
+            if len(parts) == 2:
+                d, mo = map(int, parts)
+                return date(datetime.now().year, mo, d)
+            if len(parts) == 3:
+                d, mo, y = map(int, parts)
+                if y < 100:
+                    y += 2000
+                return date(y, mo, d)
+        except ValueError:
+            return None
+        return None
+
+    def _set_order_date_range(self, kind, run=False):
+        from datetime import timedelta
+        bugun = datetime.now().date()
+        if kind == "bugun":
+            dan = gacha = bugun
+        elif kind == "kecha":
+            dan = gacha = bugun - timedelta(days=1)
+        elif kind == "oy":
+            dan, gacha = bugun.replace(day=1), bugun
+        else:
+            dan, gacha = bugun - timedelta(days=int(kind) - 1), bugun
+        self._of_dan_var.set(dan.strftime("%d.%m.%Y"))
+        self._of_gacha_var.set(gacha.strftime("%d.%m.%Y"))
+        if run:
+            self.search_orders()
+
+    def _shift_order_dates(self, days):
+        """◀ / ▶ — oraliqni o'z uzunligiga siljitish (1 kun bo'lsa kunma-kun)."""
+        from datetime import timedelta
+        dan = self._parse_ui_date(self._of_dan_var.get())
+        gacha = self._parse_ui_date(self._of_gacha_var.get()) or dan
+        if not dan:
+            dan = gacha = datetime.now().date()
+        uzun = (gacha - dan).days + 1
+        step = timedelta(days=uzun * days)
+        self._of_dan_var.set((dan + step).strftime("%d.%m.%Y"))
+        self._of_gacha_var.set((gacha + step).strftime("%d.%m.%Y"))
+        self.search_orders()
+
+    def _load_order_filter_choices(self):
+        """Filiallar va tahlil nomlarini fonda yuklash (oyna qotmasin)."""
+        def worker():
+            filiallar, nomlar = [], []
+            try:
+                conn = db_conn()
+                if conn:
+                    with _db_query_lock:
+                        cur = conn.cursor()
+                        try:
+                            cur.execute("SELECT id, nomi FROM kipiy_filiallar ORDER BY id")
+                            filiallar = [(int(r[0]), str(r[1] or f"Filial {r[0]}"))
+                                         for r in cur.fetchall()]
+                            cur.execute("SELECT nomi, soha FROM tahlillar ORDER BY nomi")
+                            try:
+                                from natija_tugallik import LAB_BO_LMAGAN_SOHALAR as _nolab
+                            except Exception:
+                                _nolab = ("uzi", "ambulator", "muolaja", "statsionar", "korik")
+                            nomlar = [str(r[0]).strip() for r in cur.fetchall()
+                                      if r[0] and str(r[1] or "lab").strip().lower() not in _nolab]
+                        finally:
+                            cur.close()
+            except Exception as e:
+                print(f"[OGOHLANTIRISH] Filtr ro'yxatlari yuklanmadi: {e}")
+
+            def apply():
+                try:
+                    if not self._of_filial_combo.winfo_exists():
+                        return
+                except Exception:
+                    return
+                self._of_filial_map = {"Hammasi": None}
+                for fid, nomi in filiallar:
+                    self._of_filial_map[nomi] = fid
+                self._of_filial_combo["values"] = list(self._of_filial_map.keys())
+                self._of_tahlil_all = sorted(set(nomlar), key=str.lower)
+                self._of_tahlil_combo["values"] = self._of_tahlil_all
+            self.root.after(0, apply)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    @staticmethod
+    def _norm_tahlil_nomi(s):
+        s = str(s or "")
+        for ch in ("’", "‘", "ʻ", "ʼ", "`", "´"):
+            s = s.replace(ch, "'")
+        return re.sub(r"\s+", " ", s).strip().lower()
+
+    def _on_of_tahlil_key(self, event):
+        if event.keysym in ("Return", "Up", "Down", "Escape", "Tab"):
+            return
+        q = self._norm_tahlil_nomi(self._of_tahlil_var.get())
+        allv = getattr(self, "_of_tahlil_all", [])
+        self._of_tahlil_combo["values"] = (
+            [n for n in allv if q in self._norm_tahlil_nomi(n)] if q else allv)
+
+    def search_orders(self):
+        """Sana oralig'i + tahlil + filial + holat bo'yicha buyurtmalar (fon oqimida)."""
+        dan = self._parse_ui_date(self._of_dan_var.get())
+        gacha = self._parse_ui_date(self._of_gacha_var.get()) or dan
+        if not dan:
+            messagebox.showwarning("Diqqat", "Sanani KK.OO.YYYY ko'rinishida kiriting\n"
+                                   "(masalan 29.09.2026)", parent=getattr(self, "_search_win", None))
+            return
+        if gacha < dan:
+            dan, gacha = gacha, dan
+        self._of_dan_var.set(dan.strftime("%d.%m.%Y"))
+        self._of_gacha_var.set(gacha.strftime("%d.%m.%Y"))
+
+        if getattr(self, "_search_in_progress", False):
+            return
+        self._search_in_progress = True
+        for b in (getattr(self, "_of_btn", None), getattr(self, "_search_btn", None)):
+            try:
+                if b is not None:
+                    b.config(state="disabled")
+            except Exception:
+                pass
+        self.status_var.set("🔎 Buyurtmalar qidirilmoqda...")
+
+        params = {
+            "dan": dan, "gacha": gacha,
+            "tahlil": self._norm_tahlil_nomi(self._of_tahlil_var.get()),
+            "filial_id": self._of_filial_map.get(self._of_filial_var.get()),
+            "holat": self._of_holat_var.get(),
+            "ism": self.search_ism_entry.get().strip(),
+            "fam": self.search_fam_entry.get().strip(),
+            "tel": self.search_tel_entry.get().strip(),
+            "jins": self.search_jins_var.get().strip(),
+        }
+
+        def worker():
+            outcome = {"ok": False, "message": "", "params": params}
+            try:
+                conn = db_conn()
+                if not conn:
+                    outcome["message"] = "MySQL serverga ulana olmadi!"
+                else:
+                    with _db_query_lock:
+                        outcome.update(self._query_orders(conn, params))
+                        outcome["ok"] = True
+            except Exception as e:
+                outcome["message"] = f"Qidirishda xato: {e}"
+                import traceback
+                traceback.print_exc()
+            self.root.after(0, lambda: self._apply_order_results(outcome))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _query_orders(self, conn, p):
+        """Buyurtmalar + tahlillar + bajarilganlik (DB qulfi ichida chaqiriladi).
+
+        p["guruh"] berilsa (masalan IMMUNO_SAMPLE='IFA') — faqat o'sha guruh
+        (tahlillar.sample) tahlillari bor buyurtmalar va faqat ular hisoblanadi.
+        Har bir tahlil: (nomi, bajarildi, guruh).
+        """
+        from datetime import timedelta
+        try:
+            from natija_tugallik import LAB_BO_LMAGAN_SOHALAR as nolab, panel_azolari
+        except Exception:
+            nolab = ("uzi", "ambulator", "muolaja", "statsionar", "korik")
+            panel_azolari = lambda nom: set()
+        norm = self._norm_tahlil_nomi
+
+        cur = conn.cursor(dictionary=True)
+        try:
+            sql = """
+                SELECT o.id AS order_id, o.sana_vaqt, o.sample_id, o.filial_id,
+                       o.bemor_id, b.fish, b.yosh, b.jins,
+                       f.nomi AS filial_nomi,
+                       (SELECT MAX(CASE r.status WHEN 'printed' THEN 4 WHEN 'ready' THEN 3
+                                                 WHEN 'draft' THEN 2 ELSE 1 END)
+                          FROM results r WHERE r.order_id = o.id) AS holat_k,
+                       (SELECT MAX(r.updated_at) FROM results r
+                         WHERE r.order_id = o.id AND r.status IN ('ready','printed')) AS chiqqan_vaqt,
+                       (SELECT MAX(r.updated_at) FROM results r
+                         WHERE r.order_id = o.id) AS oxirgi_saqlash
+                FROM orders o
+                JOIN bemorlar b ON b.id = o.bemor_id
+                LEFT JOIN kipiy_filiallar f ON f.id = o.filial_id
+                WHERE o.sana_vaqt >= %s AND o.sana_vaqt < %s
+                  AND o.deleted_at IS NULL
+                  AND (o.status IS NULL OR o.status <> 'cancelled')
+            """
+            args = [p["dan"].strftime("%Y-%m-%d 00:00:00"),
+                    (p["gacha"] + timedelta(days=1)).strftime("%Y-%m-%d 00:00:00")]
+            for word in (p.get("ism"), p.get("fam")):
+                if word:
+                    sql += " AND b.fish LIKE %s"
+                    args.append(f"%{word}%")
+            if p.get("tel"):
+                sql += " AND b.telefon LIKE %s"
+                args.append(f"%{p['tel']}%")
+            if p.get("jins"):
+                sql += " AND b.jins = %s"
+                args.append(p["jins"])
+            if p.get("guruh"):
+                sql += """ AND EXISTS (SELECT 1 FROM order_items gi
+                                       JOIN tahlillar gt ON gt.id = gi.tahlil_id
+                                       WHERE gi.order_id = o.id AND gt.sample = %s)"""
+                args.append(p["guruh"])
+            fid = p.get("filial_id")
+            if fid is not None:
+                # filial_id NULL — ustun qo'shilishidan oldingi eski yozuvlar,
+                # ular asosiy laboratoriyaniki (filial_belgi.boshqa_filial bilan bir xil)
+                if int(fid) == 1:
+                    sql += " AND (o.filial_id = 1 OR o.filial_id IS NULL)"
+                else:
+                    sql += " AND o.filial_id = %s"
+                    args.append(int(fid))
+            sql += " ORDER BY o.sana_vaqt DESC, o.id DESC LIMIT 3000"
+            cur.execute(sql, tuple(args))
+            orders = cur.fetchall()
+
+            ids = [int(o["order_id"]) for o in orders]
+            items, done, vaqt = {}, {}, {}
+            for i in range(0, len(ids), 500):
+                chunk = ids[i:i + 500]
+                ph = ",".join(["%s"] * len(chunk))
+                cur.execute(f"""
+                    SELECT oi.order_id, oi.nomi, oi.tahlil_id,
+                           COALESCE(t.soha, oi.soha) AS soha, COALESCE(t.sample, '') AS guruh
+                    FROM order_items oi LEFT JOIN tahlillar t ON t.id = oi.tahlil_id
+                    WHERE oi.order_id IN ({ph}) ORDER BY oi.id
+                """, tuple(chunk))
+                for r in cur.fetchall():
+                    if not r["nomi"] or str(r["soha"] or "").strip().lower() in nolab:
+                        continue
+                    items.setdefault(int(r["order_id"]), []).append(
+                        (str(r["nomi"]).strip(), r["tahlil_id"], str(r["guruh"] or "").upper()))
+                cur.execute(f"""
+                    SELECT order_id, test_name, updated_at FROM test_results
+                    WHERE order_id IN ({ph}) AND result_data IS NOT NULL
+                      AND TRIM(result_data) <> ''
+                """, tuple(str(x) for x in chunk))
+                for r in cur.fetchall():
+                    try:
+                        _oid = int(r["order_id"])
+                    except (TypeError, ValueError):
+                        continue
+                    done.setdefault(_oid, set()).add(norm(r["test_name"]))
+                    if r.get("updated_at"):
+                        vaqt.setdefault(_oid, {})[norm(r["test_name"])] = r["updated_at"]
+                cur.execute(f"""
+                    SELECT r.order_id, ri.tahlil_nomi FROM result_items ri
+                    JOIN results r ON r.id = ri.result_id
+                    WHERE r.order_id IN ({ph}) AND ri.qiymat IS NOT NULL
+                      AND TRIM(ri.qiymat) <> ''
+                """, tuple(chunk))
+                for r in cur.fetchall():
+                    done.setdefault(int(r["order_id"]), set()).add(norm(r["tahlil_nomi"]))
+        finally:
+            cur.close()
+
+        q = p.get("tahlil") or ""
+        guruh = (p.get("guruh") or "").upper()
+        rows, stats = [], {}
+        for o in orders:
+            oid = int(o["order_id"])
+            raw = items.get(oid, [])
+            if not raw:
+                continue                    # faqat UZI/vrach qabuli — laboratoriyaga emas
+            dset = done.get(oid, set())
+            # Panel (BUYRAK PANELI / LIPID SPEKTRI) bo'lsa, uning a'zolari alohida
+            # qator bo'lib ham turadi — asosiy oynadagidek ko'rsatilmaydi; panel
+            # saqlangan bo'lsa ular ham bajarilgan (natija_tugallik bilan bir xil).
+            azolar = set()
+            for nomi, _tid, _g in raw:
+                azolar |= panel_azolari(nomi)
+            tests_raw = [(n, tid, g) for n, tid, g in raw
+                         if not (tid is not None and int(tid) in azolar)]
+            holat_k = int(o["holat_k"] or 1)
+            test_done = [(n, holat_k >= 3 or norm(n) in dset, g) for n, tid, g in tests_raw]
+            # results.status eskirgan bo'lishi mumkin (panel xatosi, 2026-09-29 gacha) —
+            # hamma tahlil haqiqatan saqlangan bo'lsa, buyurtma chiqqan hisoblanadi
+            chiqqan_order = holat_k >= 3 or all(d for _, d, _ in test_done)
+            match = test_done
+            if guruh:
+                match = [td for td in match if td[2] == guruh]
+            if q:
+                match = [td for td in match if q in norm(td[0])]
+            if not match:
+                continue
+            # Tahlil/guruh tanlangan bo'lsa holat — AYNAN o'sha tahlillarniki
+            chiqqan = all(d for _, d, _ in match) if (q or guruh) else chiqqan_order
+            if p.get("holat") == "Chiqmagan" and chiqqan:
+                continue
+            if p.get("holat") == "Chiqqan" and not chiqqan:
+                continue
+            o["tests"] = test_done
+            o["qolgan"] = sum(1 for _, d, _ in test_done if not d)
+            o["chiqqan"] = chiqqan
+            o["chiqqan_order"] = chiqqan_order
+            # Tanlangan tahlillar oxirgi saqlangan vaqti (test_results.updated_at)
+            _tv = [vaqt.get(oid, {}).get(norm(n)) for n, d, _g in match if d]
+            _tv = [v for v in _tv if v]
+            o["match_vaqt"] = max(_tv) if (_tv and chiqqan) else None
+            rows.append(o)
+            boshqa = o["filial_id"] is not None and int(o["filial_id"]) != 1
+            for t, d, _g in match:
+                s = stats.setdefault(norm(t), {"nomi": t, "jami": 0, "chiqqan": 0, "filial": 0})
+                s["jami"] += 1
+                s["chiqqan"] += 1 if d else 0
+                s["filial"] += 1 if boshqa else 0
+        return {"rows": rows, "stats": list(stats.values()), "truncated": len(orders) >= 3000}
+
+    def _apply_order_results(self, outcome):
+        self._search_in_progress = False
+        for b in (getattr(self, "_of_btn", None), getattr(self, "_search_btn", None)):
+            try:
+                if b is not None and b.winfo_exists():
+                    b.config(state="normal")
+            except Exception:
+                pass
+        try:
+            if not self.search_results_tree.winfo_exists():
+                return
+        except Exception:
+            return
+        if not outcome["ok"]:
+            self.status_var.set("[OGOHLANTIRISH] Qidirishda xato")
+            messagebox.showerror("Xatolik", outcome["message"], parent=self._search_win)
+            return
+
+        p = outcome["params"]
+        rows, stats = outcome["rows"], outcome["stats"]
+        tree = self.search_results_tree
+        self._search_set_columns("order")
+
+        filial_soni = {}
+        for o in rows:
+            f = self._fmt_order_row(o, focus=bool(p.get("tahlil")))
+            filial_soni[f["filial"]] = filial_soni.get(f["filial"], 0) + 1
+            tags = ["chiqqan" if o["chiqqan"] else "chiqmagan"]
+            if o["filial_id"] is not None and int(o["filial_id"]) != 1:
+                tags.append("filial")
+            iid = tree.insert("", tk.END, tags=tags, values=(
+                o.get("sample_id") or "", f["topshirgan"], o.get("fish") or "",
+                o.get("yosh") or "", o.get("jins") or "", f["filial"],
+                f["tahlillar"], f["immuno"], f["holat"], f["chiqqan"]))
+            self._search_row_meta[iid] = {"order_id": o["order_id"],
+                                          "sample_id": o.get("sample_id"),
+                                          "bemor_id": o["bemor_id"],
+                                          "fish": o.get("fish") or "",
+                                          "tests": o["tests"]}
+
+        # Statistika yorlig'i
+        st = self._search_stat_tree
+        for item in st.get_children():
+            st.delete(item)
+        stats.sort(key=lambda s: (-s["jami"], s["nomi"].lower()))
+        for s in stats:
+            chiqmagan = s["jami"] - s["chiqqan"]
+            st.insert("", tk.END, tags=("chiqmagan",) if chiqmagan else (),
+                      values=(s["nomi"], s["jami"], s["chiqqan"], chiqmagan, s["filial"] or ""))
+
+        # Qisqa hisobot
+        sana = p["dan"].strftime("%d.%m.%Y") if p["dan"] == p["gacha"] else \
+            f"{p['dan'].strftime('%d.%m.%Y')} — {p['gacha'].strftime('%d.%m.%Y')}"
+        bemorlar = len({o["bemor_id"] for o in rows})
+        tahlillar = sum(s["jami"] for s in stats)
+        chiqmagan_b = sum(1 for o in rows if not o["chiqqan"])
+        imm = [d for o in rows for _n, d, g in o["tests"] if g == IMMUNO_SAMPLE]
+        parts = [f"📅 {sana}", f"👥 Bemorlar: {bemorlar}", f"🧾 Buyurtmalar: {len(rows)}",
+                 f"🧪 Tahlillar: {tahlillar}", f"⏳ Chiqmagan: {chiqmagan_b}"]
+        if imm:
+            parts.append(f"🔬 {IMMUNO_LABEL}: {len(imm)} ta (⏳ {sum(1 for d in imm if not d)})")
+        if len(filial_soni) > 1 or any(k != "Asosiy laboratoriya" for k in filial_soni):
+            parts.append("🏥 " + ", ".join(f"{k}: {v}" for k, v in
+                                          sorted(filial_soni.items(), key=lambda x: -x[1])))
+        if p["tahlil"]:
+            parts.append(f"🔎 «{self._of_tahlil_var.get().strip()}»")
+        if outcome.get("truncated"):
+            parts.append("⚠ oraliq juda katta — oxirgi 3000 ta buyurtma")
+        self._search_summary_var.set("   |   ".join(parts))
+        self.status_var.set(f"[OK] {len(rows)} ta buyurtma, {bemorlar} ta bemor")
+
+    @staticmethod
+    def _immuno_qisqa_nom(nomi):
+        """'Gepatit B (HBsAg, IFA ИФА)' → 'Gepatit B (HBsAg)' — ustunga sig'sin."""
+        s = re.sub(r"\b(IFA|ИФА|ELISA)\b", "", str(nomi or ""), flags=re.IGNORECASE)
+        s = re.sub(r"[\s,]+\)", ")", s)
+        s = re.sub(r"\(\s*\)", "", s)
+        return re.sub(r"\s{2,}", " ", s).strip(" ,")
+
+    def _fmt_order_row(self, o, focus=False):
+        """Buyurtma qatori uchun ko'rinadigan matnlar (qidiruv va IFA oynasi uchun umumiy).
+
+        focus=True — tahlil/guruh bo'yicha filtr: holat o'sha tahlillarniki.
+        """
+        def fmt(dt, fmt_s="%d.%m.%Y %H:%M"):
+            return dt.strftime(fmt_s) if hasattr(dt, "strftime") else (str(dt) if dt else "")
+
+        holat_nomi = {4: "✅ Chop etilgan", 3: "✅ Chiqqan", 2: "⏳ Qisman", 1: "⏳ Kutilmoqda"}
+        holat_k = int(o.get("holat_k") or 1)
+        tests = o.get("tests") or []
+        if o.get("chiqqan_order"):
+            holat = holat_nomi.get(holat_k) if holat_k >= 3 else "✅ Chiqqan"
+        else:
+            holat = holat_nomi.get(holat_k, "")
+            if o.get("qolgan"):
+                holat += f" ({o['qolgan']}/{len(tests)} qoldi)"
+            if focus:
+                holat = "✅ Tanlangan chiqqan" if o.get("chiqqan") else "⏳ Tanlangan chiqmagan"
+
+        chiqqan_txt = ""
+        cv = (o.get("chiqqan_vaqt") or o.get("oxirgi_saqlash")) if o.get("chiqqan_order") else None
+        sv = o.get("sana_vaqt")
+        if cv:
+            same = hasattr(sv, "date") and hasattr(cv, "date") and cv.date() == sv.date()
+            chiqqan_txt = fmt(cv, "%H:%M") if same else fmt(cv, "%d.%m %H:%M")
+            try:
+                daq = int((cv - sv).total_seconds() // 60)
+                if daq >= 0:
+                    chiqqan_txt += (f"  ({daq // 60} s {daq % 60} daq)" if daq >= 60
+                                    else f"  ({daq} daq)")
+            except Exception:
+                pass
+
+        fid = o.get("filial_id")
+        filial = o.get("filial_nomi") or ("Asosiy laboratoriya" if fid in (None, 1) else f"Filial {fid}")
+        oddiy = [(n, d) for n, d, g in tests if g != IMMUNO_SAMPLE]
+        immuno = [(n, d) for n, d, g in tests if g == IMMUNO_SAMPLE]
+        return {
+            "topshirgan": fmt(sv),
+            "filial": filial,
+            "tahlillar": ", ".join(n if d else f"{n} ⏳" for n, d in oddiy),
+            "immuno": ", ".join(("✅ " if d else "⏳ ") + self._immuno_qisqa_nom(n)
+                                for n, d in immuno),
+            "holat": holat,
+            "chiqqan": chiqqan_txt,
+        }
+
+    def _on_search_row_select(self, event=None):
+        """Tanlangan buyurtma tahlillarini holati bilan to'liq ko'rsatish."""
+        var = getattr(self, "_search_detail_var", None)
+        if var is None:
+            return
+        sel = self.search_results_tree.selection()
+        meta = self._search_row_meta.get(sel[0]) if sel else None
+        if not meta or not meta.get("tests"):
+            var.set("")
+            return
+        tayyor = [t for t, d, _g in meta["tests"] if d]
+        qolgan = [t for t, d, _g in meta["tests"] if not d]
+        txt = f"🧾 {meta['fish']}:  "
+        if qolgan:
+            txt += "⏳ Chiqmagan: " + ", ".join(qolgan)
+        if tayyor:
+            txt += ("   |   " if qolgan else "") + "✅ Chiqqan: " + ", ".join(tayyor)
+        var.set(txt)
+
+    def _on_stat_tahlil_double_click(self, event):
+        """Statistikadagi tahlilga 2x bosish → shu tahlil bo'yicha buyurtmalar."""
+        sel = self._search_stat_tree.selection()
+        if not sel:
+            return
+        nomi = self._search_stat_tree.set(sel[0], "Tahlil nomi")
+        if not nomi:
+            return
+        self._of_tahlil_var.set(nomi)
+        try:
+            self._search_nb.select(0)
+        except Exception:
+            pass
+        self.search_orders()
+
+    # ── IFA (IMMUNOLOGIK) TAHLILLAR KUZATUVI ──────────────────────────────
+    # IFA uzoq davom etadi, bosqichlari ko'p va PARTIYA-PARTIYA qo'yiladi —
+    # shuning uchun egasi uni ALOHIDA kuzatmoqchi (2026-09-29):
+    #   • o'ng panelda FAQAT kutilayotgan (chiqmagan) IFA — nomi bo'yicha soni,
+    #     filial/markaz bo'yicha ajratilgan: "bir qarashda nechta Vitamin D bor";
+    #   • markaz yoki filialdan YANGI IFA olinsa — oyna BIR MARTA o'zi ochiladi,
+    #     tepada ogohlantirish chiqadi, yangi qatorlar sariq bo'ladi.
+    # Guruh = tahlillar.sample = IMMUNO_SAMPLE; nom = IMMUNO_LABEL (config).
+
+    _IMMUNO_BG = "#6A1B9A"
+    _IMMUNO_ALERT_BG = "#E65100"
+    _IMMUNO_POLL_MS = 60_000
+    _IMMUNO_NEW_HIGHLIGHT_S = 30 * 60      # yangi qator shuncha vaqt sariq turadi
+
+    def _immuno_fetch_today(self):
+        """Bugungi IFA buyurtmalari (fon oqimida chaqiriladi). Xato bo'lsa None."""
+        today = datetime.now().date()
+        try:
+            conn = db_conn()
+            if not conn:
+                return None
+            with _db_query_lock:
+                return self._query_orders(conn, {"dan": today, "gacha": today,
+                                                 "guruh": IMMUNO_SAMPLE})
+        except Exception as e:
+            print(f"[OGOHLANTIRISH] {IMMUNO_LABEL} kuzatuvi: {e}")
+            return None
+
+    @staticmethod
+    def _immuno_is_filial(o):
+        return o.get("filial_id") is not None and int(o["filial_id"]) != 1
+
+    def _immuno_filial_qisqa(self, o):
+        """'Asosiy laboratoriya' → 'Markaz', filial — o'z nomi (ustun tor bo'lsin)."""
+        if not self._immuno_is_filial(o):
+            return "Markaz"
+        return o.get("filial_nomi") or f"Filial {o.get('filial_id')}"
+
+    def _immuno_keys(self, o):
+        """Buyurtmadagi har bir IFA tahlilining kaliti: (order_id, nom). Tahlil
+        mavjud buyurtmaga KEYIN qo'shilsa ham 'yangi' deb aniqlanadi."""
+        norm = self._norm_tahlil_nomi
+        return [((int(o["order_id"]), norm(n)), n, d)
+                for n, d, g in o["tests"] if g == IMMUNO_SAMPLE]
+
+    def _immuno_poll(self):
+        """Har daqiqada: tugma matnini yangilash + yangi IFA ni aniqlash."""
+        def worker():
+            res = self._immuno_fetch_today()
+            try:
+                self.root.after(0, lambda: self._immuno_poll_apply(res))
+            except Exception:
+                pass
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _immuno_poll_apply(self, res):
+        try:
+            if res is not None and getattr(self, "immuno_btn", None) is not None:
+                rows = res["rows"]
+                imm = [d for o in rows for _n, d, g in o["tests"] if g == IMMUNO_SAMPLE]
+                kutil = sum(1 for d in imm if not d)
+                txt = f"🔬 {IMMUNO_LABEL}"
+                if imm:
+                    txt += f" {len(imm)}" + (f" · ⏳{kutil}" if kutil else " ✅")
+                self.immuno_btn.config(text=txt)
+
+                bugun = datetime.now().date()
+                birinchi = (getattr(self, "_immuno_seen", None) is None
+                            or getattr(self, "_immuno_seen_day", None) != bugun)
+                if birinchi:
+                    self._immuno_seen = set()
+                    self._immuno_seen_day = bugun
+                seen = self._immuno_seen
+                yangi = []                  # [(order, nom)]
+                for o in rows:
+                    for key, nom, done in self._immuno_keys(o):
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        if done:
+                            continue
+                        # Dastur ishga tushgandagi birinchi tekshiruvda markazdagi
+                        # eski buyurtmalar "yangi" emas — laborant ularni biladi.
+                        # Filialdan kutilayotgani esa baribir ko'rsatiladi.
+                        if birinchi and not self._immuno_is_filial(o):
+                            continue
+                        yangi.append((o, nom))
+                if yangi:
+                    self._immuno_alert(yangi)
+        except Exception as e:
+            print(f"[OGOHLANTIRISH] {IMMUNO_LABEL} tugmasi: {e}")
+        finally:
+            try:
+                self.root.after(self._IMMUNO_POLL_MS, self._immuno_poll)
+            except Exception:
+                pass
+
+    def _immuno_alert(self, yangi):
+        """Yangi IFA: oyna BIR MARTA ochiladi + tepada ogohlantirish + ovoz + tugma miltillaydi."""
+        now = time.time()
+        new_map = getattr(self, "_immuno_new", None)
+        if new_map is None:
+            new_map = self._immuno_new = {}
+        guruh = {}                          # qisqa nom → {joy: soni}
+        for o, nom in yangi:
+            new_map[(int(o["order_id"]), self._norm_tahlil_nomi(nom))] = now
+            q = self._immuno_qisqa_nom(nom)
+            joy = self._immuno_filial_qisqa(o)
+            guruh.setdefault(q, {})
+            guruh[q][joy] = guruh[q].get(joy, 0) + 1
+        bo_laklar = []
+        for q, joylar in sorted(guruh.items(), key=lambda x: -sum(x[1].values())):
+            soni = sum(joylar.values())
+            joy_txt = ", ".join(f"{j}" + (f" {s}" if s > 1 else "") for j, s in joylar.items())
+            bo_laklar.append(f"{q}" + (f" ×{soni}" if soni > 1 else "") + f" ({joy_txt})")
+        banner = (f"🔔 YANGI {IMMUNO_LABEL} ({datetime.now().strftime('%H:%M')}):  "
+                  + ";   ".join(bo_laklar))
+        print(f"[{IMMUNO_LABEL}] {banner}")
+
+        self._immuno_blink = True
+        self._immuno_blink_step(0)
+        try:
+            import winsound
+            winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
+        except Exception:
+            pass
+        self.open_immuno_window(banner=banner)
+
+    def _immuno_blink_step(self, n):
+        btn = getattr(self, "immuno_btn", None)
+        if btn is None:
+            return
+        try:
+            if not getattr(self, "_immuno_blink", False):
+                btn.config(bg=self._IMMUNO_BG)
+                return
+            btn.config(bg=self._IMMUNO_ALERT_BG if n % 2 == 0 else self._IMMUNO_BG)
+            self.root.after(700, lambda: self._immuno_blink_step(n + 1))
+        except Exception:
+            pass
+
+    def _immuno_stop_blink(self, event=None):
+        self._immuno_blink = False
+
+    def open_immuno_window(self, banner=None):
+        """IFA kuzatuv oynasi. banner berilsa — avtomatik ochilish (yangi IFA)."""
+        avto = banner is not None
+        if not avto:
+            self._immuno_blink = False      # laborant o'zi ochdi — ko'rdi
+        # Avtomatik ochilganda hamshira yozayotgan joydan fokusni tortib olmaymiz
+        prev_focus = None
+        if avto:
+            try:
+                prev_focus = self.root.focus_get()
+            except Exception:
+                prev_focus = None
+
+        old = getattr(self, "_immuno_win", None)
+        try:
+            if old is not None and old.winfo_exists():
+                old.deiconify()
+                self._immuno_show_banner(banner)
+                self._immuno_raise(old, prev_focus)
+                self._immuno_refresh()
+                return
+        except Exception:
+            pass
+
+        win = tk.Toplevel(self.root)
+        self._immuno_win = win
+        win.title(f"{IMMUNO_LABEL} tahlillari — kuzatuv")
+        _center_window_on_work_area(win, min(1700, win.winfo_screenwidth() - 80),
+                                    min(900, win.winfo_screenheight() - 100))
+        win.minsize(900, 500)
+        win.bind("<FocusIn>", self._immuno_stop_blink)
+
+        top = tk.Frame(win, bg=self._IMMUNO_BG, padx=10, pady=6)
+        top.pack(fill=tk.X)
+        tk.Label(top, text=f"🔬 {IMMUNO_LABEL} tahlillari", bg=self._IMMUNO_BG, fg="white",
+                 font=("Arial", 14, "bold")).pack(side=tk.LEFT)
+        self._imm_summary = tk.StringVar(value="")
+        tk.Label(top, textvariable=self._imm_summary, bg=self._IMMUNO_BG, fg="white",
+                 font=("Arial", 11, "bold")).pack(side=tk.LEFT, padx=25)
+
+        # Yangi IFA ogohlantirishi (avtomatik ochilganda ko'rinadi)
+        self._imm_banner_fr = tk.Frame(win, bg=self._IMMUNO_ALERT_BG)
+        self._imm_banner_var = tk.StringVar(value="")
+        tk.Label(self._imm_banner_fr, textvariable=self._imm_banner_var,
+                 bg=self._IMMUNO_ALERT_BG, fg="white", font=("Arial", 13, "bold"),
+                 anchor="w", justify=tk.LEFT, wraplength=1500
+                 ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=12, pady=6)
+        tk.Button(self._imm_banner_fr, text="✕ Ko'rdim", font=("Arial", 10, "bold"),
+                  command=lambda: (self._imm_banner_fr.pack_forget(), self._immuno_stop_blink())
+                  ).pack(side=tk.RIGHT, padx=10)
+
+        ctl = ttk.Frame(win, padding=(10, 6))
+        self._imm_ctl = ctl
+        ctl.pack(fill=tk.X)
+        today = datetime.now().strftime("%d.%m.%Y")
+        self._imm_dan = tk.StringVar(value=today)
+        self._imm_gacha = tk.StringVar(value=today)
+        self._imm_filial = tk.StringVar(value="Hammasi")
+        self._imm_holat = tk.StringVar(value="Hammasi")
+        self._imm_auto = tk.BooleanVar(value=True)
+
+        ttk.Label(ctl, text="Sana:").pack(side=tk.LEFT)
+        ttk.Button(ctl, text="◀", width=3, command=lambda: self._imm_shift(-1)).pack(side=tk.LEFT, padx=2)
+        e1 = ttk.Entry(ctl, textvariable=self._imm_dan, width=11, justify=tk.CENTER)
+        e1.pack(side=tk.LEFT)
+        ttk.Label(ctl, text="—").pack(side=tk.LEFT, padx=3)
+        e2 = ttk.Entry(ctl, textvariable=self._imm_gacha, width=11, justify=tk.CENTER)
+        e2.pack(side=tk.LEFT)
+        ttk.Button(ctl, text="▶", width=3, command=lambda: self._imm_shift(1)).pack(side=tk.LEFT, padx=2)
+        for label, kun in (("Bugun", 0), ("Kecha", -1), ("7 kun", 7), ("30 kun", 30)):
+            ttk.Button(ctl, text=label, width=7,
+                       command=lambda k=kun: self._imm_range(k)).pack(side=tk.LEFT, padx=1)
+        ttk.Label(ctl, text="   Filial:").pack(side=tk.LEFT)
+        fil = ttk.Combobox(ctl, textvariable=self._imm_filial, width=20, state="readonly",
+                           values=["Hammasi"])
+        fil.pack(side=tk.LEFT, padx=3)
+        ttk.Label(ctl, text="  Natija:").pack(side=tk.LEFT)
+        hol = ttk.Combobox(ctl, textvariable=self._imm_holat, width=11, state="readonly",
+                           values=["Hammasi", "Chiqmagan", "Chiqqan"])
+        hol.pack(side=tk.LEFT, padx=3)
+        tk.Button(ctl, text="🔄 Yangilash", command=self._immuno_refresh, bg="#1E8449",
+                  fg="white", font=("Arial", 9, "bold"), cursor="hand2").pack(side=tk.LEFT, padx=10)
+        ttk.Checkbutton(ctl, text="Avto (1 daq)", variable=self._imm_auto).pack(side=tk.LEFT)
+        for w in (fil, hol):
+            w.bind("<<ComboboxSelected>>", lambda e: self._immuno_refresh())
+        for w in (e1, e2):
+            w.bind("<Return>", lambda e: self._immuno_refresh())
+
+        # Filiallar ro'yxati (qidiruv oynasidagi bilan bir xil manba)
+        self._imm_filial_map = {"Hammasi": None}
+
+        def _load_filial():
+            try:
+                conn = db_conn()
+                if not conn:
+                    return
+                with _db_query_lock:
+                    cur = conn.cursor()
+                    try:
+                        cur.execute("SELECT id, nomi FROM kipiy_filiallar ORDER BY id")
+                        rows = cur.fetchall()
+                    finally:
+                        cur.close()
+
+                def apply():
+                    for fid, nomi in rows:
+                        self._imm_filial_map[str(nomi or f"Filial {fid}")] = int(fid)
+                    try:
+                        fil["values"] = list(self._imm_filial_map.keys())
+                    except Exception:
+                        pass
+                self.root.after(0, apply)
+            except Exception as e:
+                print(f"[OGOHLANTIRISH] filiallar: {e}")
+        threading.Thread(target=_load_filial, daemon=True).start()
+
+        body = ttk.Frame(win)
+        body.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 6))
+
+        # O'NG: faqat KUTILAYOTGAN IFA — partiyani rejalashtirish uchun
+        rf = tk.Frame(body, bg="#FFF8E1", bd=1, relief=tk.SOLID, width=380)
+        rf.pack(side=tk.RIGHT, fill=tk.Y, padx=(8, 0))
+        rf.pack_propagate(False)
+        tk.Label(rf, text=f"⏳ Kutilayotgan {IMMUNO_LABEL}", bg="#FFF8E1", fg="#BF360C",
+                 font=("Arial", 14, "bold")).pack(anchor="w", padx=10, pady=(8, 0))
+        tk.Label(rf, text="(natijasi hali chiqmagan — qo'yilishi kerak)", bg="#FFF8E1",
+                 fg="#795548", font=("Arial", 9)).pack(anchor="w", padx=10)
+        self._imm_pending = tk.Text(rf, bg="#FFF8E1", relief=tk.FLAT, wrap=tk.WORD,
+                                    cursor="arrow", padx=10, pady=6)
+        self._imm_pending.pack(fill=tk.BOTH, expand=True)
+        pt = self._imm_pending
+        pt.tag_configure("jami", font=("Arial", 12, "bold"), foreground="#BF360C",
+                         spacing3=8)
+        pt.tag_configure("nom", font=("Arial", 14, "bold"), foreground="#1A1A1A",
+                         spacing1=6)
+        pt.tag_configure("son", font=("Arial", 16, "bold"), foreground="#C62828")
+        pt.tag_configure("joy", font=("Arial", 11), foreground="#4A148C", lmargin1=18,
+                         lmargin2=18, spacing3=4)
+        pt.tag_configure("yangi", background="#FFEB3B")
+        pt.tag_configure("bosh", font=("Arial", 13, "bold"), foreground="#2E7D32")
+        pt.configure(state=tk.DISABLED)
+
+        # CHAP: bemorlar jadvali
+        lf = ttk.Frame(body)
+        lf.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        style = ttk.Style(win)
+        style.configure("Imm.Treeview", font=("Arial", 11), rowheight=28)
+        style.configure("Imm.Treeview.Heading", font=("Arial", 10, "bold"))
+        cols = ("Sample ID", "Olingan", "F.I.SH", "Joy",
+                f"{IMMUNO_LABEL} tahlillari", "Holat", "Chiqqan", "Yosh", "Jins",
+                "Boshqa tahlillar")
+        tree = ttk.Treeview(lf, columns=cols, show="headings", style="Imm.Treeview")
+        self._imm_tree = tree
+        widths = {"Sample ID": 120, "Olingan": 70, "F.I.SH": 230, "Joy": 150,
+                  f"{IMMUNO_LABEL} tahlillari": 430, "Holat": 125, "Chiqqan": 120,
+                  "Yosh": 45, "Jins": 55, "Boshqa tahlillar": 260}
+        for c in cols:
+            tree.heading(c, text=c, command=lambda cc=c: self._search_tree_sort(tree, cc))
+            tree.column(c, width=widths[c], minwidth=40,
+                        stretch=c in ("F.I.SH", f"{IMMUNO_LABEL} tahlillari"),
+                        anchor=tk.CENTER if c in ("Sample ID", "Olingan", "Yosh", "Jins") else tk.W)
+        sy = ttk.Scrollbar(lf, orient=tk.VERTICAL, command=tree.yview)
+        sx = ttk.Scrollbar(lf, orient=tk.HORIZONTAL, command=tree.xview)
+        tree.configure(yscrollcommand=sy.set, xscrollcommand=sx.set)
+        sy.pack(side=tk.RIGHT, fill=tk.Y)
+        sx.pack(side=tk.BOTTOM, fill=tk.X)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        tree.tag_configure('chiqqan', background='#EAFAF1', foreground='#555555')
+        tree.tag_configure('chiqmagan', background='#FDEDEC', font=("Arial", 11, "bold"))
+        tree.tag_configure('filial', foreground='#6A1B9A')
+        tree.tag_configure('yangi', background='#FFEB3B', font=("Arial", 11, "bold"))
+        self._imm_meta = {}
+
+        def _dbl(event=None):
+            sel = tree.selection()
+            meta = self._imm_meta.get(sel[0]) if sel else None
+            if not meta:
+                return
+            sid = meta.get("sample_id") or meta.get("order_id")
+            if sid:
+                self.barcode_entry.delete(0, tk.END)
+                self.barcode_entry.insert(0, str(sid))
+                self.process_barcode(str(sid))
+                self._oynani_oldinga()
+        tree.bind("<Double-1>", _dbl)
+
+        ttk.Label(win, foreground="gray",
+                  text="💡 Qatorga 2 marta bosing → bemor asosiy oynada ochiladi  |  "
+                       "sariq = yangi kelgan  |  qizg'ish qalin = natija chiqmagan  |  "
+                       "binafsha = filialdan  |  oyna har daqiqada o'zi yangilanadi").pack(pady=(0, 6))
+
+        self._imm_busy = False
+        self._immuno_show_banner(banner)
+        if avto:
+            self._immuno_raise(win, prev_focus)
+        self._immuno_refresh()
+        self._imm_auto_tick()
+
+    def _immuno_show_banner(self, banner):
+        fr = getattr(self, "_imm_banner_fr", None)
+        if fr is None or not banner:
+            return
+        try:
+            self._imm_banner_var.set(banner)
+            fr.pack(fill=tk.X, before=self._imm_ctl)
+        except Exception:
+            pass
+
+    def _immuno_raise(self, win, prev_focus=None):
+        """Oynani boshqalar ustiga chiqarish (fokusni tortib olmasdan)."""
+        try:
+            win.lift()
+            win.attributes("-topmost", True)
+            win.after(1500, lambda: win.winfo_exists() and win.attributes("-topmost", False))
+            if prev_focus is not None:
+                # Oyna menejeri yangi oynani biroz kechikib faollashtiradi —
+                # fokusni ikki marta qaytaramiz (hamshira yozayotgan maydonga)
+                def _qaytar(force=False):
+                    try:
+                        if prev_focus.winfo_exists():
+                            (prev_focus.focus_force if force else prev_focus.focus_set)()
+                    except Exception:
+                        pass
+                win.after(50, _qaytar)
+                win.after(400, lambda: _qaytar(True))
+        except Exception:
+            pass
+
+    def _imm_range(self, kun):
+        from datetime import timedelta
+        bugun = datetime.now().date()
+        if kun <= 0:
+            dan = gacha = bugun + timedelta(days=kun)
+        else:
+            dan, gacha = bugun - timedelta(days=kun - 1), bugun
+        self._imm_dan.set(dan.strftime("%d.%m.%Y"))
+        self._imm_gacha.set(gacha.strftime("%d.%m.%Y"))
+        self._immuno_refresh()
+
+    def _imm_shift(self, days):
+        from datetime import timedelta
+        dan = self._parse_ui_date(self._imm_dan.get()) or datetime.now().date()
+        gacha = self._parse_ui_date(self._imm_gacha.get()) or dan
+        step = timedelta(days=((gacha - dan).days + 1) * days)
+        self._imm_dan.set((dan + step).strftime("%d.%m.%Y"))
+        self._imm_gacha.set((gacha + step).strftime("%d.%m.%Y"))
+        self._immuno_refresh()
+
+    def _imm_auto_tick(self):
+        win = getattr(self, "_immuno_win", None)
+        try:
+            if win is None or not win.winfo_exists():
+                return
+        except Exception:
+            return
+        if self._imm_auto.get():
+            self._immuno_refresh()
+        win.after(self._IMMUNO_POLL_MS, self._imm_auto_tick)
+
+    def _immuno_refresh(self):
+        if getattr(self, "_imm_busy", False):
+            return
+        dan = self._parse_ui_date(self._imm_dan.get())
+        gacha = self._parse_ui_date(self._imm_gacha.get()) or dan
+        if not dan:
+            messagebox.showwarning("Diqqat", "Sanani KK.OO.YYYY ko'rinishida kiriting",
+                                   parent=self._immuno_win)
+            return
+        if gacha < dan:
+            dan, gacha = gacha, dan
+        p = {"dan": dan, "gacha": gacha, "guruh": IMMUNO_SAMPLE,
+             "filial_id": self._imm_filial_map.get(self._imm_filial.get()),
+             "holat": self._imm_holat.get()}
+        self._imm_busy = True
+
+        def worker():
+            out = None
+            try:
+                conn = db_conn()
+                if conn:
+                    with _db_query_lock:
+                        out = self._query_orders(conn, p)
+            except Exception as e:
+                print(f"[XATO] {IMMUNO_LABEL} oynasi: {e}")
+            self.root.after(0, lambda: self._immuno_apply(out, p))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _immuno_apply(self, out, p):
+        self._imm_busy = False
+        try:
+            if not self._imm_tree.winfo_exists():
+                return
+        except Exception:
+            return
+        if out is None:
+            self._imm_summary.set("⚠ Bazaga ulanib bo'lmadi")
+            return
+        tree = self._imm_tree
+        norm = self._norm_tahlil_nomi
+        sel_order = None
+        sel = tree.selection()
+        if sel and sel[0] in self._imm_meta:
+            sel_order = self._imm_meta[sel[0]].get("order_id")
+        for i in tree.get_children():
+            tree.delete(i)
+        self._imm_meta = {}
+
+        bir_kun = p["dan"] == p["gacha"]
+
+        def fmt(dt, f):
+            return dt.strftime(f) if hasattr(dt, "strftime") else ""
+
+        now = time.time()
+        new_map = getattr(self, "_immuno_new", None) or {}
+        jami = kutil = filialdan = 0
+        kutilayotgan = {}                   # qisqa nom → {joy: soni}
+        yangi_nomlar = set()
+        for o in out["rows"]:
+            oid = int(o["order_id"])
+            imm = [(n, d) for n, d, g in o["tests"] if g == IMMUNO_SAMPLE]
+            boshqa = [(n, d) for n, d, g in o["tests"] if g != IMMUNO_SAMPLE]
+            k = sum(1 for _n, d in imm if not d)
+            jami += len(imm)
+            kutil += k
+            is_fil = self._immuno_is_filial(o)
+            filialdan += 1 if is_fil else 0
+            joy = self._immuno_filial_qisqa(o)
+            is_new = False
+            for n, d in imm:
+                if d:
+                    continue
+                q = self._immuno_qisqa_nom(n)
+                kutilayotgan.setdefault(q, {})
+                kutilayotgan[q][joy] = kutilayotgan[q].get(joy, 0) + 1
+                t = new_map.get((oid, norm(n)))
+                if t and now - t < self._IMMUNO_NEW_HIGHLIGHT_S:
+                    is_new = True
+                    yangi_nomlar.add(q)
+            holat = (f"⏳ Kutilmoqda ({k}/{len(imm)})" if 0 < k < len(imm)
+                     else "⏳ Kutilmoqda" if k else "✅ Chiqqan")
+            chiq = ""
+            cv, sv = o.get("match_vaqt"), o.get("sana_vaqt")
+            if not k and cv:
+                same = hasattr(sv, "date") and cv.date() == sv.date()
+                chiq = fmt(cv, "%H:%M") if same else fmt(cv, "%d.%m %H:%M")
+                try:
+                    daq = int((cv - sv).total_seconds() // 60)
+                    if daq >= 0:
+                        chiq += f" ({daq // 60}s {daq % 60}d)" if daq >= 60 else f" ({daq} d)"
+                except Exception:
+                    pass
+            # Kutilayotgan IFA nomlari OLDINDA — ko'zga birinchi tashlansin
+            imm_sorted = sorted(imm, key=lambda x: x[1])
+            imm_txt = ",  ".join(("⏳ " if not d else "✓ ") + self._immuno_qisqa_nom(n)
+                                 for n, d in imm_sorted)
+            tags = ["yangi" if is_new else ("chiqmagan" if k else "chiqqan")]
+            if is_fil:
+                tags.append("filial")
+            iid = tree.insert("", tk.END, tags=tags, values=(
+                o.get("sample_id") or "",
+                fmt(sv, "%H:%M") if bir_kun else fmt(sv, "%d.%m %H:%M"),
+                o.get("fish") or "",
+                ("🏥 " if is_fil else "") + joy,
+                imm_txt, holat, chiq,
+                o.get("yosh") or "", o.get("jins") or "",
+                ", ".join(n if d else f"{n} ⏳" for n, d in boshqa)))
+            self._imm_meta[iid] = {"order_id": oid, "sample_id": o.get("sample_id")}
+            if sel_order is not None and oid == sel_order:
+                tree.selection_set(iid)
+                tree.see(iid)
+
+        # O'ng panel: faqat kutilayotganlar
+        pt = self._imm_pending
+        pt.configure(state=tk.NORMAL)
+        pt.delete("1.0", tk.END)
+        if not kutilayotgan:
+            pt.insert(tk.END, f"✅ Hamma {IMMUNO_LABEL} natijasi chiqqan\n", "bosh")
+        else:
+            jami_k = sum(sum(v.values()) for v in kutilayotgan.values())
+            pt.insert(tk.END, f"Jami: {jami_k} ta tahlil, {len(kutilayotgan)} xil\n", "jami")
+            for q, joylar in sorted(kutilayotgan.items(),
+                                    key=lambda x: (-sum(x[1].values()), x[0].lower())):
+                soni = sum(joylar.values())
+                extra = ("yangi",) if q in yangi_nomlar else ()
+                pt.insert(tk.END, f"{q}  ", ("nom",) + extra)
+                pt.insert(tk.END, f"{soni}\n", ("son",) + extra)
+                joy_txt = "   ".join(
+                    ("🏥 " if j != "Markaz" else "🏠 ") + f"{j}: {s}"
+                    for j, s in sorted(joylar.items(), key=lambda x: (x[0] != "Markaz", x[0])))
+                pt.insert(tk.END, joy_txt + "\n", "joy")
+        pt.configure(state=tk.DISABLED)
+
+        sana = p["dan"].strftime("%d.%m.%Y") if bir_kun else \
+            f"{p['dan'].strftime('%d.%m')} — {p['gacha'].strftime('%d.%m.%Y')}"
+        self._imm_summary.set(
+            f"📅 {sana}    👥 {len(out['rows'])} bemor    🧪 {jami} tahlil    "
+            f"⏳ {kutil} chiqmagan    🏥 filialdan: {filialdan}    "
+            f"(yangilandi {datetime.now().strftime('%H:%M')})")
+
     def process_barcode(self, barcode):
         """Barcode ni qayta ishlash - yaxshilangan xato boshqaruvi"""
         self.status_var.set(f"Qidiryapman: {barcode}...")
@@ -12186,12 +13471,11 @@ Sana: {_sana_fmt}"""
         if not sel:
             messagebox.showwarning("Diqqat", "Avval bemorni tanlang!", parent=self._search_win)
             return
-        item = self.search_results_tree.item(sel[0])
-        vals = item.get('values', [])
-        if not vals:
+        # Bemor ID jadvalda ko'rsatilmaydi (faqat shtrix-kod) — meta dan olinadi
+        meta = getattr(self, "_search_row_meta", {}).get(sel[0]) or {}
+        bemor_id = meta.get('bemor_id')
+        if bemor_id is None:
             return
-        bemor_id = vals[0]  # 1-ustun = ID
-        fish = vals[1] if len(vals) > 1 else ''
         try:
             bemor_id = int(bemor_id)
         except (ValueError, TypeError):
@@ -12303,6 +13587,20 @@ Sana: {_sana_fmt}"""
                 ORDER BY oi.order_id ASC, oi.id ASC
             """, all_order_ids)
             all_tests = cursor.fetchall()
+
+            # Panel (Lipid spektri / Buyrak paneli) bor buyurtmada uning a'zolari
+            # alohida qator bo'lib "Kutilmoqda" ko'rinmasin — load_tests() bilan
+            # bir xil qoida, lekin har bir buyurtma uchun alohida.
+            _skip_by_order = {}
+            for _t in all_tests:
+                _nm = _t.get('nomi', '')
+                if _is_lipid_spektri_test(_nm):
+                    _skip_by_order.setdefault(_t.get('order_id'), set()).update(LIPID_PANEL_MEMBER_IDS)
+                elif _is_buyrak_paneli_test(_nm):
+                    _skip_by_order.setdefault(_t.get('order_id'), set()).update(BUYRAK_PANEL_MEMBER_IDS)
+            if _skip_by_order:
+                all_tests = [t for t in all_tests
+                             if t.get('tahlil_id') not in _skip_by_order.get(t.get('order_id'), ())]
 
             # 4. Barcha test_results (order_id bo'yicha)
             str_order_ids = [str(oid) for oid in all_order_ids]
@@ -21045,6 +22343,10 @@ Sana: {_sana_fmt}"""
             self.status_var.set("[TO'XTATILDI] Avval tahlil natijalarini kiriting")
             return
 
+        # Bazaga tushmagan natija bo'lsa — "saqlaymi?" (Yo'q = test rejimi)
+        if not self._confirm_unsaved_before_blank("Blanka yaratish"):
+            return
+
         # blanka_generator.py dan to'g'ridan-to'g'ri foydalanish (hech qanday pre-state kerak emas)
         try:
             
@@ -21201,12 +22503,167 @@ Sana: {_sana_fmt}"""
             import traceback
             traceback.print_exc()
     
+    # ── BLANKA OLDIDAN: SAQLANMAGAN NATIJA TEKSHIRUVI ─────────────────────
+    # MUAMMO (2026-09-29): ogohlantirish oynasida hamshiralar «Tuzataman
+    # (saqlanmasin)» ni bosib, keyin «Blanka Yaratish» bilan qog'oz
+    # chiqarishardi — natija bazaga UMUMAN tushmay qolardi (SMS/PDF/tarix yo'q).
+    # Endi blanka/chop etishdan oldin xotiradagi natija bazadagi bilan
+    # solishtiriladi; farq bo'lsa so'raladi: Ha → saqlab blanka, Yo'q → TEST
+    # (saqlamasdan blanka — faqat dasturni sinayotganda).
+
+    def _find_unsaved_results(self):
+        """Xotirada bor, lekin bazaga tushmagan (yoki keyin o'zgartirilgan) tahlil nomlari.
+
+        Taqqoslash save_to_db() dagi bilan AYNAN bir xil ko'rinishda
+        (dict → json.dumps, boshqasi → str). Bazani tekshirib bo'lmasa None.
+        """
+        if not self.current_order_id or not self.test_results:
+            return []
+        # Umumiy ulanish + _db_query_lock EMAS: asosiy (UI) oqim fon oqimi qulfni
+        # bo'shatishini kutib qotib qolmasin — save_to_db() kabi alohida ulanish.
+        try:
+            conn = self._create_fresh_connection()
+        except Exception:
+            conn = None
+        if not conn:
+            return None
+
+        def _same(a, b):
+            a, b = str(a or "").strip(), str(b or "").strip()
+            if a == b:
+                return True
+            try:
+                ja, jb = json.loads(a), json.loads(b)
+            except Exception:
+                return False
+            if ja == jb:
+                return True
+            # test_results oddiy qiymatni {"result": ...} ichida saqlaydi
+            if isinstance(jb, dict) and set(jb) == {"result"} and not isinstance(ja, dict):
+                return str(jb["result"]).strip() == str(ja).strip()
+            return False
+
+        try:
+            cur = conn.cursor()
+            try:
+                cur.execute("""
+                    SELECT ri.tahlil_nomi, ri.qiymat FROM result_items ri
+                    JOIN results r ON r.id = ri.result_id
+                    WHERE r.order_id = %s ORDER BY ri.id
+                """, (self.current_order_id,))
+                db_ri = {n: q for n, q in cur.fetchall()}
+                cur.execute("SELECT test_name, result_data FROM test_results WHERE order_id = %s",
+                            (str(self.current_order_id),))
+                db_tr = {n: q for n, q in cur.fetchall()}
+            finally:
+                cur.close()
+        except Exception as e:
+            print(f"[OGOHLANTIRISH] saqlanmagan natija tekshiruvi: {e}")
+            return None
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+        unsaved = []
+        for test in self.current_tests or []:
+            val = self.test_results.get(test.get('id'))
+            if val is None or (isinstance(val, str) and not val.strip()) or val == {}:
+                continue
+            nomi = test.get('nomi', '')
+            s = json.dumps(val, ensure_ascii=False) if isinstance(val, dict) else str(val)
+            if nomi in db_ri and _same(s, db_ri[nomi]):
+                continue
+            if nomi in db_tr and (_same(s, db_tr[nomi]) or _same(db_tr[nomi], s)):
+                continue
+            unsaved.append(nomi)
+        return unsaved
+
+    def _confirm_unsaved_before_blank(self, amal):
+        """True — davom etish mumkin (saqlandi yoki test rejimi), False — to'xtatildi."""
+        unsaved = self._find_unsaved_results()
+        if not unsaved:
+            return True             # hammasi bazada (yoki tekshirib bo'lmadi — to'smaymiz)
+
+        choice = {"v": "cancel"}
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Natija bazaga SAQLANMAGAN")
+        dlg.transient(self.root)
+        dlg.resizable(False, False)
+        dlg.configure(bg="#FFF8E1")
+        tk.Label(dlg, text="⚠  Natija bazaga SAQLANMAGAN!", bg="#FFF8E1", fg="#C62828",
+                 font=("Arial", 14, "bold")).pack(padx=20, pady=(16, 6))
+        ro_yxat = "\n".join(f"   • {n}" for n in unsaved[:12])
+        if len(unsaved) > 12:
+            ro_yxat += f"\n   ... va yana {len(unsaved) - 12} ta"
+        tk.Label(dlg, bg="#FFF8E1", justify=tk.LEFT, font=("Arial", 10),
+                 text=f"Quyidagi {len(unsaved)} ta tahlil natijasi bazaga tushmagan:\n\n"
+                      f"{ro_yxat}\n\n"
+                      "Saqlanmasa: bemorga SMS ketmaydi, natija internetda chiqmaydi,\n"
+                      "tarixda ko'rinmaydi. Blankadan oldin SAQLAYMI?"
+                 ).pack(padx=22, pady=4, anchor="w")
+        bf = tk.Frame(dlg, bg="#FFF8E1")
+        bf.pack(padx=20, pady=(10, 16))
+
+        def _set(v):
+            choice["v"] = v
+            dlg.destroy()
+        ha = tk.Button(bf, text="💾  Ha, saqlab keyin blanka", command=lambda: _set("save"),
+                       bg="#2E7D32", fg="white", font=("Arial", 11, "bold"),
+                       padx=14, pady=6, cursor="hand2")
+        ha.pack(side=tk.LEFT, padx=5)
+        tk.Button(bf, text="🧪  Yo'q — TEST (saqlamasdan)", command=lambda: _set("test"),
+                  bg="#9E9E9E", fg="white", font=("Arial", 10),
+                  padx=10, pady=6, cursor="hand2").pack(side=tk.LEFT, padx=5)
+        tk.Button(bf, text="Bekor qilish", command=lambda: _set("cancel"),
+                  font=("Arial", 10), padx=10, pady=6).pack(side=tk.LEFT, padx=5)
+        dlg.bind("<Escape>", lambda e: _set("cancel"))
+        dlg.update_idletasks()
+        x = self.root.winfo_rootx() + (self.root.winfo_width() - dlg.winfo_reqwidth()) // 2
+        y = self.root.winfo_rooty() + (self.root.winfo_height() - dlg.winfo_reqheight()) // 3
+        dlg.geometry(f"+{max(0, x)}+{max(0, y)}")
+        dlg.grab_set()
+        ha.focus_set()
+        dlg.after(80, lambda: _kursor_tugmaga(ha))       # sichqoncha xavfsiz tugmada
+        self.root.wait_window(dlg)
+
+        if choice["v"] == "save":
+            if not self.save_to_db():
+                self.status_var.set(f"[TO'XTATILDI] Natija saqlanmadi — {amal.lower()} bekor qilindi")
+                return False
+            # save_to_db() tekshiruv oynasini ko'rsatdi — chop etishda takrorlamaymiz.
+            # FAQAT print_results() uchun: u bayroqni darhol ishlatib o'chiradi.
+            # create_blanks() uni ishlatmaydi — qolib ketsa keyingi chop etishda
+            # tekshiruv jimgina o'tib ketardi.
+            if amal == "Chop etish":
+                self._skip_next_print_validation = True
+            return True
+        if choice["v"] == "test":
+            # TEST ham "ko'rga hassa": tasodifan bosilsa natija saqlanmay qoladi
+            if not self._hassa_dialog(
+                    title="🧪 TEST rejimi — natija SAQLANMAYDI",
+                    sarlavha="🧪 Natija bazaga SAQLANMAYDI!",
+                    satrlar=unsaved,
+                    izoh="Bemorga SMS ketmaydi, natija internetda chiqmaydi, tarixda yo'q bo'ladi.\n"
+                         "Bu faqat dasturni SINASH uchun. Bemor natijasi bo'lsa — orqaga qayting.",
+                    davom_matni="Ha, TEST — saqlamasdan davom etish",
+                    belgi_matni="Bu haqiqiy bemor natijasi EMAS, men dasturni sinayapman",
+                    orqaga_matni="↩  Orqaga (saqlab chiqaraman)"):
+                self.status_var.set(f"[TO'XTATILDI] {amal} bekor qilindi")
+                return False
+            print(f"[TEST] {amal}: natija SAQLANMASDAN (test rejimi): {', '.join(unsaved)}")
+            self.status_var.set(f"[TEST] {amal} — natija bazaga SAQLANMADI")
+            return True
+        self.status_var.set(f"[TO'XTATILDI] {amal} bekor qilindi")
+        return False
+
     def save_and_print(self):
         """Bazaga saqlash va chop etish - bitta funksiya"""
         if not self.current_order_id:
             messagebox.showwarning("Diqqat", "Avval bemor ma'lumotlarini yuklang")
             return
-        
+
         if not self.test_results:
             messagebox.showwarning("Diqqat", "Saqlash uchun natijalar yo'q")
             return
@@ -21268,6 +22725,12 @@ Sana: {_sana_fmt}"""
                 f"Agar shu yerda qog'oz kerak bo'lsa: «Blanka yaratish» tugmasidan "
                 f"qo'lda chop eting.")
             return
+
+        # ── Bazaga tushmagan natija ("Faqat Chop Etish" bosilganda) ────────
+        # save_and_print() dan kelganda natija hozirgina saqlangan — so'ramaymiz.
+        if not getattr(self, '_skip_next_print_validation', False):
+            if not self._confirm_unsaved_before_blank("Chop etish"):
+                return
 
         # ── Tahlillar to'liqligi (save_and_print() da tekshirilgan bo'lsa —
         #    ikkinchi marta so'ramaymiz) ─────────────────────────────────
@@ -21584,19 +23047,122 @@ Sana: {_sana_fmt}"""
             return True
 
         n = len(incomplete)
-        satrlar = "\n".join(f"   • {nomi} — {sabab}" for nomi, sabab in incomplete[:15])
-        if n > 15:
-            satrlar += f"\n   ... va yana {n - 15} ta"
-
-        return messagebox.askyesno(
-            "⚠ Tahlillar to'liq emas",
-            f"{amal}: buyurtmadagi {n} ta tahlil natijasi to'liq emas:\n\n"
-            f"{satrlar}\n\n"
-            "Blanka bu tahlillar uchun BO'SH katakcha bilan chiqadi.\n\n"
-            "Baribir davom etaymi?",
-            icon=messagebox.WARNING,
-            default=messagebox.NO
+        jami = len([t for t in (self.current_tests or [])])
+        hammasi = jami and n >= jami
+        ok = self._hassa_dialog(
+            title="⛔ Tahlillar to'liq emas",
+            sarlavha=(f"⛔ DIQQAT!  {n} ta tahlil natijasi YO'Q"
+                      + ("  —  BIRORTA HAM NATIJA KIRITILMAGAN!" if hammasi else "")),
+            satrlar=[f"{nomi}  —  {sabab}" for nomi, sabab in incomplete],
+            izoh=(f"{amal}: blanka bu tahlillar uchun BO'SH katakcha bilan chiqadi.\n"
+                  "Bemor bo'sh blanka oladi — natijani avval kiriting!"),
+            davom_matni="Baribir davom etish (bo'sh katak bilan)",
+            belgi_matni="Ro'yxatni o'qidim — bu tahlillar blankada BO'SH chiqishini bilaman",
+            kutish=8 if hammasi else 5,
         )
+        if ok:
+            print(f"[OGOHLANTIRISH] {amal}: laborant to'liq emas holatda davom etdi: "
+                  f"{', '.join(n_ for n_, _ in incomplete)}")
+        return ok
+
+    def _hassa_dialog(self, title, sarlavha, satrlar, izoh, davom_matni,
+                      belgi_matni, kutish=5, orqaga_matni="↩  Orqaga — natijani kiritaman"):
+        """"Ko'rga hassa" tasdiq oynasi — o'qimasdan bosib yuborib bo'lmaydi.
+
+        MUAMMO (2026-09-29): oddiy Ha/Yo'q oynasida hamshiralar matnni o'qimasdan
+        «Да» ni bosib, bo'sh blanka chiqarib yuborishardi. Bu oynada:
+          • standart (Enter/Esc/yopish) — ORQAGA qaytish;
+          • «davom etish» tugmasi `kutish` soniya sanog'i tugaguncha VA belgi
+            qo'yilmaguncha O'CHIQ — tasodifiy bosish imkonsiz.
+        Returns: True — laborant ongli ravishda davom etdi; False — orqaga.
+        """
+        natija = {"v": False}
+        dlg = tk.Toplevel(self.root)
+        dlg.title(title)
+        dlg.transient(self.root)
+        dlg.resizable(False, False)
+        dlg.configure(bg="white")
+
+        tk.Label(dlg, text=sarlavha, bg="#C62828", fg="white", font=("Arial", 16, "bold"),
+                 padx=20, pady=12, wraplength=760, justify=tk.LEFT
+                 ).pack(fill=tk.X)
+        ro = tk.Frame(dlg, bg="#FFEBEE", padx=20, pady=10)
+        ro.pack(fill=tk.X, padx=14, pady=(12, 4))
+        for s in satrlar[:12]:
+            tk.Label(ro, text=f"✖  {s}", bg="#FFEBEE", fg="#B71C1C", anchor="w",
+                     justify=tk.LEFT, wraplength=720, font=("Arial", 13, "bold")
+                     ).pack(fill=tk.X, pady=1)
+        if len(satrlar) > 12:
+            tk.Label(ro, text=f"... va yana {len(satrlar) - 12} ta", bg="#FFEBEE",
+                     fg="#B71C1C", font=("Arial", 11, "italic")).pack(anchor="w")
+        tk.Label(dlg, text=izoh, bg="white", fg="#333333", font=("Arial", 11),
+                 justify=tk.LEFT, wraplength=740).pack(anchor="w", padx=20, pady=(6, 8))
+
+        def _orqaga(event=None):
+            natija["v"] = False
+            dlg.destroy()
+
+        orqaga = tk.Button(dlg, text=orqaga_matni, command=_orqaga, bg="#2E7D32", fg="white",
+                           font=("Arial", 14, "bold"), padx=24, pady=10, cursor="hand2")
+        orqaga.pack(pady=(4, 12))
+
+        pastki = tk.Frame(dlg, bg="#F5F5F5", padx=14, pady=10)
+        pastki.pack(fill=tk.X)
+        belgi = tk.BooleanVar(value=False)
+        davom = tk.Button(pastki, text=davom_matni, state=tk.DISABLED, bg="#BDBDBD",
+                          fg="white", disabledforeground="#EEEEEE", font=("Arial", 10),
+                          padx=10, pady=4)
+        qoldi = {"s": int(kutish)}
+
+        def _holat(*_):
+            tayyor = belgi.get() and qoldi["s"] <= 0
+            davom.config(state=tk.NORMAL if tayyor else tk.DISABLED,
+                         bg="#E65100" if tayyor else "#BDBDBD",
+                         text=davom_matni if qoldi["s"] <= 0
+                         else f"{davom_matni}  ({qoldi['s']})")
+
+        def _tick():
+            if not dlg.winfo_exists():
+                return
+            qoldi["s"] -= 1
+            _holat()
+            if qoldi["s"] > 0:
+                dlg.after(1000, _tick)
+
+        def _davom():
+            if davom.cget("state") == tk.DISABLED:
+                return
+            natija["v"] = True
+            dlg.destroy()
+
+        davom.config(command=_davom)
+        tk.Checkbutton(pastki, text=belgi_matni, variable=belgi, command=_holat,
+                       bg="#F5F5F5", font=("Arial", 10), anchor="w", justify=tk.LEFT,
+                       wraplength=460).pack(side=tk.LEFT)
+        davom.pack(side=tk.RIGHT)
+        _holat()
+        dlg.after(1000, _tick)
+
+        # Enter / Esc / oynani yopish — HAR DOIM orqaga
+        dlg.bind("<Return>", _orqaga)
+        dlg.bind("<KP_Enter>", _orqaga)
+        dlg.bind("<Escape>", _orqaga)
+        dlg.protocol("WM_DELETE_WINDOW", _orqaga)
+
+        try:
+            import winsound
+            winsound.MessageBeep(winsound.MB_ICONHAND)
+        except Exception:
+            pass
+        dlg.update_idletasks()
+        x = self.root.winfo_rootx() + (self.root.winfo_width() - dlg.winfo_reqwidth()) // 2
+        y = self.root.winfo_rooty() + (self.root.winfo_height() - dlg.winfo_reqheight()) // 3
+        dlg.geometry(f"+{max(0, x)}+{max(0, y)}")
+        dlg.grab_set()
+        orqaga.focus_set()
+        dlg.after(80, lambda: _kursor_tugmaga(orqaga))   # sichqoncha xavfsiz tugmada
+        self.root.wait_window(dlg)
+        return natija["v"]
 
     def _validate_results_before_save(self, title_extra=""):
         """

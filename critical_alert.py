@@ -62,7 +62,10 @@ DEFAULT_CONFIG = {
             {"key": "kreatinin",        "match": ["kreatinin"], "exclude": ["nisbat", "mochevina", "/"], "low": 40, "high": 500, "zero": True},
             {"key": "mochevina",        "match": ["mochevina"], "exclude": ["azot", "nisbat", "kislota", "/"], "low": 0.5, "high": 30, "zero": True},
             {"key": "siydik_kislota",   "match": ["siydik kislota", "mochevaya kislota"], "low": 60, "high": 900, "zero": True},
-            {"key": "kalsiy",           "match": ["kalsiy"],                           "low": 1.5, "high": 3.5,  "zero": True},
+            # Kalsiy ko'p "o'ynaydi" — egasi talabi (2026-09-29): >2.7 qizil, <1.8 ko'k signal
+            {"key": "kalsiy",           "match": ["kalsiy"],                           "low": 1.8, "high": 2.7,  "zero": True,
+             "high_level": "critical",
+             "low_msg": "past — gipokalsiemiya yoki namuna xatosi, qayta tekshiring"},
             {"key": "kaliy",            "match": ["kaliy"],                            "low": 2.0, "high": 7.0,  "zero": True},
             {"key": "natriy",           "match": ["natriy"],                           "low": 110, "high": 170,  "zero": True},
             {"key": "magniy",           "match": ["magniy"],                           "low": 0.5, "high": 5.0,  "zero": True},
@@ -200,6 +203,16 @@ def check_biochemistry(rows, cfg=None):
       alerts          — [{'level': ..., 'msg': ...}, ...]
       offending_names — {nom, ...}  (aynan berilgan nom bilan qizil qilish uchun)
     """
+    alerts, offending, _dirs = check_biochemistry_detail(rows, cfg)
+    return alerts, offending
+
+
+def check_biochemistry_detail(rows, cfg=None):
+    """check_biochemistry + yo'nalish: (alerts, offending_names, {nom: 'high'|'low'}).
+
+    'low' — past chiqqan (ko'k signal), 'high' — baland yoki mantiqiy xato (qizil).
+    Qoidada ixtiyoriy: "high_level"/"low_level" ('warn'|'critical'), "low_msg"/"high_msg".
+    """
     cfg = cfg or load_config()
     b = cfg.get("biochemistry", {})
     tests_cfg = b.get("tests", [])
@@ -207,6 +220,7 @@ def check_biochemistry(rows, cfg=None):
 
     alerts = []
     offending = set()
+    dirs = {}
 
     # Nomlarni saqlab qolgan holda ro'yxat
     parsed = []
@@ -229,15 +243,23 @@ def check_biochemistry(rows, cfg=None):
             if rule.get("zero") and val == 0:
                 alerts.append({"level": "critical", "msg": f"{name} = 0 — o'lchov/reagent xatosi shubhasi"})
                 offending.add(name)
+                dirs[name] = "high"
             elif (rule.get("zero") or rule.get("neg")) and val < 0:
                 alerts.append({"level": "critical", "msg": f"{name} = {val:g} — manfiy (xato)"})
                 offending.add(name)
+                dirs[name] = "high"
             elif low is not None and val < low:
-                alerts.append({"level": "critical", "msg": f"{name} = {val:g} — juda past ({low:g} dan past), reagent/zardob shubhasi"})
+                sabab = rule.get("low_msg") or "juda past, reagent/zardob shubhasi"
+                alerts.append({"level": rule.get("low_level", "critical"),
+                               "msg": f"{name} = {val:g} — {sabab} ({low:g} dan past)"})
                 offending.add(name)
+                dirs[name] = "low"
             elif high is not None and val > high:
-                alerts.append({"level": "warn", "msg": f"{name} = {val:g} — baland ({high:g} dan baland)"})
+                sabab = rule.get("high_msg") or "baland"
+                alerts.append({"level": rule.get("high_level", "warn"),
+                               "msg": f"{name} = {val:g} — {sabab} ({high:g} dan baland)"})
                 offending.add(name)
+                dirs[name] = "high"
             break  # birinchi mos qoida yetarli
 
     # ── Bilirubin fraksiyalari ─────────────────────────────────────────────
@@ -288,7 +310,9 @@ def check_biochemistry(rows, cfg=None):
             if kre_name:
                 offending.add(kre_name)
 
-    return alerts, offending
+    for n in offending:
+        dirs.setdefault(n, "high")     # bilirubin/kreatinin mantiqiy xatolari — qizil
+    return alerts, offending, dirs
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -368,16 +392,89 @@ def notify(parent, patient_name, alerts, cfg=None, play=True):
         messagebox.showwarning(title, body)
 
 
+def kursor_tugmaga(widget):
+    """Sichqoncha kursorini XAVFSIZ tugma markaziga olib borish.
+
+    Egasi talabi (2026-09-29): ogohlantirish oynasida sichqoncha va Enter
+    "bizning foydamizga" — ya'ni xavfsiz tugmada tursin (Windows'ning
+    "tugmaga avtomatik o'tish" kabi). Shoshilgan hamshira boshqa tugmani
+    tasodifan bosib qo'ymasin. Xato bo'lsa jim o'tadi.
+    """
+    try:
+        widget.update_idletasks()
+        x = widget.winfo_rootx() + widget.winfo_width() // 2
+        y = widget.winfo_rooty() + widget.winfo_height() // 2
+        import ctypes
+        ctypes.windll.user32.SetCursorPos(int(x), int(y))
+    except Exception:
+        pass
+
+
 def confirm_save(parent, patient_name, alerts, cfg=None):
-    """Saqlash/import oldidan tasdiqlash. True = davom etsin."""
+    """Saqlash/import oldidan tasdiqlash. True = davom etsin.
+
+    Standart (Enter/Esc/yopish, kursor) — "Tekshiraman (saqlanmasin)".
+    """
     cfg = cfg or load_config()
     if not cfg.get("enabled", True) or not has_critical(alerts):
         return True
     play_alert_sound(cfg)
+    try:
+        import tkinter as tk
+        res = {"ok": False}
+        dlg = tk.Toplevel(parent)
+        dlg.title("⚠ KRITIK NATIJA")
+        dlg.configure(bg="#FFF4F4")
+        try:
+            dlg.transient(parent)
+        except Exception:
+            pass
+        tk.Label(dlg, text=f"⚠ KRITIK NATIJA — {patient_name}", bg="#C62828", fg="white",
+                 font=("Arial", 13, "bold"), padx=14, pady=10, anchor="w"
+                 ).pack(fill=tk.X)
+        tk.Label(dlg, text=format_alerts(alerts), bg="#FFF4F4", fg="#7F1D1D",
+                 font=("Arial", 11, "bold"), justify=tk.LEFT, wraplength=620,
+                 padx=16, pady=10).pack(anchor="w")
+        tk.Label(dlg, text="Bu natijalarda xatolik shubhasi bor. Namunani/natijani tekshiring.",
+                 bg="#FFF4F4", font=("Arial", 10), padx=16).pack(anchor="w")
+        bf = tk.Frame(dlg, bg="#FFF4F4")
+        bf.pack(fill=tk.X, padx=14, pady=12)
+
+        def _yoq(e=None):
+            res["ok"] = False
+            dlg.destroy()
+
+        def _ha():
+            res["ok"] = True
+            dlg.destroy()
+        safe = tk.Button(bf, text="✎  Tekshiraman (saqlanmasin)", command=_yoq,
+                         bg="#2E7D32", fg="white", font=("Arial", 11, "bold"),
+                         padx=14, pady=6, cursor="hand2")
+        safe.pack(side=tk.LEFT)
+        tk.Button(bf, text="Natija to'g'ri — baribir saqlansin", command=_ha,
+                  bg="#E0E0E0", font=("Arial", 9), padx=10, pady=4).pack(side=tk.RIGHT)
+        dlg.bind("<Return>", _yoq)
+        dlg.bind("<Escape>", _yoq)
+        dlg.protocol("WM_DELETE_WINDOW", _yoq)
+        dlg.update_idletasks()
+        try:
+            px = parent.winfo_rootx() + (parent.winfo_width() - dlg.winfo_reqwidth()) // 2
+            py = parent.winfo_rooty() + (parent.winfo_height() - dlg.winfo_reqheight()) // 3
+            dlg.geometry(f"+{max(0, px)}+{max(0, py)}")
+        except Exception:
+            pass
+        dlg.grab_set()
+        safe.focus_set()
+        dlg.after(80, lambda: kursor_tugmaga(safe))
+        dlg.wait_window()
+        return res["ok"]
+    except Exception:
+        pass
     from tkinter import messagebox
     body = f"Bemor: {patient_name}\n\n{format_alerts(alerts)}\n\n" \
            "Bu natijalarda xatolik shubhasi bor.\nBaribir saqlansinmi?"
     try:
-        return messagebox.askyesno("⚠ KRITIK NATIJA", body, parent=parent, icon="warning")
+        return messagebox.askyesno("⚠ KRITIK NATIJA", body, parent=parent, icon="warning",
+                                   default="no")
     except Exception:
         return messagebox.askyesno("⚠ KRITIK NATIJA", body)

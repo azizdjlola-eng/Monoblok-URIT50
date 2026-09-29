@@ -55,6 +55,31 @@ import re
 # hisobga olinmaydi.
 LAB_BO_LMAGAN_SOHALAR = ("uzi", "ambulator", "muolaja", "statsionar", "korik")
 
+# PANEL TAHLILLARI (2026-09-29 da topildi): registratsiya "BUYRAK PANELI"
+# bilan birga uning a'zolarini (Mochevina, Kreatinin...) ham ALOHIDA qator
+# qilib qo'shadi. Natija esa bitta panel JSON ida saqlanadi — a'zolar nomi
+# bilan yozuv bo'lmaydi. Natijada to'liq chiqqan buyurtma abadiy 'draft'
+# bo'lib qolardi (60 kunda 32 tadan 21 tasi). Qoida: panel saqlangan bo'lsa,
+# uning a'zolari ham bajarilgan hisoblanadi.
+# Kalit — panel nomidagi bo'lak (kichik harf), qiymat — a'zolar tahlil_id si
+# (monoblok_dastur.BUYRAK_PANEL_MEMBER_IDS / LIPID_PANEL_MEMBER_IDS bilan bir xil).
+PANEL_AZOLARI = {
+    "buyrak panel":      {42, 41, 35, 50},   # Mochevina, Kreatinin, Albumin, Siydik kislota
+    "lipid spektri":     {43, 44, 123, 124}, # TC, TG, LDL, HDL
+    "lipid paneli":      {43, 44, 123, 124},
+    "lipidlar spektori": {43, 44, 123, 124},
+    "lipidlar paneli":   {43, 44, 123, 124},
+}
+
+
+def panel_azolari(nom) -> set:
+    """Tahlil panel bo'lsa — a'zolarining tahlil_id lari, aks holda bo'sh set."""
+    n = _norm(nom)
+    for kalit, azolar in PANEL_AZOLARI.items():
+        if kalit in n:
+            return azolar
+    return set()
+
 _BOSHLIQ = re.compile(r"\s+")
 
 
@@ -100,18 +125,18 @@ def buyurtma_tugallik(cur, order_id):
     # 1) Buyurtmadagi tahlillar (soha `tahlillar` katalogidan olinadi, chunki
     #    order_items.soha ko'p hollarda NULL)
     cur.execute("""
-        SELECT oi.nomi, COALESCE(t.soha, oi.soha)
+        SELECT oi.nomi, COALESCE(t.soha, oi.soha), oi.tahlil_id
         FROM order_items oi
         LEFT JOIN tahlillar t ON t.id = oi.tahlil_id
         WHERE oi.order_id = %s
     """, (order_id,))
-    buyurtma = []
-    for nomi, soha in _qatorlar(cur):
+    buyurtma = []                         # [(nomi, tahlil_id)]
+    for nomi, soha, tahlil_id in _qatorlar(cur):
         if not nomi or not str(nomi).strip():
             continue
         if soha and str(soha).strip().lower() in LAB_BO_LMAGAN_SOHALAR:
             continue                      # UZI / vrach qabuli — blankaga kirmaydi
-        buyurtma.append(str(nomi).strip())
+        buyurtma.append((str(nomi).strip(), tahlil_id))
 
     # 2) Bajarilgan tahlil nomlari
     cur.execute("""
@@ -133,7 +158,21 @@ def buyurtma_tugallik(cur, order_id):
         # birorta qiymat bo'lsa tayyor deb hisoblaymiz.
         return (bool(bajarilgan), [], 0)
 
-    yetishmaydi = [n for n in buyurtma if _norm(n) not in bajarilgan]
+    # Saqlangan panel a'zolari alohida kutilmaydi (PANEL_AZOLARI izohiga qarang)
+    panel_bilan = set()
+    for n, _tid in buyurtma:
+        if _norm(n) in bajarilgan:
+            panel_bilan |= panel_azolari(n)
+
+    def _bajarildimi(n, tid):
+        if _norm(n) in bajarilgan:
+            return True
+        try:
+            return tid is not None and int(tid) in panel_bilan
+        except (TypeError, ValueError):
+            return False
+
+    yetishmaydi = [n for n, tid in buyurtma if not _bajarildimi(n, tid)]
     return (not yetishmaydi, yetishmaydi, len(buyurtma))
 
 

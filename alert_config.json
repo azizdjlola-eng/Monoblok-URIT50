@@ -103,9 +103,11 @@
         "match": [
           "kalsiy"
         ],
-        "low": 1.5,
-        "high": 3.5,
-        "zero": true
+        "low": 1.8,
+        "high": 2.7,
+        "zero": true,
+        "high_level": "critical",
+        "low_msg": "past — gipokalsiemiya yoki namuna xatosi, qayta tekshiring"
       },
       {
         "key": "kaliy",
@@ -262,7 +264,10 @@
     "delay_alert_min": 60,
     "morning_check_time": "08:20",
     "heartbeat_timeout_sec": 30,
-    "repeat_alert_min": 30,
+    "morning_min_age_min": 30,
+    "order_rule_min_age_min": 20,
+    "repeat_alert_min": 90,
+    "max_popups_per_order": 2,
     "cbc_tahlil_ids": [
       27
     ],

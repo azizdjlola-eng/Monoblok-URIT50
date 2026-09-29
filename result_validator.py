@@ -1211,5 +1211,18 @@ def confirm_save(parent, issues, cfg=None, title_extra=""):
         dlg.geometry(f"{w}x{h}")
 
     fix_btn.focus_set()
+    # Sichqoncha ham XAVFSIZ tugmada tursin (egasi talabi, 2026-09-29): shoshilgan
+    # hamshira shubhali natijani o'qimasdan "baribir saqlansin" ni bosib qo'ymasin
+    def _kursor():
+        try:
+            import ctypes
+            fix_btn.update_idletasks()
+            ctypes.windll.user32.SetCursorPos(
+                int(fix_btn.winfo_rootx() + fix_btn.winfo_width() // 2),
+                int(fix_btn.winfo_rooty() + fix_btn.winfo_height() // 2))
+        except Exception:
+            pass
+    dlg.after(80, _kursor)
+    dlg.protocol("WM_DELETE_WINDOW", do_fix)
     dlg.wait_window()
     return result["ok"]
