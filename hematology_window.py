@@ -502,10 +502,49 @@ def open_window(parent=None, on_import_callback=None):
         hist_canvases[_k] = _cv
     hist_current = [None]   # joriy bemorning histograms lug'ati
 
+    # ── Gistogramma IZOHI — har gistogramma tepasida (faqat oynada, blankaga chiqmaydi) ──
+    # Egasi talabi (2026-09-29): gistogrammadan laborantga foydali xulosa — nimaga
+    # e'tibor berish kerak (surtma, qayta o'lchash). Mantiq: gemo_histogram.histogram_izoh
+    izoh_frame = tk.Frame(right_panel, height=165)
+    izoh_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(6, 0))
+    izoh_frame.pack_propagate(False)
+    izoh_texts = {}
+    for _k in _gh.HIST_ORDER:
+        _tx = tk.Text(izoh_frame, width=1, height=1, wrap=tk.WORD, font=("Arial", 9),
+                      bg="#FFFDF4", relief=tk.SOLID, bd=1, padx=6, pady=4, cursor="arrow")
+        _tx.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=1)
+        _tx.tag_configure("sarlavha", font=("Arial", 9, "bold"), foreground="#333333")
+        _tx.tag_configure("!", foreground="#B71C1C", font=("Arial", 9, "bold"))
+        _tx.tag_configure("i", foreground="#37474F")
+        _tx.tag_configure("ok", foreground="#2E7D32")
+        _tx.configure(state=tk.DISABLED)
+        izoh_texts[_k] = _tx
+    hist_izoh_ctx = [None, None]   # (values, is_flags) — joriy bemor
+
+    def _redraw_izoh():
+        h = hist_current[0] or {}
+        vals, isf = hist_izoh_ctx
+        try:
+            izoh = _gh.histogram_izoh(vals or {}, h, isf) if h else {}
+        except Exception as e:
+            print(f"[GEMO] gistogramma izohi: {e}")
+            izoh = {}
+        belgi = {"!": "⚠ ", "i": "• ", "ok": "✓ "}
+        for k, tx in izoh_texts.items():
+            tx.configure(state=tk.NORMAL)
+            tx.delete("1.0", tk.END)
+            satrlar = izoh.get(k) or []
+            if satrlar:
+                tx.insert(tk.END, f"{k} tahlili\n", "sarlavha")
+                for lvl, txt in satrlar:
+                    tx.insert(tk.END, belgi.get(lvl, "") + txt + "\n", lvl)
+            tx.configure(state=tk.DISABLED)
+
     def _redraw_histograms(*_):
         h = hist_current[0] or {}
         for k, cv in hist_canvases.items():
             _gh.draw_histogram(cv, k, h.get(k))
+        _redraw_izoh()
 
     for _k, _cv in hist_canvases.items():
         _cv.bind("<Configure>", lambda e, k=_k: _gh.draw_histogram(
@@ -601,9 +640,11 @@ def open_window(parent=None, on_import_callback=None):
 
         pinfo  = patients_data[sample_id]
         hist_current[0] = pinfo.get('histograms')
-        _redraw_histograms()
         tests  = pinfo.get('tests', {})
         edits  = edited_values.get(sample_id, {})
+        hist_izoh_ctx[0] = {k: edits.get(k, (t or {}).get('value', '')) for k, t in tests.items()}
+        hist_izoh_ctx[1] = pinfo.get('is_flags') or []
+        _redraw_histograms()
         age    = pinfo.get('age', '')
         gender = pinfo.get('gender', '')
         no     = 1
