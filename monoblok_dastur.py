@@ -248,9 +248,49 @@ _db_query_lock = Lock()  # Fon oqimida (background thread) so'rov yuborilganda u
 
 _db_first_connect = True  # Birinchi ulanish uchun flag
 
+_db_fon_lokal = threading.local()
+
+
+def _db_conn_fon():
+    """Fon oqimi uchun O'Z ulanishi (har oqimga alohida, oqim tugasa yo'qoladi).
+
+    05.10.2026: dastur «Не отвечает» bo'lib qotardi — CPU 0, bazada so'rov yo'q.
+    Sabab: bitta umumiy ulanishni asosiy (UI) oqim qulfsiz, fon oqimlari
+    (IFA kuzatuvi har 60 s, filial/qidiruv yuklovchilari) esa _db_query_lock
+    bilan ishlatardi — qulf faqat fon oqimlarini bir-biridan himoya qiladi.
+    Ikki oqim bir ulanishga bir vaqtda so'rov yuborsa biri ikkinchisining
+    javobini o'qib oladi, ikkinchisi esa abadiy kutadi (mysql-connector 9 da
+    o'qish timeout'i yo'q). Endi fon oqimi umumiy ulanishga umuman tegmaydi.
+    """
+    conn = getattr(_db_fon_lokal, "conn", None)
+    if conn is not None:
+        try:
+            conn.ping(reconnect=True, attempts=1, delay=0)
+            return conn
+        except Exception:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            _db_fon_lokal.conn = None
+    try:
+        config = DB_CONFIG.copy()
+        config.update({"connection_timeout": 10, "raise_on_warnings": False,
+                       "use_pure": True, "autocommit": True})
+        _db_fon_lokal.conn = mysql.connector.connect(**config)
+        return _db_fon_lokal.conn
+    except Exception as e:
+        print(f"[OGOHLANTIRISH] Fon oqimi bazaga ulanmadi: {e}")
+        return None
+
+
 def db_conn():
     """Database ulanishi (Connection Pooling) - yaxshilangan xato boshqaruvi"""
     global _db_connection, _db_first_connect
+
+    # Umumiy ulanish FAQAT asosiy (UI) oqimniki — fon oqimi o'zinikini oladi.
+    if threading.current_thread() is not threading.main_thread():
+        return _db_conn_fon()
 
     with _db_connection_lock:
         if _db_connection is not None:
@@ -24931,6 +24971,49 @@ class NatijaKiritish:
             traceback.print_exc()
 
 
+def _after_oqimga_xavfsiz(root):
+    """Fon oqimidan chaqirilgan `widget.after(...)` ni asosiy oqimga navbat orqali o'tkazadi.
+
+    05.10.2026: dastur «Не отвечает» bo'lib qotardi (CPU 0, bazada so'rov yo'q).
+    Analizator listenerlari, Qon nazorati, OneDrive kuzatuvchisi natijani oynaga
+    `self.root.after(0, ...)` bilan FON OQIMIDAN yuborardi — Tcl oqimlarga xavfsiz
+    emas, bu tkinter'ni jim qotiradi (registratorda ham isbotlangan, 2026-09-04).
+    Endi fon oqimi Tcl'ga umuman tegmaydi: chaqiruv navbatga tushadi, asosiy oqim
+    har 50 ms da navbatni bo'shatib haqiqiy `after` ni o'zi qo'yadi.
+    """
+    import queue as _queue
+    navbat = _queue.Queue()
+    asl_after = tk.Misc.after
+    asosiy = threading.main_thread()
+
+    def after(self, ms, func=None, *args):
+        if threading.current_thread() is asosiy:
+            return asl_after(self, ms, func, *args)
+        if func is None:                      # after(ms) = kutish
+            time.sleep(ms / 1000.0)
+            return None
+        navbat.put((self, ms, func, args))
+        return None                           # fon oqimida id kerak emas
+
+    def bosh_navbat():
+        try:
+            while True:
+                w, ms, func, args = navbat.get_nowait()
+                try:
+                    asl_after(w, ms, func, *args)
+                except Exception as e:        # oyna yopilgan bo'lishi mumkin
+                    print(f"[OGOHLANTIRISH] fon chaqiruvi o'tkazilmadi: {e}")
+        except _queue.Empty:
+            pass
+        try:
+            asl_after(root, 50, bosh_navbat)
+        except Exception:
+            pass                              # root yopilgan
+
+    tk.Misc.after = after
+    asl_after(root, 50, bosh_navbat)
+
+
 def main():
     try:
         print("=" * 60)
@@ -24940,6 +25023,7 @@ def main():
         # Tkinter import tekshirish
         try:
             root = tk.Tk()
+            _after_oqimga_xavfsiz(root)
             print("[OK] Tkinter oynasi yaratildi")
         except Exception as e:
             print(f"[XATO] Tkinter oynasi yaratishda xato: {e}")
