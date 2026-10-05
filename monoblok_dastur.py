@@ -10186,7 +10186,11 @@ class MonoblokApp:
         pids = []
         try:
             ps_cmd = ("Get-CimInstance Win32_Process -Filter \"Name='python.exe' or Name='pythonw.exe'\" | "
-                      "Where-Object { $_.CommandLine -like '*COM4_Urit50*' } | "
+                      # 05.10.2026: xizmat endi urit50_service.py nomi bilan ishga
+                      # tushadi — faqat COM4_Urit50 qidirilgani uchun yetimlar
+                      # to'planib COM portni ushlab qolardi. Ikkala nom qidiriladi.
+                      "Where-Object { $_.CommandLine -like '*COM4_Urit50*' -or "
+                      "$_.CommandLine -like '*urit50_service*' } | "
                       "ForEach-Object { $_.ProcessId }")
             result = subprocess.run(
                 ['powershell', '-NoProfile', '-Command', ps_cmd],
