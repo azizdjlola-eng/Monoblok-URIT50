@@ -58,7 +58,7 @@ def _db_conn():
     if not DB_AVAILABLE:
         return None
     try:
-        return mysql.connector.connect(**DB_CONFIG, connection_timeout=5)
+        return mysql.connector.connect(**{**DB_CONFIG, "connection_timeout": 5})
     except Exception as e:
         print(f"[QC] DB xato: {e}")
         return None

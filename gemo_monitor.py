@@ -217,7 +217,7 @@ def _fetch_today_cbc_orders(cfg):
     if not conds:
         return []
 
-    conn = mysql.connector.connect(connection_timeout=10, **DB_CONFIG)
+    conn = mysql.connector.connect(**{**DB_CONFIG, "connection_timeout": 10})
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute(f"""
@@ -267,7 +267,7 @@ def _count_today_cbc_results():
     """Bugun BC-20S dan kelgan natijali buyurtmalar soni (test_results bo'yicha)."""
     from monoblok_db_config import DB_CONFIG
     import mysql.connector
-    conn = mysql.connector.connect(connection_timeout=10, **DB_CONFIG)
+    conn = mysql.connector.connect(**{**DB_CONFIG, "connection_timeout": 10})
     try:
         cur = conn.cursor()
         cur.execute("""SELECT COUNT(DISTINCT order_id) FROM test_results
@@ -287,7 +287,7 @@ def _fetch_today_bc20s_arrivals():
     Sabab aniqlash uchun ("shu buyurtmadan keyin boshqa namuna keldimi?")."""
     from monoblok_db_config import DB_CONFIG
     import mysql.connector
-    conn = mysql.connector.connect(connection_timeout=10, **DB_CONFIG)
+    conn = mysql.connector.connect(**{**DB_CONFIG, "connection_timeout": 10})
     try:
         cur = conn.cursor()
         cur.execute("""SELECT order_id, MAX(created_at) FROM test_results
@@ -324,7 +324,7 @@ def _fetch_orphan_cbc_orders(cfg, arrivals):
         return []
     from monoblok_db_config import DB_CONFIG
     import mysql.connector
-    conn = mysql.connector.connect(connection_timeout=10, **DB_CONFIG)
+    conn = mysql.connector.connect(**{**DB_CONFIG, "connection_timeout": 10})
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute(f"""
