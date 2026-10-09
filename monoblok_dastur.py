@@ -2042,6 +2042,14 @@ def create_qondan_mazok_table_in_doc(doc, result_json, order_info):
 
     _add_section_title(doc, "QONDAN MAZOK (MORFOLOGIYA) NATIJALARI")
 
+    # ── Umumiy qon ko'rsatkichlari (buyurtmada umumiy qon yo'q bo'lsa,
+    #    analizator natijasi shu yerda — on_hematology_import 'cbc' ga yozadi)
+    cbc = data.get('cbc')
+    if isinstance(cbc, dict) and cbc:
+        create_hematology_cbc_table_in_doc(doc, cbc, order_info, subsection=True)
+    if not (set(data) - {'cbc'}):
+        return   # morfologiya hali kiritilmagan
+
     # ── Leykogramma jadvali ───────────────────────────────────────────────────
     sub1 = doc.add_paragraph()
     sub1.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -3443,10 +3451,12 @@ def _hema_analyzer_label() -> str:
         return "Mindray BC-20S"
 
 
-def create_hematology_cbc_table_in_doc(doc: Document, result_data, order_info: dict):
+def create_hematology_cbc_table_in_doc(doc: Document, result_data, order_info: dict,
+                                       subsection=False):
     """Umumiy qon tahlili (BC-20S) jadvali — Ko'rsatkich, Qisqa nom, Birlik, Norma, Natija.
     Multi-ref norma: yosh va jinsga qarab norma aniqlanadi.
     Normadan yuqori: qizil + ↑, past: ko'k + ↓.
+    subsection=True — boshqa bo'lim ichida (qondan mazok): kichik sarlavha.
     """
     rd = {}
     if result_data:
@@ -3468,9 +3478,13 @@ def create_hematology_cbc_table_in_doc(doc: Document, result_data, order_info: d
 
     heading = doc.add_paragraph()
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _set_para_spacing(heading, 0, 0, line_spacing=1.0)
-    _add_run_tnr(heading, "UMUMIY QON TAHLILI", 14, bold=True,
-                 color_rgb=_group_title_rgb())
+    if subsection:
+        _set_para_spacing(heading, 2, 1, line_spacing=1)
+        _add_run_tnr(heading, "Umumiy qon tahlili ko'rsatkichlari", 11, bold=True)
+    else:
+        _set_para_spacing(heading, 0, 0, line_spacing=1.0)
+        _add_run_tnr(heading, "UMUMIY QON TAHLILI", 14, bold=True,
+                     color_rgb=_group_title_rgb())
     sample_no = rd.get('sid') or rd.get('sno') or order_info.get('sample_id', '') or ''
     _hema_model = rd.get('analyzer') or _hema_analyzer_label()
     meta = f"Avtomatik gematologik analizator: {_hema_model} namuna sample № {sample_no}".strip()
@@ -6387,6 +6401,19 @@ def create_unified_blank(order_id: int, order_info: dict, organized: dict, test_
                                         if 'qondan' in (t.get('nomi') or '').lower()
                                         and 'mazok' in (t.get('nomi') or '').lower()]
                         for _mt in _mazok_tests:
+                            _mj = test_results.get(_mt['id'], '')
+                            if _mj and str(_mj).strip() not in ('{}', '', 'None'):
+                                create_qondan_mazok_table_in_doc(doc, _mj, order_info)
+                                break
+                    elif not any(_is_hematology_cbc_test(_t.get('nomi', ''))
+                                 for _tl in organized.get('by_group', {}).values()
+                                 for _t in _tl):
+                        # Buyurtmada umumiy qon yo'q — morfologiya o'zi alohida chiqadi
+                        # (create_results_table uni o'tkazib yuboradi; CBC esa natija
+                        # ichidagi 'cbc' kalitidan chiziladi)
+                        for _mt in group_tests_list:
+                            if not _is_qondan_mazok_test(_mt.get('nomi', '')):
+                                continue
                             _mj = test_results.get(_mt['id'], '')
                             if _mj and str(_mj).strip() not in ('{}', '', 'None'):
                                 create_qondan_mazok_table_in_doc(doc, _mj, order_info)
@@ -14655,7 +14682,12 @@ Sana: {_sana_fmt}"""
                     rd = _parse_json_result(test_id)
                     row_idx += 1
                     _rt = 'row_even' if row_idx % 2 == 0 else 'row_odd'
-                    if rd:
+                    if rd and not (set(rd) - {'cbc'}):
+                        # Faqat analizator CBC qo'shilgan, morfologiya hali kiritilmagan
+                        _display = "CBC qo'shildi — morfologiyani kiriting"
+                        _st = 'kutilmoqda'
+                        _st_txt = "Kutilmoqda"
+                    elif rd:
                         # Natija ustuni: leykogramma + xulosa qisqartmasi
                         _parts = []
                         if rd.get('wbc'): _parts.append(f"WBC:{rd['wbc']}")
@@ -18238,6 +18270,11 @@ Sana: {_sana_fmt}"""
                     try: cbc = json.loads(str(_raw))
                     except Exception: cbc = {}
                 break
+        # Buyurtmada umumiy qon yo'q — analizator CBC morfologiya natijasining
+        # o'zida ('cbc' kaliti, on_hematology_import yozadi)
+        own_cbc = old.get('cbc') if isinstance(old.get('cbc'), dict) else None
+        if not cbc and own_cbc:
+            cbc = own_cbc
 
         def _fv(key):
             """old_result yoki default bo'sh string"""
@@ -18329,7 +18366,7 @@ Sana: {_sana_fmt}"""
         # ── Avtomatik xulosa generator (professional klinik tahlil) ─────────
         def _auto_xulosa(morph_dict):
             def _f(k):
-                try: return float(cbc.get(k) or 0)
+                try: return float(cbc.get(k) or cbc.get(_CBC_KOD_ALIAS.get(k, '')) or 0)
                 except: return 0.0
 
             hgb   = _f('HGB');   mcv  = _f('MCV');    mch  = _f('MCH')
@@ -18523,8 +18560,8 @@ Sana: {_sana_fmt}"""
             if not all_parts:
                 return (
                     "Periferik qon surtmasida patologik o'zgarishlar aniqlanmadi. "
-                    "Umumiy qon tahlili ko'rsatkichlari me'yor doirasida.\n\n"
-                    + DISCLAIMER
+                    + ("Umumiy qon tahlili ko'rsatkichlari me'yor doirasida." if cbc else "")
+                    + "\n\n" + DISCLAIMER
                 )
 
             # Jumlalarni birlashtirish
@@ -18824,6 +18861,8 @@ Sana: {_sana_fmt}"""
             if xul and _DISCLAIMER_TXT not in xul:
                 xul = xul.rstrip() + "\n\n" + _DISCLAIMER_TXT
             data['xulosa'] = xul
+            if own_cbc:
+                data['cbc'] = own_cbc
             result_json_out = json.dumps(data, ensure_ascii=False)
             self.test_results[test_id] = result_json_out
             self._mark_result_pending(test_id, result_json_out)
@@ -23885,32 +23924,58 @@ Sana: {_sana_fmt}"""
                 db_nm = _HEMA_HL7_MAP.get(pk, pk)
                 all_vals[db_nm] = v
 
+        cbc_data = None
+        if all_vals:
+            cbc_data = {'result': display_id, 'type': 'hematology_cbc',
+                        'source': 'BC-20S', 'sid': sample_id,   # 'source' — tarixiy manba tegi (gemo_monitor)
+                        'analyzer': _hema_analyzer_label(),
+                        'patient_age': patient_info.get('age', ''),
+                        'patient_gender': patient_info.get('gender', ''),
+                        **all_vals}
+            # WBC/RBC/PLT gistogrammalari (blankada chiziladi)
+            try:
+                import gemo_histogram as _gh
+                _hp = _gh.pack_histograms(patient_info.get('histograms'))
+                if _hp:
+                    cbc_data['histograms'] = _hp
+            except Exception:
+                pass
+
+        has_cbc_test = False
         for test in self.current_tests:
             tname_low = test.get('nomi', '').lower()
             is_cbc = (any(exact in tname_low for exact in CBC_EXACT_NAMES)
                       and not any(ex in tname_low for ex in CBC_EXCLUDE))
+            has_cbc_test = has_cbc_test or is_cbc
             # DIQQAT: ilgari bu yerda "natijasi yo'q bo'lsa" sharti bor edi va
             # shu sababli XATO natijani analizatordan QAYTA import qilib
             # tuzatib bo'lmasdi (eski natija joyida qolardi). Endi rejaga
             # har doim qo'shamiz — ustiga yozishni pastdagi tasdiq oynasi
             # hal qiladi.
-            if is_cbc and all_vals:
-                cbc_data = {'result': display_id, 'type': 'hematology_cbc',
-                            'source': 'BC-20S', 'sid': sample_id,   # 'source' — tarixiy manba tegi (gemo_monitor)
-                            'analyzer': _hema_analyzer_label(),
-                            'patient_age': patient_info.get('age', ''),
-                            'patient_gender': patient_info.get('gender', ''),
-                            **all_vals}
-                # WBC/RBC/PLT gistogrammalari (blankada chiziladi)
-                try:
-                    import gemo_histogram as _gh
-                    _hp = _gh.pack_histograms(patient_info.get('histograms'))
-                    if _hp:
-                        cbc_data['histograms'] = _hp
-                except Exception:
-                    pass
+            if is_cbc and cbc_data:
                 plan.append((test['id'], test.get('nomi', ''),
                              json.dumps(cbc_data, ensure_ascii=False)))
+
+        # Buyurtmada umumiy qon YO'Q, lekin qondan mazok bor — CBC ko'rsatkichlari
+        # morfologiya natijasining 'cbc' kalitiga yoziladi (kiritilgan morfologiya
+        # saqlanib qoladi): oynada, xulosada va blankada morfologiya bilan chiqadi.
+        mazok_new_cbc = set()   # eski CBC yo'q — qo'shilyapti, ustiga yozilmayapti (tasdiq shart emas)
+        if cbc_data and not has_cbc_test:
+            for test in self.current_tests:
+                if not _is_qondan_mazok_test(test.get('nomi', '')):
+                    continue
+                old_raw = self.test_results.get(test['id'], '')
+                try:
+                    old = json.loads(str(old_raw)) if str(old_raw).strip().startswith('{') else {}
+                except Exception:
+                    old = {}
+                if not isinstance(old, dict):
+                    old = {}
+                if not old.get('cbc'):
+                    mazok_new_cbc.add(test['id'])
+                plan.append((test['id'], test.get('nomi', ''),
+                             json.dumps({**old, 'cbc': cbc_data}, ensure_ascii=False)))
+                break
 
         if not plan:
             self.status_var.set(
@@ -23921,26 +23986,38 @@ Sana: {_sana_fmt}"""
 
         # ── 2-BOSQICH: mavjud natija ustiga yozilsa — TASDIQ so'raymiz ───────
         if not self._confirm_result_overwrite(
-                plan, manba=f"BC-20S gematologiya (Sample ID: {sample_id})"):
+                [p for p in plan if p[0] not in mazok_new_cbc],
+                manba=f"BC-20S gematologiya (Sample ID: {sample_id})"):
             self.status_var.set(
                 "[BEKOR] Gematologiya natijasi yangilanmadi — eski natija qoldi")
             return 0
 
         # ── 3-BOSQICH: yozamiz ──────────────────────────────────────────────
         count = 0
+        mazok_updated = False
         for test_id, _tname, result_json in plan:
             self.test_results[test_id] = result_json
             # DB ga F2 bosilganda tushadi — shu paytgacha eski baza qiymati
             # bu natijani bosib ketmasin
             self._mark_result_pending(test_id, result_json)
-            if test_id in item_map:
+            if _is_qondan_mazok_test(_tname):
+                mazok_updated = True
+            elif test_id in item_map:
                 self.refresh_single_test_display(item_map[test_id], test_id)
             count += 1
+        if mazok_updated:
+            self.load_tests()   # morfologiya qatori o'z ko'rinishi bilan qayta chiziladi
 
-        self.status_var.set(
-            f"✅ Gematologiya: {count} ta natija o'tkazildi "
-            f"({patient_info.get('name', sample_id)}) — bazaga saqlash uchun F2 bosing"
-        )
+        if mazok_updated:
+            self.status_var.set(
+                f"✅ Gematologiya: umumiy qon ko'rsatkichlari morfologiyaga qo'shildi "
+                f"({patient_info.get('name', sample_id)}) — morfologiyani kiriting, so'ng F2"
+            )
+        else:
+            self.status_var.set(
+                f"✅ Gematologiya: {count} ta natija o'tkazildi "
+                f"({patient_info.get('name', sample_id)}) — bazaga saqlash uchun F2 bosing"
+            )
         return count
 
     def open_biochemistry_raw(self):
