@@ -33,7 +33,13 @@ except Exception:
     MINDRAY_DAT_BASE = _np.bc20s_dat()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PREFS_PATH = os.path.join(BASE_DIR, "bc20s_import_prefs.json")
+# Oxirgi USB papka eslab qolinadi — EXE da Program Files ga yozib bo'lmaydi,
+# shuning uchun natija_papka.sozlama_papka() (koddan — ilgarigidek shu papka).
+try:
+    import natija_papka as _npp
+    PREFS_PATH = os.path.join(_npp.sozlama_papka(), "bc20s_import_prefs.json")
+except Exception:
+    PREFS_PATH = os.path.join(BASE_DIR, "bc20s_import_prefs.json")
 
 # ── Parametrlar: CSV kaliti → HL7 (kod, nom, tizim, birlik). Tartib analizator
 #    HL7 xabaridagi kabi (parse_hl7_file va _save_to_db shu kodlarni biladi).
