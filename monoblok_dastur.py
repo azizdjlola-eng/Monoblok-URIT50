@@ -3698,7 +3698,13 @@ def create_urine_full_table_in_doc(doc: Document, result_data, order_info: dict)
                   'BIL': 'Mkmol/l', 'GLU': 'Mmol/l', 'PRO': 'G/l', 'SG': 'g/l',
                   'PH': '', 'BLD': 'Erit/mkl', 'Vc': 'Mmol/l', 'MA': 'Mg/l',
                   'Ca': 'Mmol/l', 'CR': 'Mmol/l', 'ACR': 'mg/mmol'}
-    meta = f"Kimyoviy tahlil (URIT-50 Analizator)"
+    _manba = str(rd.get('source') or '')
+    if _manba == "Qo'lda":
+        meta = "Kimyoviy tahlil (test poloska, qo'lda kiritilgan)"
+    elif "qo'lda" in _manba.lower():
+        meta = "Kimyoviy tahlil (URIT-50 Analizator, qo'lda tuzatilgan)"
+    else:
+        meta = f"Kimyoviy tahlil (URIT-50 Analizator)"
     if rd.get('sid'):
         meta += f" Sample ID: {rd.get('sid')}"
     if rd.get('sno'):
@@ -15609,8 +15615,13 @@ Sana: {_sana_fmt}"""
             except Exception:
                 pass
 
+        # Siydik — natija hali yo'q: analizator ishlamasa / poloska tugasa qo'lda
+        if not result_json and self._get_analyzer_managed_type(test_id) == 'urine':
+            self._siydik_qolda_taklif(test_id, test_name)
+            return
+
         test_name_lower = test_name.lower()
-        
+
         # Test turini aniqlash (DB so'rovi YO'Q - test_data dan o'qish)
         test_type = (test_data.get('test_type') or '').strip().lower() if test_data else ''
         type_from_norma = (test_data.get('type') or '').strip().lower() if test_data else ''
@@ -16206,9 +16217,65 @@ Sana: {_sana_fmt}"""
                    command=popup.destroy).pack(pady=10)
         popup.focus_set()
 
-    def _show_urine_mikroskopiya_popup(self, test_id, test_name, result_dict):
+    # Siydik kimyoviy qismini QO'LDA kiritish (test poloska) — analizator ishlamasa
+    # yoki poloska tugaganda (mijoz talabi, 2026-10-11). Variantlar URIT poloskasi
+    # darajalari; Combobox tahrirlanadi — istalgan qiymat yozilishi mumkin.
+    SIYDIK_QOLDA_VARIANT = {
+        'LEU': ["manfiy", "± (15)", "+1 (70)", "+2 (125)", "+3 (500)"],
+        'KET': ["manfiy", "± (0.5)", "+1 (1.5)", "+2 (4.0)", "+3 (8.0)"],
+        'NIT': ["manfiy", "musbat"],
+        'URO': ["normal", "+1 (33)", "+2 (66)", "+3 (131)"],
+        'BIL': ["manfiy", "+1 (8.6)", "+2 (33)", "+3 (100)"],
+        'GLU': ["manfiy", "± (5.5)", "+1 (14)", "+2 (28)", "+3 (55)", "+4 (111)"],
+        'PRO': ["manfiy", "± (0.15)", "+1 (0.3)", "+2 (1.0)", "+3 (3.0)"],
+        'SG':  ["1.000", "1.005", "1.010", "1.015", "1.020", "1.025", "1.030"],
+        'PH':  ["5.0", "5.5", "6.0", "6.5", "7.0", "7.5", "8.0", "8.5", "9.0"],
+        'BLD': ["manfiy", "± (10)", "+1 (25)", "+2 (80)", "+3 (200)"],
+        'Vc':  ["manfiy", "± (0.6)", "+1 (1.4)", "+2 (2.8)"],
+        'MA':  ["10", "30", "80", "150"],
+        'Ca':  ["1.0", "2.5", "5.0", "7.5", "10"],
+        'CR':  ["0.9", "4.4", "8.8", "17.7", "26.5"],
+    }
+    SIYDIK_QOLDA_KODLAR = ['LEU', 'KET', 'NIT', 'URO', 'BIL', 'GLU', 'PRO', 'SG',
+                           'PH', 'BLD', 'Vc', 'MA', 'Ca', 'CR']
+
+    @staticmethod
+    def _siydik_qolda_patologikmi(code, val):
+        """Qo'lda kiritilgan siydik qiymati normadan chetmi (blankada qizil)."""
+        v = (val or '').strip().lower()
+        if not v:
+            return False
+        if code in ('SG', 'PH', 'MA', 'Ca', 'CR'):
+            try:
+                n = float(re.search(r'[\d.]+', v.replace(',', '.')).group(0))
+            except Exception:
+                return False
+            chegara = {'SG': (1.010, 1.025), 'PH': (5.5, 7.0), 'MA': (0, 20),
+                       'Ca': (1.5, 9.0), 'CR': (2.0, 22.0)}[code]
+            return not (chegara[0] <= n <= chegara[1])
+        return v not in ('manfiy', 'neg', 'negative', '-', '(0) manfiy', 'normal', 'norma')
+
+    def _siydik_qolda_taklif(self, test_id, test_name):
+        """Siydik natijasi analizatordan kelmagan — qo'lda kiritishni taklif qiladi.
+        True — taklif ko'rsatildi (chaqiruvchi boshqa ish qilmasin)."""
+        if not messagebox.askyesno(
+                "Siydik tahlili",
+                "Bu tahlil natijasi analizatordan (URIT) hali kelmagan.\n\n"
+                "Kimyoviy qismni (test poloska) QO'LDA kiritasizmi?\n\n"
+                "«Yo'q» — analizatordan kutiladi («● Siydik» tugmasi).",
+                parent=self.root):
+            return True
+        self._show_urine_mikroskopiya_popup(
+            test_id, test_name,
+            {'type': 'urine', 'result': "qo'lda", 'source': "Qo'lda",
+             'all_analytes': {}},
+            qolda=True)
+        return True
+
+    def _show_urine_mikroskopiya_popup(self, test_id, test_name, result_dict, qolda=False):
         """Siydik tahlili uchun to'liq mikroskopiya kiritish oynasi.
-        Chap panel: URIT-50 analitlari (faqat ko'rish).
+        Chap panel: URIT-50 analitlari (faqat ko'rish) — qolda=True bo'lsa
+        kimyoviy ko'rsatkichlar QO'LDA kiritiladi (test poloska).
         O'ng panel: Mikroskopiya maydonlari (tahrirlash mumkin, avtomatik to'ladi).
         Saqlash: faqat xotirada (DB ga emas), test_results ga yoziladi.
         """
@@ -16313,7 +16380,8 @@ Sana: {_sana_fmt}"""
         hdr.pack(fill=tk.X)
         tk.Label(hdr, text=test_name, bg=hdr_bg, fg="white",
                  font=("Arial", 13, "bold")).pack(side=tk.LEFT, padx=12, pady=8)
-        meta = f"Analizator: {source}"
+        meta = ("Kimyoviy qism: QO'LDA kiritiladi (test poloska)" if qolda
+                else f"Analizator: {source}")
         if sid:
             meta += f"   |   Sample ID: {sid}"
         if sno:
@@ -16326,9 +16394,13 @@ Sana: {_sana_fmt}"""
         content.pack(fill=tk.BOTH, expand=True)
 
         # ── SOL panel: URIT-50 analitlari (Treeview, faqat ko'rish) ──────
-        left = ttk.LabelFrame(content, text="URIT-50 Analitlari  (faqat ko'rish)", padding=4)
+        left = ttk.LabelFrame(
+            content,
+            text=("KIMYOVIY TAHLIL — qo'lda (test poloska)  ✏" if qolda
+                  else "URIT-50 Analitlari  (faqat ko'rish)"),
+            padding=4)
         left.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=(0, 6))
-        left.configure(width=340)
+        left.configure(width=360 if qolda else 340)
         left.pack_propagate(False)
 
         try:
@@ -16337,27 +16409,57 @@ Sana: {_sana_fmt}"""
             _PNAMES  = {}
             _URIT_AN = list(all_analytes.keys())
 
-        ucols = ("Tahlil nomi", "Natija")
-        utree = ttk.Treeview(left, columns=ucols, show="headings", height=20)
-        utree.heading("Tahlil nomi", text="Tahlil nomi")
-        utree.column("Tahlil nomi", width=160, anchor=tk.W)
-        utree.heading("Natija", text="Natija")
-        utree.column("Natija", width=155, anchor=tk.W)
-        utree.tag_configure("ab", foreground="red", font=("Arial", 9, "bold"))
-        usb = ttk.Scrollbar(left, orient=tk.VERTICAL, command=utree.yview)
-        utree.configure(yscrollcommand=usb.set)
-        utree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        usb.pack(side=tk.RIGHT, fill=tk.Y)
+        qolda_vars = {}   # {kod: StringVar} — faqat qolda rejimida
+        if qolda:
+            _BIRLIK = {'LEU': 'Leyk/mkl', 'KET': 'mmol/l', 'NIT': '', 'URO': 'mkmol/l',
+                       'BIL': 'mkmol/l', 'GLU': 'mmol/l', 'PRO': 'g/l', 'SG': '',
+                       'PH': '', 'BLD': 'Erit/mkl', 'Vc': 'mmol/l', 'MA': 'mg/l',
+                       'Ca': 'mmol/l', 'CR': 'mmol/l'}
+            tk.Label(left, text="Ro'yxatdan tanlang yoki qiymatni o'zingiz yozing.\n"
+                                "Bo'sh ko'rsatkich blankada «-» bo'lib chiqadi.\n"
+                                "MA, Ca, CR — faqat 14 parametrli poloskada (bo'sh = chiqmaydi).",
+                     font=("Arial", 8), fg="#555", justify=tk.LEFT
+                     ).pack(anchor="w", pady=(0, 4))
+            qgrid = tk.Frame(left)
+            qgrid.pack(fill=tk.BOTH, expand=True)
+            for r_i, code in enumerate(self.SIYDIK_QOLDA_KODLAR):
+                if code == 'MA':
+                    ttk.Separator(qgrid, orient=tk.HORIZONTAL).grid(
+                        row=r_i * 2 - 1 if r_i else 0, column=0, columnspan=3,
+                        sticky="ew", pady=(4, 2))
+                tk.Label(qgrid, text=f"{_PNAMES.get(code, code)} ({code})",
+                         font=("Arial", 9), anchor="w", width=19
+                         ).grid(row=r_i * 2, column=0, sticky="w", pady=1)
+                qv = tk.StringVar(value=(all_analytes.get(code) or '').strip())
+                ttk.Combobox(qgrid, textvariable=qv, width=12,
+                             values=self.SIYDIK_QOLDA_VARIANT.get(code, [])
+                             ).grid(row=r_i * 2, column=1, sticky="w", pady=1, padx=2)
+                tk.Label(qgrid, text=_BIRLIK.get(code, ''), font=("Arial", 8), fg="#666"
+                         ).grid(row=r_i * 2, column=2, sticky="w", padx=2)
+                qolda_vars[code] = qv
 
-        for code in _URIT_AN:
-            val = (all_analytes.get(code) or '').strip()
-            if not val:
-                continue
-            name_disp = _PNAMES.get(code, code)
-            is_ab = ('+' in val or '>' in val or '<' in val) and \
-                    'normal' not in val.lower() and 'neg' not in val.lower()
-            utree.insert("", tk.END, values=(name_disp, val),
-                         tags=("ab",) if is_ab else ())
+        ucols = ("Tahlil nomi", "Natija")
+        if not qolda:   # qolda rejimida yuqoridagi kiritish maydonlari turadi
+            utree = ttk.Treeview(left, columns=ucols, show="headings", height=20)
+            utree.heading("Tahlil nomi", text="Tahlil nomi")
+            utree.column("Tahlil nomi", width=160, anchor=tk.W)
+            utree.heading("Natija", text="Natija")
+            utree.column("Natija", width=155, anchor=tk.W)
+            utree.tag_configure("ab", foreground="red", font=("Arial", 9, "bold"))
+            usb = ttk.Scrollbar(left, orient=tk.VERTICAL, command=utree.yview)
+            utree.configure(yscrollcommand=usb.set)
+            utree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            usb.pack(side=tk.RIGHT, fill=tk.Y)
+
+            for code in _URIT_AN:
+                val = (all_analytes.get(code) or '').strip()
+                if not val:
+                    continue
+                name_disp = _PNAMES.get(code, code)
+                is_ab = ('+' in val or '>' in val or '<' in val) and \
+                        'normal' not in val.lower() and 'neg' not in val.lower()
+                utree.insert("", tk.END, values=(name_disp, val),
+                             tags=("ab",) if is_ab else ())
 
         # ── O'NG panel: Mikroskopiya kiritish ────────────────────────────
         right = ttk.LabelFrame(
@@ -16622,12 +16724,55 @@ Sana: {_sana_fmt}"""
             tk.Label(row, text=birlik, bg=row_bg, font=("Arial", 9),
                      fg="#444", anchor="w").pack(side=tk.LEFT, padx=4)
 
+        # ── Qo'lda rejim: LEU/BLD/NIT o'zgarsa mikroskopiya TAKLIFI yangilanadi ──
+        # Faqat laborant hali o'zi o'zgartirmagan (taklif turgan) katakchalar.
+        if qolda:
+            _avto_oxirgi = {k: entry_vars[k].get() for k in ('WBC', 'RBC-D', 'RBC-U', 'BACT')
+                            if k in entry_vars and not (saved_mikro.get(k) or '')}
+
+            def _avto_yangila(*_a):
+                yangi = _calc_auto_mikro(qolda_vars['LEU'].get(), qolda_vars['BLD'].get(),
+                                         qolda_vars['NIT'].get())
+                for k, eski in list(_avto_oxirgi.items()):
+                    if entry_vars[k].get() == eski:
+                        entry_vars[k].set(yangi[k]['value'])
+                        _avto_oxirgi[k] = yangi[k]['value']
+
+            for _k in ('LEU', 'BLD', 'NIT'):
+                qolda_vars[_k].trace_add("write", _avto_yangila)
+
         # ── Quyi tugmalar ─────────────────────────────────────────────────
         btn_frame = tk.Frame(popup, pady=8, padx=10)
         btn_frame.pack(fill=tk.X)
 
+        def _joriy_mikro_fizik():
+            result_dict['mikroskopiya'] = {code: var.get().strip() for code, var in entry_vars.items()}
+            result_dict['fizik'] = {
+                'miqdori': miqdori_var.get().strip(),
+                'rangi': rangi_var.get().strip(),
+                'tiniqligi': tiniqligi_var.get().strip()
+            }
+
         def do_save():
             """Mikroskopiya qiymatlarini xotirada saqlash (DB ga emas)"""
+            if qolda:
+                aa = {k: v.get().strip() for k, v in qolda_vars.items() if v.get().strip()}
+                if not aa and not messagebox.askyesno(
+                        "Siydik tahlili",
+                        "Kimyoviy ko'rsatkichlarning birortasi ham kiritilmadi.\n\n"
+                        "Faqat mikroskopiya bilan saqlansinmi?", parent=popup):
+                    return
+                result_dict['all_analytes'] = aa
+                # Blanka ranglari shu ro'yxatdan olinadi (analizator * belgisi o'rnida)
+                result_dict['abnormal_params'] = [
+                    k for k, v in aa.items() if self._siydik_qolda_patologikmi(k, v)]
+                result_dict['type'] = 'urine'
+                _src = str(result_dict.get('source') or '')
+                if not _src or _src == "Qo'lda":
+                    result_dict['source'] = "Qo'lda"
+                    result_dict['result'] = result_dict.get('result') or "qo'lda"
+                elif "qo'lda" not in _src.lower():
+                    result_dict['source'] = f"{_src} (qo'lda tuzatilgan)"
             mikro_data = {code: var.get().strip() for code, var in entry_vars.items()}
             result_dict['mikroskopiya'] = mikro_data
             result_dict['fizik'] = {
@@ -16661,6 +16806,16 @@ Sana: {_sana_fmt}"""
             btn_frame, text="Bekor qilish", command=popup.destroy
         ).pack(side=tk.RIGHT, padx=4)
 
+        if not qolda:
+            # Analizator natijasini qo'lda tuzatish (masalan poloska noto'g'ri
+            # o'qilgan) — kiritilgan mikroskopiya/fizik qiymatlar yo'qolmaydi.
+            def _qoldaga_otish():
+                _joriy_mikro_fizik()
+                popup.destroy()
+                self._show_urine_mikroskopiya_popup(test_id, test_name, result_dict, qolda=True)
+            ttk.Button(btn_frame, text="✏ Kimyoviy qismni qo'lda tuzatish",
+                       command=_qoldaga_otish).pack(side=tk.LEFT, padx=4)
+
         popup.update_idletasks()
         popup.focus_set()
 
@@ -16681,9 +16836,12 @@ Sana: {_sana_fmt}"""
         # Analizator (siydik / gemotologiya) testlari oddiy matn sifatida tahrirlanmaydi.
         # Natija bor bo'lsa — ko'rish oynasini ochamiz; yo'q bo'lsa — hech narsa qilmaymiz
         # (analizator to'ldiradi). Bu JSON natija buzilishining oldini oladi.
+        # Siydik natijasi yo'q bo'lsa — qo'lda kiritish taklif qilinadi.
         if self._get_analyzer_managed_type(test_id):
             if self.test_results.get(test_id):
                 self._show_analyzer_result_popup(test_id)
+            elif self._get_analyzer_managed_type(test_id) == 'urine':
+                self._siydik_qolda_taklif(test_id, test_name)
             return
 
         # Test turini aniqlash (DB so'rovi YO'Q - test_data dan o'qish)
@@ -17211,7 +17369,7 @@ Sana: {_sana_fmt}"""
     NATIJA_HINT_FORM     = "⧉  Oynada"
     NATIJA_HINT_BIO      = "✎  Qo'lda   yoki   ● Bioximiya"
     NATIJA_HINT_FORM_BIO = "✎  Qo'lda   yoki   ● Bioximiya"
-    NATIJA_HINT_URINE    = "● Siydik"
+    NATIJA_HINT_URINE    = "● Siydik   yoki   ✎ Qo'lda"
     NATIJA_HINT_CBC      = "● Gemotologiya"
     NATIJA_HINT_ANALYZER = "⟳  Analizator"
 
@@ -17525,9 +17683,12 @@ Sana: {_sana_fmt}"""
         # ── Analizator testi (siydik / gemotologiya) — oddiy edit OCHILMAYDI ──────
         # Natija bor bo'lsa ko'rish oynasini ochamiz; aks holda hech narsa qilmaymiz.
         # Bu JSON natijaning oddiy matnga aylanib buzilishini oldini oladi.
+        # Siydik natijasi yo'q bo'lsa — qo'lda kiritish taklif qilinadi.
         if self._get_analyzer_managed_type(test_id):
             if self.test_results.get(test_id):
                 self._show_analyzer_result_popup(test_id)
+            elif self._get_analyzer_managed_type(test_id) == 'urine':
+                self._siydik_qolda_taklif(test_id, test_name)
             return
 
         tname_lower      = test_name.lower()
