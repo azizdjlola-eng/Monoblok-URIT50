@@ -53,8 +53,10 @@ SOCKET_TIMEOUT  = 10.0            # Socket timeout
 RECONNECT_INTERVAL = int(_gema_cfg.get("reconnect_interval", 5))  # Qayta ulanish kutishi (sek)
 MAX_RECONNECT   = 0               # 0 = cheksiz qayta ulanish (siydik analizatori kabi)
 
-# BC-20S natijalar papkasi — oyma-oy tartibda: G:\DASTUR\URIT 50\BC-20s\YYYYMM\
-MINDRAY_DAT_BASE = r"G:\DASTUR\URIT 50\BC-20s"
+# BC-20S natijalar papkasi — oyma-oy tartibda: <asosiy>\BC-20s\YYYYMM\
+# (natija_papka: sozlamadan; standart koddan = G:\DASTUR\URIT 50, EXE = ProgramData)
+import natija_papka as _np
+MINDRAY_DAT_BASE = _np.bc20s_dat()
 
 # ─────────────────────────── GLOBAL STATE ─────────────────────
 _running         = False

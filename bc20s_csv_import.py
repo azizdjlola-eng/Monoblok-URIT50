@@ -29,7 +29,8 @@ from datetime import datetime, date
 try:
     from bc20s_listener import MINDRAY_DAT_BASE
 except Exception:
-    MINDRAY_DAT_BASE = r"G:\DASTUR\URIT 50\BC-20s"
+    import natija_papka as _np
+    MINDRAY_DAT_BASE = _np.bc20s_dat()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PREFS_PATH = os.path.join(BASE_DIR, "bc20s_import_prefs.json")

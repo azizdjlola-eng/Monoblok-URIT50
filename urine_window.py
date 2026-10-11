@@ -19,8 +19,10 @@ except ImportError:
 
 import siydik_protokol as _sp   # universal RAW parser (URIT/Dirui/UA/HL7/ASTM)
 
-URIT_RAW_PATH = r"G:\DASTUR\URIT 50\Urit\RAW_LOGS"
-URIT_PREFS_FILE = r"G:\DASTUR\URIT 50\urit_prefs.json"
+# Yozuvchi (urit50_service) bilan BIR XIL qoida — natija_papka.py
+import natija_papka as _np
+URIT_RAW_PATH = _np.urit_raw()
+URIT_PREFS_FILE = os.path.join(_np.sozlama_papka(), "urit_prefs.json")
 
 def _load_strip_pref():
     """Oxirgi tanlangan poloska turini fayldan yuklash (0=Avto, 11=11-param, 14=14-param)."""

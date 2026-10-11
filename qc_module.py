@@ -1228,21 +1228,30 @@ def _import_hematology_qc(lot_id, lot_number, parent_win):
 def _import_biochemistry_qc(lot_id, lot_number, parent_win):
     import glob as glob_mod
     import re as re_mod
-    BK280_RAW = r"G:\DASTUR\URIT 50\BK280\RAW_LOGS"
+    # Listener (bk280_listener) ProgramData ga yozadi; eski G: yo'li — zaxira.
+    try:
+        from biochemistry_window import BK280_RAW_PATHS as _bk_yollar
+    except Exception:
+        _bk_yollar = [os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"),
+                                   "AzizMedLine", "BK280", "RAW_LOGS"),
+                      r"G:\DASTUR\URIT 50\BK280\RAW_LOGS"]
+    BK280_RAW = next((p for p in _bk_yollar if os.path.exists(p)), _bk_yollar[0])
 
     def _do():
         if not os.path.exists(BK280_RAW):
             return 'no_folder'
         today = datetime.now()
-        patterns = [
-            os.path.join(BK280_RAW, today.strftime("%Y%m%d"), "*.hl7"),
-            os.path.join(BK280_RAW, today.strftime("%Y%m%d"), "*.txt"),
-            os.path.join(BK280_RAW, (today - timedelta(days=1)).strftime("%Y%m%d"), "*.hl7"),
-            os.path.join(BK280_RAW, (today - timedelta(days=1)).strftime("%Y%m%d"), "*.txt"),
-        ]
+        kecha = today - timedelta(days=1)
+        patterns = []
+        # Kunlik (YYYYMMDD, eski) va oylik (YYYYMM, listener hozir shunday) papkalar
+        for papka in (today.strftime("%Y%m%d"), kecha.strftime("%Y%m%d"),
+                      today.strftime("%Y%m"), kecha.strftime("%Y%m")):
+            for ext in ("*.hl7", "*.txt"):
+                patterns.append(os.path.join(BK280_RAW, papka, ext))
         all_files = []
         for pat in patterns:
             all_files.extend(glob_mod.glob(pat))
+        all_files = list(dict.fromkeys(all_files))   # oy papkasi ikki marta qo'shilmasin
         all_files.sort(key=os.path.getmtime, reverse=True)
         try:
             from biochemistry_window import LIS_CODE_MAP

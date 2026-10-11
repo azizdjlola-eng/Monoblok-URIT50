@@ -32,7 +32,27 @@ def _base_dir() -> str:
     return os.path.dirname(os.path.abspath(__file__))
 
 
-CONFIG_PATH = os.path.join(_base_dir(), "analizator_config.json")
+def _config_dir() -> str:
+    """analizator_config.json YOZILADIGAN papka.
+
+    EXE: %ProgramData%\\AzizMedLine\\Natija. Ilgari EXE yonida (Program Files)
+    edi — u yerga oddiy foydalanuvchi yoza olmaydi, «Sozlamalarni saqlab
+    bo'lmadi» chiqardi (2026-10-11). Eski joydagi fayl birinchi o'qishda
+    ko'chiriladi (load_config). Koddan ishlaganda — o'zgarishsiz, skript yonida.
+    """
+    if getattr(sys, "frozen", False):
+        p = os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"),
+                         "AzizMedLine", "Natija")
+        try:
+            os.makedirs(p, exist_ok=True)
+            return p
+        except Exception:
+            return _base_dir()
+    return _base_dir()
+
+
+CONFIG_PATH = os.path.join(_config_dir(), "analizator_config.json")
+_ESKI_CONFIG_PATH = os.path.join(_base_dir(), "analizator_config.json")
 
 
 # ---------------------------------------------------------------------------
@@ -138,6 +158,13 @@ DEFAULT_CONFIG = {
         # natija blankalari doim shu printerdan chiqadi.
         "blanka_printer": "",
     },
+
+    # Analizator fayllari (URIT RAW, BC-20s TXT) papkasi. "" = standart
+    # (koddan: skript papkasi; EXE: %ProgramData%\AzizMedLine\Natija).
+    # Qoida — natija_papka.py. Tizim Sozlamalari > «📁 Papkalar».
+    "papkalar": {
+        "natija_fayllari": "",
+    },
 }
 
 
@@ -187,12 +214,20 @@ def _umumiy_db():
 def load_config() -> dict:
     """analizator_config.json ni o'qiydi. Yo'q bo'lsa — yaratadi."""
     cfg = json.loads(json.dumps(DEFAULT_CONFIG))  # chuqur nusxa
-    if os.path.exists(CONFIG_PATH):
+    manba = CONFIG_PATH
+    if (not os.path.exists(CONFIG_PATH) and _ESKI_CONFIG_PATH != CONFIG_PATH
+            and os.path.exists(_ESKI_CONFIG_PATH)):
+        # EXE: eski joydagi (EXE yonidagi) sozlamani o'qiymiz va yangi joyga
+        # ko'chiramiz — mavjud filial/mijoz sozlamasi yo'qolmasin.
+        manba = _ESKI_CONFIG_PATH
+    if os.path.exists(manba):
         try:
-            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            with open(manba, "r", encoding="utf-8") as f:
                 loaded = json.load(f)
             if isinstance(loaded, dict):
                 cfg = _deep_merge(DEFAULT_CONFIG, loaded)
+                if manba != CONFIG_PATH:
+                    save_config(cfg)   # eski joydan yangi joyga ko'chirish
         except Exception as e:
             print(f"[OGOHLANTIRISH] analizator_config.json yuklashda xato: {e}")
     else:
@@ -209,6 +244,7 @@ def load_config() -> dict:
 def save_config(cfg: dict) -> bool:
     """Sozlamalarni analizator_config.json ga yozadi."""
     try:
+        os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(cfg, f, ensure_ascii=False, indent=2)
         # Joriy jarayondagi DB_CONFIG ni ham yangilaymiz (in-place — barcha

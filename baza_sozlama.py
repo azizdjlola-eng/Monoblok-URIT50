@@ -94,6 +94,10 @@ def saqla(cfg: dict) -> str:
         f"DB={cfg.get('database','lab_tizim')}\n"
         f"PORT={cfg.get('port',3306)}\n"
     )
+    # SSL qatori ilgari saqlashda jim tushib qolardi (login.py uni o'qiydi).
+    ssl = str(cfg.get("ssl", "") or "").strip()
+    if ssl and ssl.lower() != "auto":
+        matn += f"SSL={ssl}\n"
     with open(yol, "w", encoding="utf-8") as f:
         f.write(matn)
     return yol
@@ -487,6 +491,329 @@ def barcha_iplar() -> list:
     return natija or ["127.0.0.1"]
 
 
+# ─────────────────── Serverni tarmoqdan avtomatik topish ───────────────────
+# NEGA: ish o'rni (Registratsiya/Natija/Vrach) SERVER kompyuterning IP sini
+# qo'lda terardi. Wi-Fi/router DHCP serverga keyingi yoqilishda boshqa IP
+# berishi mumkin — shunda hamma kabinet birdan «baza topilmadi» deydi, texnik
+# xodim esa yangi IP ni qayerdan bilishni bilmaydi. Endi ish o'rni o'zi
+# tarmoqni (o'z /24 qismi) skanerlaydi: MySQL porti ochiq kompyuterlarni
+# topadi va HAR BIRIDA haqiqatan bizning baza borligini (parol + jadval +
+# bemorlar soni) tekshiradi. Bemorlar soni ko'rsatiladi — tasodifan BO'SH
+# bazaga ulanib «bemorlar yo'qoldi» bo'lmasligi uchun.
+SERVER_PORTLARI = (3306, 3307, 3308)   # BazaUstasi 3306 band bo'lsa keyingisini oladi
+
+
+def _qidiriladigan_tarmoqlar() -> list:
+    """Skanerlanadigan /24 tarmoqlar prefiksi: ['192.168.0.', ...].
+    Faqat xususiy (LAN) manzillar; 169.254 (DHCP olinmagan) va 127 tashlanadi.
+    Virtual adapterlar (VirtualBox/Hyper-V) ham kirishi mumkin — zarari yo'q,
+    lekin ko'p bo'lib ketmasin deb 4 tagacha."""
+    import ipaddress
+    prefikslar = []
+    for ip in barcha_iplar():
+        try:
+            a = ipaddress.ip_address(ip)
+        except ValueError:
+            continue
+        if a.version != 4 or not a.is_private or a.is_loopback or a.is_link_local:
+            continue
+        p = ip.rsplit(".", 1)[0] + "."
+        if p not in prefikslar:
+            prefikslar.append(p)
+    return prefikslar[:4]
+
+
+def _nom_top(ip: str, kutish: float = 1.5) -> str:
+    """IP → kompyuter nomi (topilmasa ''). gethostbyaddr Windows'da NetBIOS
+    bilan bir necha soniya osilib qolishi mumkin — shuning uchun alohida
+    daemon oqimda, cheklangan kutish bilan."""
+    import socket
+    import threading
+    natija = {"nom": ""}
+
+    def _ish():
+        try:
+            natija["nom"] = socket.gethostbyaddr(ip)[0].split(".")[0].upper()
+        except Exception:
+            pass
+
+    t = threading.Thread(target=_ish, daemon=True)
+    t.start()
+    t.join(kutish)
+    return natija["nom"]
+
+
+def _lims_bazasini_tekshir(cfg: dict) -> dict:
+    """Ochiq port — bizning bazami? {'holat': 'ok'|'parol'|'baza_yoq'|'xato',
+    'bemorlar': int|None, 'xabar': str}."""
+    try:
+        import mysql.connector
+    except Exception as e:
+        return {"holat": "xato", "bemorlar": None, "xabar": str(e)}
+    try:
+        kw = dict(host=cfg["host"], port=int(cfg["port"]),
+                  user=cfg.get("user", "root"), password=cfg.get("password", ""),
+                  database=cfg.get("database", "lab_tizim"),
+                  connection_timeout=5, use_pure=True)
+        kw.update(tls_kwargs(cfg))
+        conn = mysql.connector.connect(**kw)
+    except Exception as e:
+        s = str(e)
+        # 1044 = foydalanuvchi to'g'ri, lekin bu bazaga ruxsati yo'q (yoki baza
+        # yo'q) — matnida ham «Access denied» bor, shuning uchun 1045 dan OLDIN.
+        if "1049" in s or "Unknown database" in s or "1044" in s:
+            return {"holat": "baza_yoq", "bemorlar": None,
+                    "xabar": f"MySQL bor, lekin «{cfg.get('database', 'lab_tizim')}» bazasi yo'q"}
+        if "1045" in s or "Access denied" in s:
+            return {"holat": "parol", "bemorlar": None,
+                    "xabar": "MySQL bor, lekin parol mos emas (boshqa dastur bazasi)"}
+        return {"holat": "xato", "bemorlar": None, "xabar": s[:160]}
+    try:
+        cur = conn.cursor()
+        cur.execute("SHOW TABLES LIKE 'foydalanuvchilar'")
+        if not cur.fetchall():
+            return {"holat": "baza_yoq", "bemorlar": None,
+                    "xabar": "Baza bor, lekin LIMS jadvallari yo'q (BazaUstasi tugallanmagan?)"}
+        bemorlar = None
+        try:
+            cur.execute("SELECT COUNT(*) FROM bemorlar")
+            bemorlar = int(cur.fetchone()[0])
+        except Exception:
+            pass
+        cur.close()
+        return {"holat": "ok", "bemorlar": bemorlar, "xabar": "LIMS bazasi"}
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def server_qidir(cfg: dict, jarayon=None, toxtat=None, port_kutish: float = 0.5) -> list:
+    """Lokal tarmoqdan LIMS bazasi turgan kompyuter(lar)ni topadi.
+
+    cfg      — foydalanuvchi/parol/baza nomi shu yerdan olinadi (host/port emas).
+    jarayon  — ixtiyoriy callback(bajarildi, jami). ⚠️ ISHCHI oqimdan chaqiriladi —
+               tkinter'ga to'g'ridan-to'g'ri tegmasin (holat lug'atiga yozsin).
+    toxtat   — ixtiyoriy threading.Event: o'rnatilsa skanerlash to'xtaydi.
+
+    Qaytaradi: [{'host','port','nomi','holat','bemorlar','xabar','shu_kompyuter'}],
+    yaroqlilari (holat='ok') birinchi, bemorlar soni bo'yicha kamayish tartibida.
+    Bitta /24 tarmoq ~2-3 soniya.
+    """
+    import socket
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    oz_iplar = set(barcha_iplar())
+    nishonlar = [(f"{p}{i}", port) for p in _qidiriladigan_tarmoqlar()
+                 for i in range(1, 255) for port in SERVER_PORTLARI]
+    jami = len(nishonlar)
+
+    def _ochiqmi(nishon):
+        if toxtat is not None and toxtat.is_set():
+            return None
+        try:
+            s = socket.create_connection(nishon, timeout=port_kutish)
+            s.close()
+            return nishon
+        except Exception:
+            return None
+
+    ochiqlar = []
+    bajarildi = 0
+    if jami:
+        with ThreadPoolExecutor(max_workers=200) as ex:
+            for f in as_completed([ex.submit(_ochiqmi, n) for n in nishonlar]):
+                bajarildi += 1
+                r = f.result()
+                if r:
+                    ochiqlar.append(r)
+                if jarayon and (bajarildi % 50 == 0 or bajarildi == jami):
+                    try:
+                        jarayon(bajarildi, jami)
+                    except Exception:
+                        pass
+
+    topilgan = []
+    # Tekshiruv KETMA-KET: sha2 keshini isitish (tls_kwargs) global bayroq
+    # ishlatadi — parallel chaqirilsa bir-biriga xalaqit beradi.
+    for host, port in sorted(ochiqlar):
+        if toxtat is not None and toxtat.is_set():
+            break
+        c = dict(cfg)
+        c["host"], c["port"] = host, port
+        t = _lims_bazasini_tekshir(c)
+        t.update(host=host, port=port, shu_kompyuter=host in oz_iplar,
+                 nomi=_nom_top(host) if t["holat"] == "ok" else "")
+        topilgan.append(t)
+    topilgan.sort(key=lambda d: (d["holat"] != "ok", -(d["bemorlar"] or 0), d["host"]))
+    return topilgan
+
+
+def qayta_qidirish_kerakmi(cfg: dict) -> bool:
+    """Login ulanmaganda: «server IP si o'zgargan bo'lishi mumkin» holatimi?
+    Faqat host LAN IP raqami bo'lsa va o'sha manzilda port umuman yopiq
+    bo'lsa True. (Parol xatosi yoki 127.0.0.1 — IP almashuvi emas.)"""
+    import ipaddress
+    host = str(cfg.get("host", "") or "").strip()
+    try:
+        a = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    if a.version != 4 or a.is_loopback or not a.is_private:
+        return False
+    try:
+        port = int(cfg.get("port", 3306) or 3306)
+    except (TypeError, ValueError):
+        port = 3306
+    return not _port_ochiqmi(host, port)
+
+
+def server_qidir_oynasi(parent, cfg: dict):
+    """«🔍 Serverni avtomatik topish» oynasi (modal). Tarmoqni skanerlaydi,
+    topilgan bazalarni ro'yxatda ko'rsatadi. Foydalanuvchi tanlasa — host/port
+    almashtirilgan cfg NUSXASINI qaytaradi (SAQLAMAYDI — saqlash chaqiruvchida).
+    Bekor qilinsa None."""
+    import threading
+    import tkinter as tk
+    from tkinter import ttk
+
+    cfg = dict(cfg or {})
+    natija = {"cfg": None}
+    holat = {"bajarildi": 0, "jami": 1, "tayyor": False, "royxat": [], "xato": ""}
+    toxtat = threading.Event()
+
+    oyna = tk.Toplevel(parent)
+    oyna.title("Serverni tarmoqdan topish")
+    oyna.geometry("640x400")
+    oyna.resizable(True, True)
+    try:
+        oyna.transient(parent.winfo_toplevel())
+        oyna.grab_set()
+    except Exception:
+        pass
+
+    tarmoqlar = ", ".join(p + "x" for p in _qidiriladigan_tarmoqlar()) or "—"
+    sarlavha = ttk.Label(oyna, text=f"Tarmoq qidirilmoqda ({tarmoqlar}) ...",
+                         font=("Segoe UI", 10, "bold"))
+    sarlavha.pack(anchor="w", padx=12, pady=(12, 4))
+    pb = ttk.Progressbar(oyna, mode="determinate", maximum=100)
+    pb.pack(fill="x", padx=12)
+
+    ustunlar = ("manzil", "nomi", "bemorlar", "holat")
+    jadval = ttk.Treeview(oyna, columns=ustunlar, show="headings", height=8,
+                          selectmode="browse")
+    for k, sarl, en in (("manzil", "Manzil", 150), ("nomi", "Kompyuter nomi", 140),
+                        ("bemorlar", "Bemorlar", 80), ("holat", "Holat", 240)):
+        jadval.heading(k, text=sarl)
+        jadval.column(k, width=en, anchor="w")
+    jadval.pack(fill="both", expand=True, padx=12, pady=8)
+
+    izoh = ttk.Label(oyna, text="", foreground="#555", wraplength=600, justify="left")
+    izoh.pack(fill="x", padx=12)
+
+    tugmalar = ttk.Frame(oyna)
+    tugmalar.pack(fill="x", padx=12, pady=10)
+
+    def _tanla(_e=None):
+        sel = jadval.selection()
+        if not sel:
+            return
+        d = holat["royxat"][int(sel[0])]
+        if d["holat"] != "ok":
+            izoh.config(text="Bu manzilda LIMS bazasi yo'q — ✅ belgili qatorni tanlang.",
+                        foreground="#c0392b")
+            return
+        c = dict(cfg)
+        # Server SHU kompyuterning o'zi bo'lsa — 127.0.0.1 (IP o'zgarsa ham ishlaydi)
+        c["host"] = "127.0.0.1" if d["shu_kompyuter"] else d["host"]
+        c["port"] = d["port"]
+        natija["cfg"] = c
+        _yop()
+
+    def _yop():
+        toxtat.set()
+        try:
+            oyna.grab_release()
+        except Exception:
+            pass
+        oyna.destroy()
+
+    def _boshla():
+        toxtat.clear()
+        holat.update(bajarildi=0, jami=1, tayyor=False, royxat=[], xato="")
+        jadval.delete(*jadval.get_children())
+        sarlavha.config(text=f"Tarmoq qidirilmoqda ({tarmoqlar}) ...")
+        izoh.config(text="Odatda 3-5 soniya.", foreground="#555")
+        b_qayta.config(state="disabled")
+
+        def _jarayon(b, j):
+            holat["bajarildi"], holat["jami"] = b, j
+
+        def _ish():
+            try:
+                holat["royxat"] = server_qidir(cfg, jarayon=_jarayon, toxtat=toxtat)
+            except Exception as e:
+                holat["xato"] = str(e)
+            holat["tayyor"] = True
+
+        threading.Thread(target=_ish, daemon=True).start()
+        oyna.after(150, _tik)
+
+    def _tik():
+        if not oyna.winfo_exists():
+            return
+        pb["value"] = 100.0 * holat["bajarildi"] / max(holat["jami"], 1)
+        if not holat["tayyor"]:
+            oyna.after(150, _tik)
+            return
+        pb["value"] = 100
+        b_qayta.config(state="normal")
+        royxat = holat["royxat"]
+        for i, d in enumerate(royxat):
+            belgi = "✅ " if d["holat"] == "ok" else "⚠️ "
+            manzil = f"{d['host']}:{d['port']}"
+            if d["shu_kompyuter"]:
+                manzil += " (shu)"
+            jadval.insert("", "end", iid=str(i), values=(
+                manzil, d.get("nomi", ""),
+                "" if d["bemorlar"] is None else d["bemorlar"],
+                belgi + d["xabar"]))
+        yaroqli = [i for i, d in enumerate(royxat) if d["holat"] == "ok"]
+        if holat["xato"]:
+            sarlavha.config(text="Qidiruvda xato")
+            izoh.config(text=holat["xato"], foreground="#c0392b")
+        elif yaroqli:
+            sarlavha.config(text=f"Topildi: {len(yaroqli)} ta LIMS bazasi")
+            jadval.selection_set(str(yaroqli[0]))
+            izoh.config(foreground="#1f8a4c", text=(
+                "Bemorlar soni ENG KO'P bo'lgani odatda haqiqiy server. "
+                "Tanlang va «Shu serverga ulanish» ni bosing (yoki ikki marta bosing).\n"
+                "⚠️ Faqat HAQIQIY SERVER kompyuterni tanlang. Server o'chiq bo'lsa — "
+                "avval uni yoqing: boshqa kompyuterdagi eski/sinov bazasi tanlansa "
+                "ma'lumot ikkiga bo'linib ketadi."))
+        else:
+            sarlavha.config(text="LIMS bazasi topilmadi")
+            izoh.config(foreground="#c0392b", text=(
+                "Tekshiring:  • SERVER kompyuter yoniqmi, BazaUstasi tugallanganmi\n"
+                "• Ikkala kompyuter BITTA routerga ulanganmi (mehmon Wi-Fi emas)\n"
+                "• Serverda «Boshqa kompyuterlarga ruxsat» bosilganmi; "
+                "antivirus fayrvoli 3306-portni yopmayaptimi\n"
+                "• Router «AP isolation / mijozlarni ajratish» yoqilmaganmi"))
+
+    b_tanla = ttk.Button(tugmalar, text="✅ Shu serverga ulanish", command=_tanla)
+    b_tanla.pack(side="right", padx=4)
+    ttk.Button(tugmalar, text="Bekor", command=_yop).pack(side="right", padx=4)
+    b_qayta = ttk.Button(tugmalar, text="🔄 Qayta qidirish", command=_boshla)
+    b_qayta.pack(side="left", padx=4)
+    jadval.bind("<Double-1>", _tanla)
+    oyna.protocol("WM_DELETE_WINDOW", _yop)
+
+    _boshla()
+    oyna.wait_window()
+    return natija["cfg"]
+
+
 # ─────────────────── Xizmatlar (Vrach kabineti / TV server) ───────────────────
 VRACH_PORT = 8090
 TV_PORT = 8765
@@ -723,7 +1050,7 @@ def sozlama_oynasi(parent=None, bolim: str = "baza") -> bool:
     oyna = tk.Toplevel(parent) if parent else tk.Tk()
     oyna.title("AzizMedLine — Sozlama")
     oyna.configure(bg=_BG)
-    oyna.geometry("620x660")
+    oyna.geometry("620x710")
     oyna.resizable(False, False)
 
     # ── Sarlavha ──
@@ -807,6 +1134,23 @@ def sozlama_oynasi(parent=None, bolim: str = "baza") -> bool:
               fg=_MATN, font=("Segoe UI", 9), cursor="hand2",
               command=lambda: (_hostni_qoy(""), maydon["host"].focus_set())
               ).pack(side="left", expand=True, fill="x", padx=(4, 0), ipady=5)
+
+    def _avto_top():
+        c = server_qidir_oynasi(oyna, _yig())
+        if not c:
+            return
+        _hostni_qoy(c["host"])
+        maydon["port"].delete(0, "end")
+        maydon["port"].insert(0, str(c["port"]))
+        natija_lbl.config(text=f"Topildi: {c['host']}:{c['port']} — tekshirilmoqda...", fg=_KUL)
+        oyna.update_idletasks()
+        natija_lbl.config(text=ulanish_diagnostika(_yig()) +
+                          "\n\n«💾 Saqlash» ni bosing.", fg=_MATN)
+
+    tk.Button(s1, text="🔍  Serverni tarmoqdan AVTOMATIK topish (IP terish shart emas)",
+              relief="flat", bg="#2b5cff", fg="white", font=("Segoe UI Semibold", 10),
+              cursor="hand2", command=_avto_top
+              ).pack(fill="x", pady=(4, 0), ipady=6)
 
     natija_lbl = tk.Label(s1, text="", bg=_BG, fg=_KUL, font=("Segoe UI", 9),
                           wraplength=560, justify="left")

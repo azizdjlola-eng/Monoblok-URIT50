@@ -279,8 +279,10 @@ def db_conn():
         print(f"[XATO] DB ulanish xatosi: {e}")
         return None
 
-# BC-20S natijalar papkasi — oyma-oy tartibda: G:\DASTUR\URIT 50\BC-20s\YYYYMM\
-BC20S_DAT_BASE = r"G:\DASTUR\URIT 50\BC-20s"
+# BC-20S natijalar papkasi — oyma-oy tartibda: <asosiy>\BC-20s\YYYYMM\
+# Listener (bc20s_listener) bilan BIR XIL qoida — natija_papka.py
+import natija_papka as _np
+BC20S_DAT_BASE = _np.bc20s_dat()
 
 # HL7 parametr nomlarini DB nomlariga moslashtirish
 # Analyzer → DB/Blanka nomlari

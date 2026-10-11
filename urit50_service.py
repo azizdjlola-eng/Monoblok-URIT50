@@ -37,7 +37,10 @@ ANALYZER_NAME = _sp.PROFILES.get(ANALYZER_MODEL, {}).get("name", ANALYZER_MODEL)
 # Asosiy papkalar (frozen-aware — mijozda G: bo'lmasligi mumkin)
 BASE_DIR = os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), "AzizMedLine", "URIT_natijalar")
 os.makedirs(BASE_DIR, exist_ok=True)
-RAW_LOG_DIR = r"G:\DASTUR\URIT 50\Urit\RAW_LOGS"
+# RAW loglar — natija_papka (sozlamadan; standart: koddan = shu papka,
+# EXE = ProgramData). Ilgari qattiq G:\ edi — mijozda G: yo'q, natija yo'qolardi.
+import natija_papka as _np
+RAW_LOG_DIR = _np.urit_raw()
 
 # Shablonni **shu skript turgan papkadan** olamiz (URIT 50 papkasidagi blank.docx)
 TEMPLATE_PATH = os.path.join(SCRIPT_DIR, "blank.docx")

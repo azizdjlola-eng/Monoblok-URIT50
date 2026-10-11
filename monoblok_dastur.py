@@ -173,10 +173,20 @@ from monoblok_db_config import DB_CONFIG, load_config, save_config, get_analyzer
 
 # Blanka Generator constants (from blanka_generator.py)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-BASE_DIR = r"G:\Қилинган анализлар"
+import natija_papka as _np
+# Word blankalar asosiy papkasi. Koddan (bizning ish xonasi) — ilgarigidek G:.
+# EXE (mijoz/filial) — G: bo'lmasligi mumkin, Program Files ga esa yozib
+# bo'lmaydi: natija papkasi ichida (Tizim Sozlamalari > Papkalar; Blanka
+# Sozlamalaridagi «Word papkasi» baribir ustun).
+BASE_DIR = (os.path.join(_np.asosiy_papka(), "Word blankalar") if _np.frozen()
+            else r"G:\Қилинган анализлар")
 STANDART_SHABLONLAR_DIR = r"G:\DASTUR\Standart shablaonlar"
 TEMPLATES_DIR = os.path.join(SCRIPT_DIR, "templates")
-CONFIG_FILE = os.path.join(SCRIPT_DIR, "blanka_config.json")
+# blanka_config.json: EXE da yozish mumkin bo'lgan joyga (ProgramData) saqlanadi;
+# u yerda hali yo'q bo'lsa EXE ichidagi nusxa o'qiladi (load_blanka_config).
+CONFIG_FILE = (os.path.join(_np.sozlama_papka(), "blanka_config.json") if _np.frozen()
+               else os.path.join(SCRIPT_DIR, "blanka_config.json"))
+_CONFIG_FILE_ICHKI = os.path.join(SCRIPT_DIR, "blanka_config.json")
 
 TEST_GROUPS = ['GEM', 'BIO', 'IFA', 'URINE', 'TEST', 'COAG']
 
@@ -372,16 +382,35 @@ LOGO_DEFAULT_PATH = r"G:\DASTUR\URIT 50\logo.jpg"
 #         (QR orqali telefonda ochilsa ham to'g'ri). Kerak bo'lsa shu qiymatni False qiling.
 PDF_STRIP_FONTS = True
 
+
+def _mijoz_belgisi() -> dict:
+    """MIJOZ (sotib oluvchi klinika) buildi belgisi — build_mijoz.py EXE ichiga
+    mijoz_build.json qo'shadi. Bizning o'rnatmalarda {} qaytadi."""
+    try:
+        p = _np.ichki_fayl("mijoz_build.json")
+        if os.path.exists(p):
+            with open(p, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            return d if isinstance(d, dict) and d.get("mijoz") else {}
+    except Exception:
+        pass
+    return {}
+
+
 def load_blanka_config() -> dict:
     default_path = r"G:\DASTUR\URIT 50\Standart shablonlar\blanka ustuni.docx"
+    _mijoz = _mijoz_belgisi()
     default_config = {
         "blanka_ustuni_path": default_path,
         "logo_path": LOGO_DEFAULT_PATH,
         "header_type": "shablon",
-        "klinika_nomi": "AZIZ MEDLINE",
-        "klinika_sub": "xususiy laboratoriyasi",
-        "klinika_manzil": "Surxondaryo vil., Sherobod tumani, Qo'rg'on MFY,\nY. Oxunboboev ko'chasi, 57E-uy",
-        "klinika_tel": "Tel.: (998) 99-673-13-42",
+        # MIJOZ buildida bizning klinika ma'lumotlari blankaga TUSHMASIN —
+        # nom mijozniki, qolganlari bo'sh (Blanka Sozlamalaridan to'ldiriladi).
+        "klinika_nomi": (_mijoz.get("nomi") or "Tibbiy laboratoriya") if _mijoz else "AZIZ MEDLINE",
+        "klinika_sub": "" if _mijoz else "xususiy laboratoriyasi",
+        "klinika_manzil": "" if _mijoz else "Surxondaryo vil., Sherobod tumani, Qo'rg'on MFY,\nY. Oxunboboev ko'chasi, 57E-uy",
+        "klinika_tel": "" if _mijoz else "Tel.: (998) 99-673-13-42",
+        "laborant_vrach": "" if _mijoz else "Murodov A.X",
         "logo_width": 3.2,
         "logo_height": 3.2,
         "chap_panel": "barcode",
@@ -398,9 +427,12 @@ def load_blanka_config() -> dict:
         "word_save_dir": "",   # bo'sh = G:\Қилинган анализлар
         "pdf_save_dir": "",    # bo'sh = OneDrive\Natijalar
     }
-    if os.path.exists(CONFIG_FILE):
+    # EXE ichidagi nusxa — bizning klinika sozlamasi. MIJOZ da o'qilmaydi (eski
+    # versiyadan _internal da qolib ketgan bo'lishi mumkin — Inno uni o'chirmaydi).
+    _manba = CONFIG_FILE if (os.path.exists(CONFIG_FILE) or _mijoz) else _CONFIG_FILE_ICHKI
+    if os.path.exists(_manba):
         try:
-            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+            with open(_manba, 'r', encoding='utf-8') as f:
                 config = json.load(f)
                 if isinstance(config, dict):
                     for key, val in default_config.items():
@@ -5924,7 +5956,15 @@ def add_footer(doc: Document, order_info: dict):
     Jadvaldan oldin 0.5sm bo'sh joy, matn qalin (bold).
     """
     dt_str = datetime.now().strftime("%d.%m.%Y %H:%M")
-    vrach_name = order_info.get('vrach_name', 'Murodov A.X') if order_info else 'Murodov A.X'
+    # F.I.Sh — Blanka Sozlamalari > Klinika ma'lumotlari > «Laborant vrach».
+    # Bo'sh bo'lsa imzo chizig'i qoladi (qo'lda yoziladi).
+    vrach_name = (order_info or {}).get('vrach_name') or ''
+    if not vrach_name:
+        try:
+            vrach_name = (load_blanka_config().get('laborant_vrach') or '').strip()
+        except Exception:
+            vrach_name = ''
+    vrach_name = vrach_name or "____________________"
 
     # Jadval oldida 0.5sm bo'sh joy
     spacer = doc.add_paragraph()
@@ -6458,8 +6498,9 @@ def get_save_dir():
         return save_dir
     except Exception as e:
         print(f"[XATO] Saqlash papkasini yaratishda xato: {e}")
-        # Fallback: dastur papkasiga saqlash
-        fallback_dir = os.path.join(SCRIPT_DIR, "Blankalar", datetime.now().strftime("%d.%m.%Y"))
+        # Fallback: yozish mumkin bo'lgan natija papkasi (EXE da SCRIPT_DIR =
+        # Program Files — u yerga yozib bo'lmaydi)
+        fallback_dir = os.path.join(_np.standart_papka(), "Blankalar", datetime.now().strftime("%d.%m.%Y"))
         os.makedirs(fallback_dir, exist_ok=True)
         return fallback_dir
 
@@ -21174,9 +21215,32 @@ Sana: {_sana_fmt}"""
             _myip = "?"
         ttk.Label(db_quick, text=f"🌐 Bu kompyuter IP: {_myip}",
                   foreground="#1f8a4c").pack(side=tk.LEFT, padx=6)
-        ttk.Label(tab_db,
-                  text="Boshqa kompyuterdagi bazaga ulanish: o'sha kompyuter IP sini Host maydoniga yozing.",
-                  foreground="#666", wraplength=560).grid(row=7, column=0, columnspan=2, sticky=tk.W, padx=8)
+        def db_avto_top():
+            # Server IP si o'zgargan bo'lsa (Wi-Fi/router DHCP) — tarmoqdan o'zi topadi.
+            try:
+                import baza_sozlama as _bs
+                c = _bs.server_qidir_oynasi(dialog, _db_cfg_form())
+            except Exception as e:
+                messagebox.showwarning("Serverni topish", f"Qidirib bo'lmadi: {e}", parent=dialog)
+                return
+            finally:
+                try:
+                    dialog.grab_set()   # ichki oyna grab'ni olib ketgan edi
+                except Exception:
+                    pass
+            if not c:
+                return
+            vars_map[("database", "host")].set(c["host"])
+            vars_map[("database", "port")].set(str(c["port"]))
+            test_db()
+
+        db_top_fr = ttk.Frame(tab_db)
+        db_top_fr.grid(row=7, column=0, columnspan=2, sticky=tk.W, padx=8)
+        ttk.Button(db_top_fr, text="🔍 Serverni tarmoqdan avtomatik topish",
+                   command=db_avto_top).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Label(db_top_fr,
+                  text="yoki server IP sini Host maydoniga qo'lda yozing (keyin «Saqlash»).",
+                  foreground="#666").pack(side=tk.LEFT)
 
         # ───────────────── SIYDIK (universal: URIT-50 / Dirui / Mindray UA / HL7 / ASTM) ─────
         # Model va ulanish turi sozlamadan — mijozda boshqa analizator bo'lsa kod o'zgarmaydi.
@@ -21945,6 +22009,71 @@ Sana: {_sana_fmt}"""
             foreground="#555", justify=tk.LEFT, wraplength=580).grid(
             row=4, column=0, columnspan=2, sticky=tk.W, padx=8, pady=(4, 8))
 
+        # ───────────────────────── PAPKALAR ─────────────────────────────
+        # Analizatordan kelgan RAW/TXT fayllar qayerga tushadi (natija_papka.py).
+        # Mijozda G: disk yo'q — papka shu yerdan tanlanadi (2026-10-11).
+        tab_dir = ttk.Frame(nb)
+        nb.add(tab_dir, text="📁 Papkalar")
+        tab_dir.columnconfigure(1, weight=1)
+        _dir_var = tk.StringVar(value=_np.sozlangan_papka())
+        vars_map[("papkalar", "natija_fayllari")] = _dir_var
+
+        ttk.Label(tab_dir, text="Analizator fayllari papkasi:").grid(
+            row=0, column=0, sticky=tk.W, padx=8, pady=(12, 6))
+        ttk.Entry(tab_dir, textvariable=_dir_var, width=52).grid(
+            row=0, column=1, sticky="ew", padx=8, pady=(12, 6))
+
+        _dir_info = ttk.Label(tab_dir, text="", foreground="#1565C0",
+                              justify=tk.LEFT, wraplength=600)
+        _dir_info.grid(row=2, column=0, columnspan=2, sticky=tk.W, padx=8, pady=(6, 4))
+
+        def _dir_hisob(*_a):
+            p = _dir_var.get().strip()
+            asos = p or _np.standart_papka()
+            _dir_info.config(text=(
+                ("Sozlamada ko'rsatilgan papka." if p else
+                 f"Bo'sh = STANDART papka:  {_np.standart_papka()}") +
+                f"\n\nURIT-50 (siydik) RAW:   {os.path.join(asos, 'Urit', 'RAW_LOGS')}"
+                f"\nBC-20s (gemotologiya):  {os.path.join(asos, 'BC-20s')}"
+                + (f"\nWord blankalar:          {os.path.join(asos, 'Word blankalar')}"
+                   if _np.frozen() else "")))
+
+        _dir_var.trace_add("write", _dir_hisob)
+        _dir_hisob()
+
+        def _dir_tanla():
+            from tkinter import filedialog
+            d = filedialog.askdirectory(
+                parent=dialog, title="Analizator fayllari papkasini tanlang",
+                initialdir=_dir_var.get().strip() or _np.standart_papka())
+            if d:
+                _dir_var.set(os.path.normpath(d))
+
+        def _dir_och():
+            p = _dir_var.get().strip() or _np.standart_papka()
+            try:
+                os.makedirs(p, exist_ok=True)
+                os.startfile(p)
+            except Exception as e:
+                messagebox.showwarning("Papka", f"Papkani ochib bo'lmadi:\n{p}\n\n{e}", parent=dialog)
+
+        _dir_btns = ttk.Frame(tab_dir)
+        _dir_btns.grid(row=1, column=1, sticky=tk.W, padx=8)
+        ttk.Button(_dir_btns, text="📂 Tanlash...", command=_dir_tanla).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(_dir_btns, text="↺ Standart", command=lambda: _dir_var.set("")).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(_dir_btns, text="📁 Papkani ochish", command=_dir_och).pack(side=tk.LEFT)
+
+        ttk.Label(
+            tab_dir,
+            text="• Analizator natijasi kelganda RAW/TXT fayl shu papkaga yoziladi, Natija oynasi "
+                 "ham shu yerdan o'qiydi.\n"
+                 "• Istalgan disk bo'lishi mumkin (C:, D: ...). Disk topilmasa natija yo'qolmaydi — "
+                 "standart papkaga yoziladi.\n"
+                 "• O'zgarish dastur QAYTA ishga tushgandan keyin kuchga kiradi. Eski fayllar "
+                 "ko'chirilmaydi.",
+            foreground="#555", justify=tk.LEFT, wraplength=600).grid(
+            row=3, column=0, columnspan=2, sticky=tk.W, padx=8, pady=(10, 8))
+
         # ───────────────────────── LITSENZIYA ───────────────────────────
         tab_lic = ttk.Frame(nb)
         nb.add(tab_lic, text="🔑 Litsenziya")
@@ -22272,6 +22401,9 @@ Sana: {_sana_fmt}"""
             ("klinika_sub",    "Qo'shimcha (sub):"),
             ("klinika_manzil", "Manzil:"),
             ("klinika_tel",    "Telefon:"),
+            # Blanka pastidagi «Laborant vrach:» yonidagi F.I.Sh (ilgari kodda
+            # qattiq «Murodov A.X» edi — mijozda boshqa vrach, 2026-10-11)
+            ("laborant_vrach", "Laborant vrach (F.I.Sh):"),
         ]
         for i, (key, label) in enumerate(kl_labels):
             ttk.Label(klinika_lf, text=label).grid(row=i, column=0, sticky=tk.W, pady=2, padx=(0, 5))
