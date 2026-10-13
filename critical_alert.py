@@ -26,7 +26,28 @@ if getattr(sys, "frozen", False):
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-_CONFIG_PATH = os.path.join(BASE_DIR, "alert_config.json")
+
+def _sozlama_papka():
+    """EXE: %ProgramData%\\AzizMedLine\\Natija (Program Files ga oddiy
+    foydalanuvchi yoza olmaydi — alert_config.json saqlanmasdi). Koddan —
+    BASE_DIR (o'zgarishsiz)."""
+    if not getattr(sys, "frozen", False):
+        return BASE_DIR
+    try:
+        import natija_papka as _np
+        return _np.sozlama_papka()
+    except Exception:
+        pd = os.environ.get("ProgramData") or r"C:\ProgramData"
+        p = os.path.join(pd, "AzizMedLine", "Natija")
+        try:
+            os.makedirs(p, exist_ok=True)
+        except Exception:
+            pass
+        return p
+
+
+SOZLAMA_DIR = _sozlama_papka()
+_CONFIG_PATH = os.path.join(SOZLAMA_DIR, "alert_config.json")
 
 # RF/CRP/ASLO juda past — reagent muammosi xabari (DEFAULT_CONFIG va alert_config.json)
 _R2_XABAR = ("juda past — R2 reagent (qizdirishdan qaytarilmagan yoki tugagan) shubhasi; "
@@ -131,6 +152,15 @@ def load_config(force=False):
     if _CFG_CACHE[0] is not None and not force:
         return _CFG_CACHE[0]
     cfg = json.loads(json.dumps(DEFAULT_CONFIG))  # chuqur nusxa
+    # EXE: avval dastur papkasida yozilgan sozlama bo'lsa — yangi joyga BIR
+    # MARTA ko'chiriladi (mijozning o'zgartirgan chegaralari yo'qolmasin).
+    _eski = os.path.join(BASE_DIR, "alert_config.json")
+    if _eski != _CONFIG_PATH and os.path.exists(_eski) and not os.path.exists(_CONFIG_PATH):
+        try:
+            import shutil
+            shutil.copy2(_eski, _CONFIG_PATH)
+        except Exception:
+            pass
     try:
         if os.path.exists(_CONFIG_PATH):
             with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -338,12 +368,25 @@ def check_biochemistry_detail(rows, cfg=None):
 #  OVOZ
 # ══════════════════════════════════════════════════════════════════════════
 def _resolve_sound_path(cfg):
+    """Ovoz fayli. Nisbiy yo'l (masalan `signals/alarm_clock.wav`) shu
+    tartibda qidiriladi — birinchi topilgani:
+      1) sozlama papkasi (EXE: %ProgramData%\\AzizMedLine\\Natija) — mijoz
+         shu yerga o'z ovozini shu nom bilan qo'ysa, U chalinadi;
+      2) dastur papkasi (EXE yonida);
+      3) EXE ichi (_MEIPASS) — buildga qo'shilgan standart signal.
+    Ilgari faqat 2) qidirilardi, buildda esa `signals/` umuman yo'q edi →
+    mijozda MessageBeep (ko'p kompyuterda jim) — «ovoz chiqmaydi» (2026-10-12)."""
     path = (cfg or load_config()).get("sound_file", "")
     if not path:
         return None
-    if not os.path.isabs(path):
-        path = os.path.join(BASE_DIR, path)
-    return path if os.path.exists(path) else None
+    if os.path.isabs(path):
+        return path if os.path.exists(path) else None
+    for d in (SOZLAMA_DIR, BASE_DIR, getattr(sys, "_MEIPASS", None)):
+        if d:
+            p = os.path.normpath(os.path.join(d, path))
+            if os.path.exists(p):
+                return p
+    return None
 
 
 def play_alert_sound(cfg=None):
