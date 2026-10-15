@@ -4,7 +4,7 @@ Laboratoriya xodimlari uchun · 15.10.2026 (yangilangan) · Onlayn nusxa: https:
 
 ## 1. Qisqacha: qaysi tahlil — qaysi probirka
 
-Asosiy qoida: **qon hujayralari va HbA1c — binafsha (EDTA); minerallar, gormonlar, IFA va ko'pchilik bioximiya — sariq yoki qizil (zardob); koagulogramma — faqat ko'k (sitrat).**
+Asosiy qoida: **qon hujayralari va HbA1c — binafsha (EDTA); kaliy va boshqa minerallar — sariq gelli; gormonlar, IFA va ko'pchilik bioximiya — sariq yoki qizil (zardob); koagulogramma — faqat ko'k (sitrat).**
 
 | Tahlil | Probirka | Izoh |
 | --- | --- | --- |
@@ -12,13 +12,13 @@ Asosiy qoida: **qon hujayralari va HbA1c — binafsha (EDTA); minerallar, gormon
 | HbA1c, qon guruhi va rezus | Binafsha EDTA | To'liq qon |
 | EChT (SOE) | Panchenkov kapillyari, 5% natriy sitrat (1:4) | Alohida olinadi; 1 soatdan keyin o'qiladi |
 | Koagulogramma (PT, Kviku, INR, ACHTV, TT, fibrinogen) | Ko'k, 3.2% sitrat 2.7 ml | Belgigacha aniq to'ldiriladi, boshqa probirka bilan almashtirilmaydi |
-| K, Na, Cl, Ca, Mg, Fe, fosfor | Sariq (gel) yoki qizil | EDTA plazmasi YAROQSIZ (6-bo'lim) |
+| K, Na, Cl, Ca, Mg, Fe, fosfor | Sariq (gelli) | EDTA plazmasi YAROQSIZ (6-bo'lim); gel sentrifugadan keyin K ni hujayradan ajratib turadi |
 | Ishqoriy fosfataza (ALP), amilaza | Sariq yoki qizil | EDTA fermentni pasaytiradi |
 | Glyukoza, mochevina, kreatinin, ALT, AST, bilirubin, umumiy oqsil, xolesterin, triglitserid, siydik kislotasi | Sariq/qizil; umumiy qon bilan birga bo'lsa — o'sha EDTA probirka (6-bo'lim shartlari bilan) | EDTA plazmasidan faqat 6-bo'lim shartlari bajarilsa |
 | Revmoproba (RF, CRP, ASLO) | Sariq yoki qizil | Zardob |
 | IFA: gormonlar, TORCH, gepatit markerlari, vitamin D, troponin va h.k. | Sariq yoki qizil | Zardob; reagent yo'riqnomasida boshqasi yozilmagan bo'lsa |
 
-Bir bemorga minerallar va umumiy qon birga buyurilgan bo'lsa — **ikkita probirka**: sariq (yoki qizil) + binafsha.
+Bir bemorga minerallar va umumiy qon birga buyurilgan bo'lsa — **ikkita probirka**: sariq gelli + binafsha.
 
 ## 2. Bizdagi probirkalar
 
@@ -28,7 +28,7 @@ Har bir probirka faqat o'z maqsadi uchun ishlatiladi; ag'darib aralashtirish son
 | --- | --- | --- | --- | --- | --- |
 | Ko'k | 3.2% natriy sitrat (1:9) | 2.7 ml | Koagulogramma | 3–4 marta sekin ag'darish | Shart emas, darhol sentrifuga |
 | Qizil | Ivish faollashtiruvchi | 5 ml | Zardob: bioximiya, IFA, revmoproba | 5 marta | 30 daqiqa (ivishi uchun) |
-| Sariq | Ivish faollashtiruvchi + gel | 6 ml | Zardob: bioximiya (ayniqsa minerallar), IFA | 5 marta | 30 daqiqa |
+| Sariq | Ivish faollashtiruvchi + gel | 6 ml | Zardob: K va boshqa minerallar (asosiy probirka), bioximiya, IFA | 5 marta | 30 daqiqa |
 | Binafsha | EDTA K3 | 3 ml | Umumiy qon, HbA1c, qon guruhi | 8–10 marta | Umumiy qon uchun sentrifugalanmaydi |
 | EDTA li ependorf | EDTA K3 purkalgan; 1 ml gacha to'ldiriladi | 1.5 ml | Umumiy qon; bitta glyukoza yoki ALT (barmoqdan yoki ko'chirilgan qon) | Qopqog'ini yopib 8–10 marta | — |
 | Oddiy ependorf (EDTA siz) | Hech narsa yo'q | 1.5 / 2 / 5 ml | Ajratilgan zardob/plazmani saqlash va filialga yuborish (7-bo'lim) | — | — |
@@ -116,7 +116,7 @@ Glyukoza farqining sababi EDTA emas, sentrifugagacha o'tgan vaqt: probirkalar tu
 
 ### EDTA plazmasida bo'lmaydigan tahlillar
 
-Bu tahlillarda EDTA moddaning o'zi natijaga kimyoviy ta'sir qiladi, shuning uchun **alohida sariq (yoki qizil) probirka shart**. Laboratoriyadagi amaldagi qoida to'g'ri; ro'yxatga ikkita ferment qo'shildi.
+Bu tahlillarda EDTA moddaning o'zi natijaga kimyoviy ta'sir qiladi, shuning uchun **alohida probirka shart: minerallar uchun sariq gelli, ALP va amilaza uchun sariq yoki qizil**. Laboratoriyadagi amaldagi qoida to'g'ri; ro'yxatga ikkita ferment qo'shildi.
 
 | Tahlil | EDTA ta'siri | Natijada |
 | --- | --- | --- |
@@ -169,7 +169,7 @@ Qayta sentrifuga zardobni tiniqlashtiradi, lekin aralashgan vaqtdagi o'zgarishla
 Shuning uchun:
 
 1. **Qizil probirka va EDTA plazmasi** (gel yo'q) — sentrifugadan keyin zardob/plazmani pipetka bilan oddiy ependorfga (1.5 / 2 ml) ajratib, ependorfni yuboring. Ependorfga Sample ID va "zardob" yoki "EDTA plazma" yoziladi.
-2. **Sariq (gelli) probirka** — gel to'siq zardobni qondan ajratib turadi, yo'lda aralashmaydi; ajratish shart emas.
+2. **Sariq (gelli) probirka** — gel to'siq zardobni qondan ajratib turadi, yo'lda aralashmaydi; ajratish shart emas. Kaliy va minerallar shu sababli doim sariq gelli probirkaga olinadi.
 3. Kelganda zardob qon bilan aralashgan bo'lsa — qayta sentrifugalanadi, lekin natijaga izoh yoziladi: "namuna aralashgan holda keldi"; kaliy va glyukoza natijasi berilmaydi, qayta olinadi.
 
 ## 8. Saqlash muddatlari
