@@ -1,6 +1,6 @@
 # Qon olish qo'llanmasi: probirka tanlash, olish tartibi va namunaga ishlov berish
 
-Laboratoriya xodimlari uchun · 15.10.2026 · Onlayn nusxa: https://claude.ai/code/artifact/77f527d5-de3b-4947-9e8c-4d8248ec861b
+Laboratoriya xodimlari uchun · 15.10.2026 (yangilangan) · Onlayn nusxa: https://claude.ai/code/artifact/77f527d5-de3b-4947-9e8c-4d8248ec861b
 
 ## 1. Qisqacha: qaysi tahlil — qaysi probirka
 
@@ -10,6 +10,7 @@ Asosiy qoida: **qon hujayralari va HbA1c — binafsha (EDTA); minerallar, gormon
 | --- | --- | --- |
 | Umumiy qon tahlili (BC-20S) | Binafsha EDTA 3 ml yoki EDTA li 1.5 ml ependorf | To'liq qon, sentrifugalanmaydi |
 | HbA1c, qon guruhi va rezus | Binafsha EDTA | To'liq qon |
+| EChT (SOE) | Panchenkov kapillyari, 5% natriy sitrat (1:4) | Alohida olinadi; 1 soatdan keyin o'qiladi |
 | Koagulogramma (PT, Kviku, INR, ACHTV, TT, fibrinogen) | Ko'k, 3.2% sitrat 2.7 ml | Belgigacha aniq to'ldiriladi, boshqa probirka bilan almashtirilmaydi |
 | K, Na, Cl, Ca, Mg, Fe, fosfor | Sariq (gel) yoki qizil | EDTA plazmasi YAROQSIZ (6-bo'lim) |
 | Ishqoriy fosfataza (ALP), amilaza | Sariq yoki qizil | EDTA fermentni pasaytiradi |
@@ -29,7 +30,7 @@ Har bir probirka faqat o'z maqsadi uchun ishlatiladi; ag'darib aralashtirish son
 | Qizil | Ivish faollashtiruvchi | 5 ml | Zardob: bioximiya, IFA, revmoproba | 5 marta | 30 daqiqa (ivishi uchun) |
 | Sariq | Ivish faollashtiruvchi + gel | 6 ml | Zardob: bioximiya (ayniqsa minerallar), IFA | 5 marta | 30 daqiqa |
 | Binafsha | EDTA K3 | 3 ml | Umumiy qon, HbA1c, qon guruhi | 8–10 marta | Umumiy qon uchun sentrifugalanmaydi |
-| EDTA li ependorf | EDTA K3 purkalgan | 1.5 ml | Umumiy qon (barmoqdan yoki ko'chirilgan qon) | Qopqog'ini yopib 8–10 marta | — |
+| EDTA li ependorf | EDTA K3 purkalgan; 1 ml gacha to'ldiriladi | 1.5 ml | Umumiy qon; bitta glyukoza yoki ALT (barmoqdan yoki ko'chirilgan qon) | Qopqog'ini yopib 8–10 marta | — |
 | Oddiy ependorf (EDTA siz) | Hech narsa yo'q | 1.5 / 2 / 5 ml | Ajratilgan zardob/plazmani saqlash va filialga yuborish (7-bo'lim) | — | — |
 
 Muhim:
@@ -76,13 +77,13 @@ Ikki urinishda qon olinmasa — boshqa xodimni chaqiring.
 
 ## 5. Kapillyar qon (EDTA li 1.5 ml ependorf)
 
-Barmoqdan olingan qon faqat umumiy qon tahlili uchun; bioximiya, minerallar va koagulogramma barmoqdan olinmaydi.
+Barmoqdan olingan qon umumiy qon tahlili va bitta-ikkita bioximiya (glyukoza, ALT) uchun; minerallar va koagulogramma barmoqdan olinmaydi.
 
 1. Barmoqni iliqlashtiring, spirt bilan arting va quriting.
 2. Lansetni barmoq yumshog'ining yon tomoniga sanching.
 3. **Birinchi tomchini** quruq paxta bilan arting — unda to'qima suyuqligi bor.
 4. Qonni o'z-o'zidan tomizing. **Barmoqni siqmang**: to'qima suyuqligi qonni suyultiradi, trombotsitlar to'planib, soxta past chiqadi.
-5. Ependorfni ishlab chiqaruvchi ko'rsatgan hajmgacha to'ldiring; ortiqcha to'ldirilsa EDTA yetmay, mayda laxtalar paydo bo'ladi.
+5. Ependorfni **1 ml** gacha to'ldiring; ortiqcha to'ldirilsa EDTA yetmay, mayda laxtalar paydo bo'ladi.
 6. Qopqog'ini yopib darhol 8–10 marta ag'daring.
 
 Kapillyar tartibi venadagiga teskari: bir nechta probirka bo'lsa, **EDTA birinchi** to'ldiriladi — trombotsitlar to'planib ulgurmasin.
@@ -93,7 +94,7 @@ Laboratoriya sinovi ko'rsatdi: **ALT, AST va bilirubin EDTA plazmasida zardob bi
 
 ### Laboratoriya sinovi (12.10.2026)
 
-Bitta bemorning qoni bir vaqtda binafsha (EDTA) va sariq (gel) probirkaga olinib, 2–3 soatdan keyin BK-280 da o'lchandi.
+Bitta bemorning qoni bir vaqtda binafsha (EDTA) va sariq (gel) probirkaga olinib, 2–3 soatdan keyin BK-280 da o'lchandi. Probirkalar bir vaqtda sentrifugalanmagan; mochevina, kreatinin, oqsil va lipidlar sinalmagan.
 
 | Tahlil | EDTA plazmasi | Sariq (zardob) | Farq | Xulosa |
 | --- | --- | --- | --- | --- |
@@ -103,14 +104,14 @@ Bitta bemorning qoni bir vaqtda binafsha (EDTA) va sariq (gel) probirkaga olinib
 | Bog'langan bilirubin, µmol/L | 2.5 | 2.4 | +0.1 | Bir xil |
 | Glyukoza, mmol/L | 4.09 | 5.43 | −1.34 (−25%) | EDTA da past |
 
-Glyukoza farqining sababi: sentrifugalanmagan qonda hujayralar glyukozani iste'mol qilishda davom etadi. 25% kamayish klinik jihatdan katta: haqiqiy 7.0 mmol/L (qandli diabet chegarasi) 5.3 ga tushib, "norma" bo'lib ko'rinadi.
+Glyukoza farqining sababi EDTA emas, sentrifugagacha o'tgan vaqt: probirkalar turli vaqtda sentrifugalangan, sentrifugalanmagan qonda esa hujayralar glyukozani iste'mol qilishda davom etadi. 25% kamayish klinik jihatdan katta: haqiqiy 7.0 mmol/L (qandli diabet chegarasi) 5.3 ga tushib, "norma" bo'lib ko'rinadi.
 
 ### Qoida
 
 1. **Bitta binafsha probirkadan mumkin:** umumiy qon + ALT, AST, bilirubin (sinovda tasdiqlangan). Mochevina, kreatinin, umumiy oqsil, lipidlar uchun ham xuddi shunday juft sinov o'tkazish tavsiya etiladi (10-bo'lim).
 2. **Glyukoza bo'lsa:** umumiy qon ko'rilishi bilan darhol sentrifugalang — qon olingandan keyin 30 daqiqadan kechiktirmang. Ajratilgan plazmada glyukoza barqaror, uni 1 soat ichida o'lchash mumkin. Muhimi o'lchash vaqti emas, **sentrifuga vaqti**.
 3. **Bolalar:** bitta binafsha probirka yetarli — umumiy qon va (minerallardan tashqari) bioximiya shundan qilinadi.
-4. Probirka venadan olingan binafsha 3 ml bo'lsin. Barmoqdan olingan qon bioximiyaga tavsiya etilmaydi: hajmi kam, to'qima suyuqligi va gemoliz bor.
+4. Probirka — binafsha 3 ml yoki EDTA li ependorf (1 ml). Ependorfdan bitta-ikkita tahlil (masalan, glyukoza yoki ALT) qilish mumkin. Qon barmoqdan olingan bo'lsa, barmoq siqilmasin (to'qima suyuqligi suyultiradi) va plazmada gemoliz bo'lmasin.
 5. Plazma pushti yoki qizil bo'lsa (gemoliz) — AST, LDH, K, temir soxta yuqori; namuna qayta olinadi.
 
 ### EDTA plazmasida bo'lmaydigan tahlillar
@@ -144,7 +145,7 @@ Aylanish soni (ayl/daq) sentrifuga radiusiga bog'liq: g = 0.00001118 × radius (
 Qoidalar:
 
 - Sentrifugaga probirkalarni qarama-qarshi joylashtirib muvozanatlang; qopqoqlar yopiq bo'lsin.
-- Sariq probirkada gel zardob bilan qon o'rtasida to'siq hosil qiladi. Zardobni probirkada qoldirish mumkin; gelli probirka qayta sentrifugalanmaydi.
+- Sariq probirkada gel zardob bilan qon o'rtasida to'siq hosil qiladi. Zardobni probirkada qoldirish mumkin; gel to'siq butun bo'lsa, probirka qayta sentrifugalanmaydi.
 - Zardob/plazma **pipetka bilan** olinadi, quyib olinmaydi. Pipetka uchi laxta va oq qatlamga (leykotsitlar) tegmasin.
 - Fibrin iplari bo'lsa (ayniqsa chala ivigan qizil probirkada) — ignani tiqib qo'ymasligi uchun qayta sentrifugalang.
 
@@ -154,6 +155,22 @@ Qoidalar:
 - **5 ml** — zardob ko'p kerak bo'lganda yoki uzoq saqlash uchun.
 - Har bir ependorfga asl probirkadagi shtrix-kod (Sample ID) va namuna turi ("zardob", "sitrat plazma") yoziladi.
 - Qon to'g'ridan-to'g'ri oddiy ependorfga olinmaydi (2-bo'lim).
+
+### Filialdan namuna yuborish
+
+Amaldagi tartib: umumiy qon (EDTA) sentrifugalanmay yuboriladi, qolgan tahlillar sentrifugalab yuboriladi; yo'lda aralashib qolsa, kelganda qayta sentrifugalanadi.
+
+Qayta sentrifuga zardobni tiniqlashtiradi, lekin aralashgan vaqtdagi o'zgarishlarni qaytarmaydi:
+
+- **Kaliy** hujayradan zardobga chiqadi — soxta yuqori.
+- **Glyukoza** hujayralar tomonidan iste'mol qilinadi — soxta past.
+- Chayqalishdan **gemoliz** — AST, LDH, temir soxta yuqori.
+
+Shuning uchun:
+
+1. **Qizil probirka va EDTA plazmasi** (gel yo'q) — sentrifugadan keyin zardob/plazmani pipetka bilan oddiy ependorfga (1.5 / 2 ml) ajratib, ependorfni yuboring. Ependorfga Sample ID va "zardob" yoki "EDTA plazma" yoziladi.
+2. **Sariq (gelli) probirka** — gel to'siq zardobni qondan ajratib turadi, yo'lda aralashmaydi; ajratish shart emas.
+3. Kelganda zardob qon bilan aralashgan bo'lsa — qayta sentrifugalanadi, lekin natijaga izoh yoziladi: "namuna aralashgan holda keldi"; kaliy va glyukoza natijasi berilmaydi, qayta olinadi.
 
 ## 8. Saqlash muddatlari
 
@@ -190,9 +207,9 @@ Natija g'alati chiqsa, avval shu jadvaldagi sabablarni tekshiring — ko'pincha 
 | Barmoq siqib qon olingan | Qon suyuladi, trombotsit to'planadi | Erkin tomchi, birinchi tomchi artiladi |
 | Yorliq keyin yopishtirilgan | Boshqa bemorning natijasi | Yorliq bemor oldida, qon olishdan oldin |
 
-## 10. Takliflar va ochiq savollar
+## 10. Takliflar
 
-Qo'llanmani yakunlash uchun quyidagilarni aniqlash va hal qilish kerak.
+Qo'llanmani yakunlash uchun quyidagilarni hal qilish kerak.
 
 ### Takliflar
 
@@ -200,10 +217,5 @@ Qo'llanmani yakunlash uchun quyidagilarni aniqlash va hal qilish kerak.
 - [ ] **Dasturda probirka ko'rsatmasi.** Buyurtma qabul qilinganda dastur kerakli probirkalarni ko'rsatsin (masalan: "binafsha + sariq + ko'k"). Minerallar bor bo'lsa, "EDTA dan bioximiya mumkin emas" ogohlantirishi chiqsin.
 - [ ] **EDTA ifloslanishi signali.** Kritik signal tizimiga qoida qo'shish: bir namunada K > 6.5 va Ca < 1.8 mmol/L chiqsa, "EDTA ifloslanishi? Qayta oling" degan ogohlantirish chiqsin.
 - [ ] **Sentrifugaga yorliq.** Har bir sentrifugaga "zardob uchun: ___ ayl/daq, 10 daqiqa" deb yozib qo'yish (radiusga qarab, 7-bo'lim).
-
-### Ochiq savollar
-
-- 12.10 sinovida sariq probirka EDTA bilan bir vaqtda sentrifugalanganmi yoki oldinroq? Glyukoza sinovini takrorlash kerak: ikkala probirka darhol sentrifugalanadi. Shu sinovga mochevina, kreatinin, umumiy oqsil va lipidlarni ham qo'shish tavsiya etiladi.
-- EDTA li 1.5 ml ependorf qancha hajmgacha to'ldiriladi (ishlab chiqaruvchi ko'rsatgan belgi)?
-- EChT (SOE) qilinadimi? Qilinsa, qaysi usulda va qaysi probirkada (Panchenkov — alohida 5% sitrat bilan)?
-- Filialdan keladigan namunalar qanday yetkaziladi: to'liq qonmi yoki ajratilgan zardobmi? Yetkazish vaqti 8-bo'lim muddatlariga sig'adimi?
+- [ ] **Juft sinovni takrorlash.** Bitta bemordan binafsha va sariq probirka olinib, ikkalasi **bir vaqtda, darhol** sentrifugalanadi. Glyukoza, mochevina, kreatinin, umumiy oqsil, xolesterin va triglitserid solishtiriladi. Farq 5% dan kam bo'lsa, 6-bo'limdagi ro'yxatga qo'shiladi.
+- [ ] **Filial namunalari ependorfda.** Qizil probirka va EDTA plazmasi filialda ependorfga ajratib yuborilsin (7-bo'lim); yo'lda aralashgan namunadan K va glyukoza berilmasin.
