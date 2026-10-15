@@ -159,6 +159,26 @@ DEFAULT_CONFIG = {
         "blanka_printer": "",
     },
 
+    # Koagulogramma: PT (sek) <-> Kviku (%) <-> MNO/INR qo'lda kiritishda
+    # avtomatik hisob — analizatordagi "Setup PT" bilan BIR XIL qiymatlar
+    # (har yangi reagent seriyasi / kalibrovkada shu yerda yangilanadi).
+    #   INR   = (PT / mnpt) ** isi
+    #   Kviku = kalibrlash nuqtalaridan 1/PT ~ Kviku% chiziqli regressiya
+    #           (koag_kviku_model, monoblok_dastur.py)
+    # Standart: BioSystems COAX, LOT exp 11/2026 (13.10.2026 ekranidan).
+    # Tizim Sozlamalari > «🩸 Koagulogramma».
+    "koagulogramma": {
+        "avto_hisob": True,
+        "isi": 1.14,        # ISI (International Sensitivity Index)
+        "mnpt": 13.0,       # "Normal" — o'rtacha normal PT, sek
+        "kalibrlash": [     # [Kviku %, sek]
+            [100.0, 13.0],
+            [50.0, 18.5],
+            [33.0, 24.1],
+            [25.0, 29.5],
+        ],
+    },
+
     # Analizator fayllari (URIT RAW, BC-20s TXT) papkasi. "" = standart
     # (koddan: skript papkasi; EXE: %ProgramData%\AzizMedLine\Natija).
     # Qoida — natija_papka.py. Tizim Sozlamalari > «📁 Papkalar».
@@ -226,6 +246,14 @@ def load_config() -> dict:
                 loaded = json.load(f)
             if isinstance(loaded, dict):
                 cfg = _deep_merge(DEFAULT_CONFIG, loaded)
+                # 13.10.2026: koagulogramma A/B (taxminiy) -> analizator
+                # kalibrlash jadvali. Eski A/B sozlamasi = standart COAX ga.
+                _kg = cfg.get("koagulogramma")
+                if isinstance(_kg, dict) and "kviku_a" in _kg and "kalibrlash" not in loaded.get("koagulogramma", {}):
+                    _yangi = json.loads(json.dumps(DEFAULT_CONFIG["koagulogramma"]))
+                    _yangi["avto_hisob"] = bool(_kg.get("avto_hisob", True))
+                    cfg["koagulogramma"] = _yangi
+                    save_config(cfg)
                 if manba != CONFIG_PATH:
                     save_config(cfg)   # eski joydan yangi joyga ko'chirish
         except Exception as e:

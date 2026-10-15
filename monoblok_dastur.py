@@ -9745,6 +9745,48 @@ def filial_mijozi_tekshir(order_id):
         return False, ""
 
 
+def koag_kviku_model(points):
+    """PT kalibrlash nuqtalaridan Kviku egri chizig'i (analizator usuli).
+
+    points: [[kviku_%, sek], ...] — analizatordagi "Setup PT" jadvali
+    (masalan BioSystems COAX: 100%=13.0s, 50%=18.5s, 33%=24.1s, 25%=29.5s).
+    Model: 1/PT = c + d * Kviku%  (chiziqli regressiya; COAX ekranidagi R²
+    aynan shu modelniki — 0.979). Bo'sh (0) qatorlar tashlanadi.
+
+    Qaytaradi: (sek_dan_kviku, kviku_dan_sek, r2) yoki None (nuqtalar yetarli emas).
+    """
+    pts = []
+    for p in points or []:
+        try:
+            q, s = float(p[0]), float(p[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if q > 0 and s > 0:
+            pts.append((q, 1.0 / s))
+    if len(pts) < 2:
+        return None
+    n = len(pts)
+    mx = sum(q for q, _ in pts) / n
+    my = sum(y for _, y in pts) / n
+    sxx = sum((q - mx) ** 2 for q, _ in pts)
+    syy = sum((y - my) ** 2 for _, y in pts)
+    sxy = sum((q - mx) * (y - my) for q, y in pts)
+    if sxx == 0 or syy == 0 or sxy <= 0:   # % oshsa vaqt kamayishi (1/PT oshishi) shart
+        return None
+    d = sxy / sxx
+    c = my - d * mx
+    r2 = sxy * sxy / (sxx * syy)
+
+    def sek_dan_kviku(sek):
+        return (1.0 / sek - c) / d if sek > 0 else None
+
+    def kviku_dan_sek(q):
+        y = c + d * q
+        return 1.0 / y if y > 0 else None
+
+    return sek_dan_kviku, kviku_dan_sek, r2
+
+
 class MonoblokApp:
     def __init__(self, root):
         self.root = root
@@ -21042,7 +21084,83 @@ Sana: {_sana_fmt}"""
 
         # Birinchi marta hisoblash
         calculate_values()
-        
+
+        # ── PT (sek) <-> Kviku (%) <-> MNO/INR avtomatik hisob ─────────────
+        # Qo'lda kiritishda: PT sek yozilsa -> Kviku va INR; Kviku % yozilsa
+        # -> PT sek va INR. Koeffitsientlar reagent pasportidan
+        # (analizator_config.json -> "koagulogramma"). Traslar eski natija
+        # YUKLANGANDAN KEYIN ulanadi — analizator qiymatlarini bosib ketmaydi.
+        if 'pt_sek' in component_vars and 'pt_kviku' in component_vars:
+            try:
+                _kc = get_analyzer("koagulogramma") or {}
+            except Exception:
+                _kc = {}
+            try:
+                _isi = float(_kc.get("isi", 1.14))
+                _mnpt = float(_kc.get("mnpt", 13.0))
+            except (TypeError, ValueError):
+                _isi, _mnpt = 1.14, 13.0
+            _kmodel = koag_kviku_model(_kc.get("kalibrlash"))
+            if _kc.get("avto_hisob", True) and _kmodel and _mnpt > 0:
+                _sek_to_q, _q_to_sek, _ = _kmodel
+                _pt_busy = [False]
+                _pt_auto = set()   # avtomatik to'ldirilgan maydonlar
+
+                def _num(s):
+                    try:
+                        return float(str(s).strip().replace(",", "."))
+                    except ValueError:
+                        return None
+
+                def _pt_set(key, text):
+                    if key in component_vars:
+                        component_vars[key].set(text)
+                        if text:
+                            _pt_auto.add(key)
+                        else:
+                            _pt_auto.discard(key)
+
+                def _pt_from(src):
+                    if _pt_busy[0]:
+                        return
+                    _pt_busy[0] = True
+                    try:
+                        _pt_auto.discard(src)   # laborant o'zi yozdi
+                        v = _num(component_vars[src].get())
+                        pt = None
+                        if src == 'pt_sek':
+                            q = _sek_to_q(v) if (v is not None and v >= 3) else None
+                            if q is not None and q > 0:
+                                pt = v
+                                _pt_set('pt_kviku', f"{q:.1f}")
+                        elif v is not None and v > 0:
+                            pt = _q_to_sek(v)
+                            if pt is not None:
+                                pt = round(pt, 1)
+                                _pt_set('pt_sek', f"{pt:.1f}")
+                        if pt is not None:
+                            _pt_set('pt_mno', f"{(pt / _mnpt) ** _isi:.2f}")
+                        else:
+                            # manba o'chirildi — faqat avtomatik qiymatlarni tozalaymiz
+                            for k in ('pt_sek', 'pt_kviku', 'pt_mno'):
+                                if k != src and k in _pt_auto:
+                                    _pt_set(k, "")
+                    finally:
+                        _pt_busy[0] = False
+
+                component_vars['pt_sek'].trace_add("write", lambda *a: _pt_from('pt_sek'))
+                component_vars['pt_kviku'].trace_add("write", lambda *a: _pt_from('pt_kviku'))
+                if 'pt_mno' in component_vars:
+                    component_vars['pt_mno'].trace_add(
+                        "write", lambda *a: None if _pt_busy[0] else _pt_auto.discard('pt_mno'))
+                ttk.Label(
+                    main_container,
+                    text=(f"ℹ PT sekund yoki Kviku % yozilsa, qolganlari avtomatik hisoblanadi "
+                          f"(ISI={_isi:g}, Normal={_mnpt:g} sek). Kalibrovka/reagent o'zgarsa: "
+                          f"Tizim Sozlamalari → 🩸 Koagulogramma."),
+                    font=("Arial", 8), foreground="#1565C0", wraplength=520, justify=tk.LEFT
+                ).pack(anchor=tk.W, padx=12, pady=(6, 0))
+
         def save_and_close():
             # Kamida bitta maydon to'ldirilganligini tekshirish (hamma shart emas)
             required_components = [c for c in template.get("components", []) if not c.get("readonly")]
@@ -22170,6 +22288,113 @@ Sana: {_sana_fmt}"""
             foreground="#555", justify=tk.LEFT, wraplength=580).grid(
             row=4, column=0, columnspan=2, sticky=tk.W, padx=8, pady=(4, 8))
 
+        # ───────────────────────── KOAGULOGRAMMA ────────────────────────
+        # PT sek <-> Kviku % <-> MNO/INR qo'lda kiritishdagi avtomatik hisob.
+        # Qiymatlar analizatordagi "Setup PT" ekrani bilan BIR XIL kiritiladi
+        # (ISI, Normal, kalibrlash nuqtalari). Model: koag_kviku_model().
+        from monoblok_db_config import DEFAULT_CONFIG as _DEF_CFG
+        DEFAULT_KOAG = _DEF_CFG["koagulogramma"]
+        tab_k = ttk.Frame(nb)
+        nb.add(tab_k, text="🩸 Koagulogramma")
+        _kcfg = cfg.get("koagulogramma", {}) or {}
+        _k_avto = tk.BooleanVar(value=bool(_kcfg.get("avto_hisob", True)))
+        vars_map[("koagulogramma", "avto_hisob")] = _k_avto
+        ttk.Checkbutton(tab_k, text="PT sek / Kviku % yozilganda qolganlarini avtomatik hisoblash",
+                        variable=_k_avto).grid(row=0, column=0, columnspan=3, sticky=tk.W, padx=8, pady=(12, 8))
+        _k_vars = {}
+        for _r, (_key, _lbl, _hint) in enumerate([
+            ("isi",  "ISI:",           "analizator «Setup PT» → ISI (reagent pasportida)"),
+            ("mnpt", "Normal, sek:",   "analizator «Setup PT» → Normal (o'rtacha normal PT)"),
+        ], start=1):
+            ttk.Label(tab_k, text=_lbl).grid(row=_r, column=0, sticky=tk.W, padx=8, pady=3)
+            _v = tk.StringVar(value=str(_kcfg.get(_key, DEFAULT_KOAG.get(_key, ""))))
+            ttk.Entry(tab_k, textvariable=_v, width=10).grid(row=_r, column=1, sticky=tk.W, padx=4, pady=3)
+            ttk.Label(tab_k, text=_hint, foreground="#777").grid(row=_r, column=2, sticky=tk.W, padx=4)
+            vars_map[("koagulogramma", _key)] = _v
+            _k_vars[_key] = _v
+
+        ttk.Label(tab_k, text="Kalibrlash (analizatordagi «Setup PT» jadvali — Kviku % = sekund):",
+                  font=("Arial", 9, "bold")).grid(row=3, column=0, columnspan=3, sticky=tk.W, padx=8, pady=(12, 2))
+        _kal_fr = ttk.Frame(tab_k)
+        _kal_fr.grid(row=4, column=0, columnspan=3, sticky=tk.W, padx=20)
+        _kal_saved = _kcfg.get("kalibrlash")
+        if not isinstance(_kal_saved, list):
+            _kal_saved = DEFAULT_KOAG["kalibrlash"]
+        _kal_vars = []   # [(foiz_var, sek_var), ...] — 5 qator, analizatordagidek
+        for _i in range(5):
+            try:
+                _q0, _s0 = _kal_saved[_i]
+                _q0, _s0 = f"{float(_q0):g}", f"{float(_s0):g}"
+            except Exception:
+                _q0, _s0 = "", ""
+            _qv, _sv = tk.StringVar(value=_q0), tk.StringVar(value=_s0)
+            ttk.Label(_kal_fr, text=f"{_i + 1}:").grid(row=_i, column=0, sticky=tk.E, pady=2)
+            ttk.Entry(_kal_fr, textvariable=_qv, width=8, justify=tk.RIGHT).grid(row=_i, column=1, padx=(4, 2))
+            ttk.Label(_kal_fr, text="%  =").grid(row=_i, column=2)
+            ttk.Entry(_kal_fr, textvariable=_sv, width=8, justify=tk.RIGHT).grid(row=_i, column=3, padx=(4, 2))
+            ttk.Label(_kal_fr, text="s").grid(row=_i, column=4, sticky=tk.W)
+            _kal_vars.append((_qv, _sv))
+
+        def _k_kal_points():
+            """Kalibrlash jadvali -> [[foiz, sek], ...]; bo'sh/0 qatorlar tashlanadi.
+            Noto'g'ri raqam bo'lsa ValueError."""
+            out = []
+            for _qv, _sv in _kal_vars:
+                qs, ss = _qv.get().strip().replace(",", "."), _sv.get().strip().replace(",", ".")
+                if not qs and not ss:
+                    continue
+                q, s = float(qs or 0), float(ss or 0)
+                if q > 0 and s > 0:
+                    out.append([q, s])
+            return out
+
+        _k_preview = ttk.Label(tab_k, text="", foreground="#1565C0", justify=tk.LEFT,
+                               font=("Consolas", 9))
+        _k_preview.grid(row=5, column=0, columnspan=3, sticky=tk.W, padx=8, pady=(10, 4))
+
+        def _k_hisob(*_a):
+            try:
+                isi = float(_k_vars["isi"].get().replace(",", "."))
+                mnpt = float(_k_vars["mnpt"].get().replace(",", "."))
+                model = koag_kviku_model(_k_kal_points())
+                if model is None or mnpt <= 0:
+                    raise ValueError
+                to_q, _to_s, r2 = model
+                rows = [f"PT {pt:>4g} sek  →  Kviku {to_q(pt):6.1f} %   INR {(pt / mnpt) ** isi:.2f}"
+                        for pt in (12, 13, 15, 18, 25)]
+                _k_preview.config(
+                    text=f"R² = {r2:.3f}   (analizator ekranidagi R² bilan bir xil bo'lishi kerak)\n\n"
+                         "Tekshiruv:\n" + "\n".join(rows),
+                    foreground="#1565C0")
+            except Exception:
+                _k_preview.config(text="ISI, Normal va kamida 2 ta kalibrlash nuqtasini to'g'ri kiriting "
+                                       "(% oshganda sekund kamayishi kerak)", foreground="#c62828")
+
+        for _v in list(_k_vars.values()) + [v for pair in _kal_vars for v in pair]:
+            _v.trace_add("write", _k_hisob)
+        _k_hisob()
+
+        def _k_standart():
+            _k_vars["isi"].set(f"{DEFAULT_KOAG['isi']:g}")
+            _k_vars["mnpt"].set(f"{DEFAULT_KOAG['mnpt']:g}")
+            for _i, (_qv, _sv) in enumerate(_kal_vars):
+                try:
+                    _q0, _s0 = DEFAULT_KOAG["kalibrlash"][_i]
+                    _qv.set(f"{_q0:g}"); _sv.set(f"{_s0:g}")
+                except IndexError:
+                    _qv.set(""); _sv.set("")
+
+        ttk.Button(tab_k, text="↺ Standart (COAX, exp 11/2026)", command=_k_standart
+                   ).grid(row=6, column=0, columnspan=2, sticky=tk.W, padx=8, pady=(4, 6))
+        ttk.Label(
+            tab_k,
+            text="• Analizatorda yangi kalibrovka qilinganda «Setup PT» ekranidagi ISI, Normal va "
+                 "nuqtalarni (1: 100% = 13.0s ...) shu yerga xuddi o'zidek ko'chiring va «Saqlash» bosing.\n"
+                 "• INR = (PT / Normal) ^ ISI.  Kviku % — kalibrlash nuqtalaridan (1/PT ~ %), analizator usulida.\n"
+                 "• Analizatordan kelgan natijalarga tegilmaydi — faqat qo'lda kiritishda ishlaydi.",
+            foreground="#555", justify=tk.LEFT, wraplength=620).grid(
+            row=7, column=0, columnspan=3, sticky=tk.W, padx=8, pady=(6, 8))
+
         # ───────────────────────── PAPKALAR ─────────────────────────────
         # Analizatordan kelgan RAW/TXT fayllar qayerga tushadi (natija_papka.py).
         # Mijozda G: disk yo'q — papka shu yerdan tanlanadi (2026-10-11).
@@ -22342,7 +22567,7 @@ Sana: {_sana_fmt}"""
         def save_settings():
             new_cfg = load_config()
             int_keys = {"port", "baudrate", "bytesize", "stopbits", "reconnect_interval", "lis_port"}
-            float_keys = {"timeout"}
+            float_keys = {"timeout", "isi", "mnpt"}
             try:
                 for (section, key), var in vars_map.items():
                     new_cfg.setdefault(section, {})
@@ -22358,6 +22583,22 @@ Sana: {_sana_fmt}"""
             except ValueError as e:
                 messagebox.showerror("Xato", f"Raqamli maydon noto'g'ri: {e}", parent=dialog)
                 return
+
+            # Koagulogramma kalibrlash jadvali (ro'yxat — vars_map dan tashqarida)
+            try:
+                _kal = _k_kal_points()
+            except ValueError:
+                messagebox.showerror("Xato", "Koagulogramma: kalibrlash jadvalida noto'g'ri raqam bor.",
+                                     parent=dialog)
+                return
+            if koag_kviku_model(_kal) is None or new_cfg["koagulogramma"].get("mnpt", 0) <= 0:
+                messagebox.showerror(
+                    "Xato", "Koagulogramma: Normal (sek) va kamida 2 ta to'g'ri kalibrlash nuqtasi kerak\n"
+                            "(% oshganda sekund kamayishi kerak).", parent=dialog)
+                return
+            new_cfg["koagulogramma"]["kalibrlash"] = _kal
+            for _old in ("kviku_a", "kviku_b"):   # 13.10.2026 dagi eski A/B sozlamasi
+                new_cfg["koagulogramma"].pop(_old, None)
 
             # Printer: sentinel yorlig'i -> "" (Windows standart printeri)
             try:
