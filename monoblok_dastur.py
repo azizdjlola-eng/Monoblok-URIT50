@@ -6623,6 +6623,62 @@ def _get_onedrive_natijalar(date_str=None):
         onedrive_root = os.path.join(os.path.expanduser('~'), 'Natijalar_PDF')
     return os.path.join(onedrive_root, 'Natijalar', date_str)
 
+def _muhr_joyini_top(page, anchor, size):
+    """Muhr uchun joy: «Laborant vrach:» bilan familiya ORASIDA, imzo qatorini
+    kesib o'tadi, lekin HECH QANDAY yozuvni (tepadagi jadval normalari, sahifa
+    raqami, «Sana/Vaqt») va rasmni (gistogramma) yopmaydi. Jadval chiziqlari
+    ustidan o'tishi mumkin — qog'ozdagi muhr kabi.
+    Joy yetmasa muhr 2.6 sm gacha kichrayadi. Qaytaradi: (cx, cy, size) pt."""
+    import fitz  # pymupdf
+    pr = page.rect
+    words = [w for w in page.get_text("words") if w[4].strip()]
+    mid = (anchor.y0 + anchor.y1) / 2
+    # Imzo qatoridagi so'zlar: chap = «Laborant vrach:», o'ng = familiya
+    row = [w for w in words if w[1] <= mid <= w[3]]
+    gx0 = max([w[2] for w in row if w[0] <= anchor.x1 + 15] or [anchor.x1])
+    gx1 = min([w[0] for w in row if w[0] > gx0 + 5] or [pr.x1 - 30])
+    obst = [fitz.Rect(w[:4]) + (-1.5, -1.5, 1.5, 1.5) for w in words]
+    try:
+        obst += [fitz.Rect(i["bbox"]) for i in page.get_image_info()
+                 if i.get("width", 9) * i.get("height", 9) > 4]  # 1×1 bo'sh rasm emas
+    except Exception:
+        pass
+    r_max = size / 2
+    obst = [o for o in obst if o.y1 > mid - 2.2 * r_max and o.y0 < mid + 2.2 * r_max]
+
+    def _bo_sh(cx, cy, r):
+        if cx - r < pr.x0 + 8 or cx + r > pr.x1 - 8 or cy - r < pr.y0 + 8 or cy + r > pr.y1 - 8:
+            return False
+        rr = (r * 0.98) ** 2  # muhrning tashqi halqasi
+        for o in obst:
+            dx = max(o.x0 - cx, 0, cx - o.x1)
+            dy = max(o.y0 - cy, 0, cy - o.y1)
+            if dx * dx + dy * dy < rr:
+                return False
+        return True
+
+    ideal_x = (gx0 + gx1) / 2
+    s_min = min(size, 2.6 / 2.54 * 72)
+    s = size
+    while s >= s_min - 0.01:
+        r = s / 2
+        ideal_y = mid + 0.2 * r  # qog'ozdagidek — qatordan biroz pastroq
+        cands = []
+        x = gx0 - r
+        while x <= gx1 + r:
+            y = mid - 0.55 * r  # imzo qatori har doim muhr ichida qoladi
+            while y <= mid + 0.75 * r:
+                cands.append(((x - ideal_x) ** 2 + 2 * (y - ideal_y) ** 2, x, y))
+                y += 2
+            x += 3
+        for _d, x, y in sorted(cands):
+            if _bo_sh(x, y, r):
+                return x, y, s
+        s -= 0.1 / 2.54 * 72
+    # Hech qayerga sig'madi — eng kichik o'lchamda oraliq o'rtasiga
+    return ideal_x, mid + 0.2 * s_min / 2, s_min
+
+
 def _pdf_elektron_muhr_qoy(pdf_path):
     """PDF nusxaga elektron muhr qo'yadi — «Laborant vrach:» qatori ustiga,
     qog'ozda qo'lda bosiladigan joyga. Word fayl o'zgarmaydi.
@@ -6655,17 +6711,13 @@ def _pdf_elektron_muhr_qoy(pdf_path):
             page = doc[-1]
         pr = page.rect
         if anchor is not None:
-            # Muhr markazi: «Laborant vrach:» yozuvining o'ng tomoni, qatordan biroz
-            # pastda — qog'ozdagi qo'lda bosilgan muhr kabi qatorni yarim yopadi.
-            cx = anchor.x1 + size * 0.55
-            cy = anchor.y0 + size * 0.30
+            cx, cy, size = _muhr_joyini_top(page, anchor, size)
         else:
             # Imzo qatori topilmadi — oxirgi sahifa pastki o'ng burchagi
             cx = pr.x1 - size * 0.9
             cy = pr.y1 - size * 1.1
-        # Sahifa chetidan chiqib ketmasin (pastda sahifa raqami footeri bor)
-        cx = max(pr.x0 + size / 2 + 10, min(cx, pr.x1 - size / 2 - 10))
-        cy = max(pr.y0 + size / 2 + 10, min(cy, pr.y1 - size / 2 - 28))
+            cx = max(pr.x0 + size / 2 + 10, min(cx, pr.x1 - size / 2 - 10))
+            cy = max(pr.y0 + size / 2 + 10, min(cy, pr.y1 - size / 2 - 28))
         rect = fitz.Rect(cx - size / 2, cy - size / 2, cx + size / 2, cy + size / 2)
         page.insert_image(rect, filename=muhr, overlay=True, keep_proportion=True)
         _pno = page.number + 1
