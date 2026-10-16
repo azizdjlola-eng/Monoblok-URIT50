@@ -382,6 +382,12 @@ LOGO_DEFAULT_PATH = r"G:\DASTUR\URIT 50\logo.jpg"
 #         (QR orqali telefonda ochilsa ham to'g'ri). Kerak bo'lsa shu qiymatni False qiling.
 PDF_STRIP_FONTS = True
 
+# ── PDF elektron muhr ────────────────────────────────────────────────────────
+# Qog'oz (Word) blankaga muhr QO'LDA bosiladi; bemor botdan oladigan PDF nusxaga
+# esa "ELEKTRON NUSXA" muhri avtomatik qo'yiladi (Word fayl o'zgarmaydi).
+# Blanka Sozlamalari → 🔏 PDF elektron muhr da yoqiladi/o'chiriladi.
+PDF_MUHR_DEFAULT_PATH = r"G:\DASTUR\URIT 50\muhr\elektron_muhr.png"
+
 
 def _mijoz_belgisi() -> dict:
     """MIJOZ (sotib oluvchi klinika) buildi belgisi — build_mijoz.py EXE ichiga
@@ -426,6 +432,10 @@ def load_blanka_config() -> dict:
         # boshqacha bo'lishi mumkin, shuning uchun Blanka Sozlamalaridan sozlanadi.
         "word_save_dir": "",   # bo'sh = G:\Қилинган анализлар
         "pdf_save_dir": "",    # bo'sh = OneDrive\Natijalar
+        # PDF nusxaga elektron muhr (MIJOZ buildida o'chiq — muhr bizning klinikaniki)
+        "pdf_muhr": not bool(_mijoz),
+        "pdf_muhr_path": "" if _mijoz else PDF_MUHR_DEFAULT_PATH,
+        "pdf_muhr_size": 3.8,  # sm (diametr)
     }
     # EXE ichidagi nusxa — bizning klinika sozlamasi. MIJOZ da o'qilmaydi (eski
     # versiyadan _internal da qolib ketgan bo'lishi mumkin — Inno uni o'chirmaydi).
@@ -6613,6 +6623,70 @@ def _get_onedrive_natijalar(date_str=None):
         onedrive_root = os.path.join(os.path.expanduser('~'), 'Natijalar_PDF')
     return os.path.join(onedrive_root, 'Natijalar', date_str)
 
+def _pdf_elektron_muhr_qoy(pdf_path):
+    """PDF nusxaga elektron muhr qo'yadi — «Laborant vrach:» qatori ustiga,
+    qog'ozda qo'lda bosiladigan joyga. Word fayl o'zgarmaydi.
+    Blanka Sozlamalarida o'chiq bo'lsa yoki muhr fayli topilmasa — hech narsa
+    qilmaydi. Xatolik PDF yaratishni to'xtatmaydi. True = muhr qo'yildi."""
+    try:
+        cfg = load_blanka_config()
+        if not cfg.get('pdf_muhr', False):
+            return False
+        muhr = (cfg.get('pdf_muhr_path') or '').strip()
+        if not muhr or not os.path.exists(muhr):
+            print(f"[PDF] Elektron muhr fayli topilmadi: {muhr or '(bo`sh)'}")
+            return False
+        try:
+            size_cm = float(str(cfg.get('pdf_muhr_size', 3.8)).replace(',', '.'))
+        except Exception:
+            size_cm = 3.8
+        size = max(2.0, min(size_cm, 6.0)) / 2.54 * 72  # sm → pt
+
+        import fitz  # pymupdf
+        doc = fitz.open(pdf_path)
+        page, anchor = None, None
+        # Imzo qatori oxirgi sahifada bo'ladi — oxiridan qidiramiz
+        for _pno in range(len(doc) - 1, -1, -1):
+            _hits = doc[_pno].search_for("Laborant vrach")
+            if _hits:
+                page, anchor = doc[_pno], _hits[-1]
+                break
+        if page is None:
+            page = doc[-1]
+        pr = page.rect
+        if anchor is not None:
+            # Muhr markazi: «Laborant vrach:» yozuvining o'ng tomoni, qatordan biroz
+            # pastda — qog'ozdagi qo'lda bosilgan muhr kabi qatorni yarim yopadi.
+            cx = anchor.x1 + size * 0.55
+            cy = anchor.y0 + size * 0.30
+        else:
+            # Imzo qatori topilmadi — oxirgi sahifa pastki o'ng burchagi
+            cx = pr.x1 - size * 0.9
+            cy = pr.y1 - size * 1.1
+        # Sahifa chetidan chiqib ketmasin (pastda sahifa raqami footeri bor)
+        cx = max(pr.x0 + size / 2 + 10, min(cx, pr.x1 - size / 2 - 10))
+        cy = max(pr.y0 + size / 2 + 10, min(cy, pr.y1 - size / 2 - 28))
+        rect = fitz.Rect(cx - size / 2, cy - size / 2, cx + size / 2, cy + size / 2)
+        page.insert_image(rect, filename=muhr, overlay=True, keep_proportion=True)
+        _pno = page.number + 1
+        _tmp = pdf_path + ".muhr.tmp"
+        doc.save(_tmp, garbage=3, deflate=True)
+        doc.close()
+        os.replace(_tmp, pdf_path)
+        print(f"[PDF] Elektron muhr qo'yildi (sahifa {_pno})")
+        return True
+    except ImportError:
+        print("[PDF] pymupdf o'rnatilmagan — elektron muhr qo'yilmadi")
+    except Exception as e:
+        print(f"[PDF] Elektron muhr qo'yilmadi: {e}")
+        try:
+            if os.path.exists(pdf_path + ".muhr.tmp"):
+                os.remove(pdf_path + ".muhr.tmp")
+        except Exception:
+            pass
+    return False
+
+
 def save_pdf_to_onedrive(docx_path, date_str=None):
     """DOCX faylni ixcham PDF ga aylantirib OneDrive\\Natijalar\\DD.MM.YYYY papkaga saqlaydi.
     Eski PDF mavjud bo'lsa ustiga yozadi.
@@ -6695,6 +6769,9 @@ def save_pdf_to_onedrive(docx_path, date_str=None):
             except Exception as e:
                 print(f"[PDF] docx2pdf xato: {e}")
         if os.path.exists(pdf_path):
+            # Elektron muhr — siqishdan OLDIN (keyingi bosqichlar "kichraygandagina
+            # almashtiradi" — muhr qo'shilgan faylni asos qilib olishlari kerak)
+            _pdf_elektron_muhr_qoy(pdf_path)
             _sz_before = os.path.getsize(pdf_path) / 1024
             print(f"[PDF] Dastlabki hajm: {_sz_before:.0f} KB")
 
@@ -22934,6 +23011,34 @@ Sana: {_sana_fmt}"""
 
         from tkinter import filedialog as _fd
 
+        # ══════════════════════════════════════════════════════════════
+        # 6.6. PDF ELEKTRON MUHR — faqat PDF nusxaga (Word/qog'oz o'zgarmaydi)
+        # ══════════════════════════════════════════════════════════════
+        muhr_lf = ttk.LabelFrame(main_frame, text="🔏 PDF elektron muhr", padding="8")
+        muhr_lf.pack(fill=tk.X, pady=(0, 8))
+        muhr_lf.columnconfigure(1, weight=1)
+        muhr_on_var = tk.BooleanVar(value=bool(config.get('pdf_muhr', False)))
+        ttk.Checkbutton(muhr_lf, text="Bemorga ketadigan PDF nusxaga elektron muhr qo'yilsin",
+                        variable=muhr_on_var).grid(row=0, column=0, columnspan=4, sticky=tk.W)
+        ttk.Label(muhr_lf, text="Muhr rasmi (PNG):").grid(row=1, column=0, sticky=tk.W, pady=3, padx=(0, 5))
+        muhr_path_var = tk.StringVar(value=config.get('pdf_muhr_path', ''))
+        ttk.Entry(muhr_lf, textvariable=muhr_path_var, width=48).grid(
+            row=1, column=1, sticky=tk.EW, pady=3, padx=(0, 5))
+
+        def _pick_muhr():
+            f = _fd.askopenfilename(title="Muhr rasmini tanlang (shaffof PNG)", parent=dialog,
+                                    filetypes=[("PNG rasm", "*.png"), ("Barcha rasmlar", "*.png *.jpg *.jpeg")])
+            if f:
+                muhr_path_var.set(os.path.normpath(f))
+        ttk.Button(muhr_lf, text="Tanlash...", command=_pick_muhr).grid(row=1, column=2, pady=3)
+        ttk.Label(muhr_lf, text="Diametr (sm):").grid(row=2, column=0, sticky=tk.W, pady=3, padx=(0, 5))
+        muhr_size_var = tk.StringVar(value=str(config.get('pdf_muhr_size', 3.8)))
+        ttk.Entry(muhr_lf, textvariable=muhr_size_var, width=6).grid(row=2, column=1, sticky=tk.W, pady=3)
+        ttk.Label(muhr_lf,
+                  text="• Qog'oz blankaga muhr odatdagidek QO'LDA bosiladi — Word fayl o'zgarmaydi.\n"
+                       "• Muhr faqat OneDrive/botga ketadigan PDF ga, «Laborant vrach» qatoriga qo'yiladi.",
+                  foreground="#555", justify=tk.LEFT).grid(row=3, column=0, columnspan=4, sticky=tk.W, pady=(4, 0))
+
         save_lf = ttk.LabelFrame(main_frame, text="📁 Saqlash yo'llari (Word / PDF)", padding="8")
         save_lf.pack(fill=tk.X, pady=(0, 8))
         save_lf.columnconfigure(1, weight=1)
@@ -22999,7 +23104,14 @@ Sana: {_sana_fmt}"""
                 "ong_panel": ong_var.get(),
                 "qr_link_template": qr_link_var.get().strip(),
                 "blanka_ruscha": bool(ruscha_var.get()),
+                "pdf_muhr": bool(muhr_on_var.get()),
+                "pdf_muhr_path": muhr_path_var.get().strip(),
             }
+            try:
+                new_config["pdf_muhr_size"] = max(2.0, min(float(
+                    muhr_size_var.get().replace(',', '.')), 6.0))
+            except Exception:
+                new_config["pdf_muhr_size"] = 3.8
             for key, var in kl_fields.items():
                 new_config[key] = var.get().strip()
             for key, var in color_vars.items():
