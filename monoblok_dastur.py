@@ -3539,22 +3539,42 @@ def create_hematology_cbc_table_in_doc(doc: Document, result_data, order_info: d
         p_meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_para_spacing(p_meta, 0, 0, line_spacing=1.0)
         _add_run_tnr(p_meta, meta, 9)
-    HEADER_COLOR = TABLE_HEADER_HEX
-    table = doc.add_table(rows=1, cols=5)
-    table.style = 'Table Grid'
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    _apply_table_widths(table, [7.0, 2.0, 3.5, 3.5, 3.0])
-    headers = ["Ko'rsatkich", "Qisqa nom", "Natija", "Norma", "Birlik"]
-    for cell, hdr in zip(table.rows[0].cells, headers):
-        _set_cell_shading(cell, HEADER_COLOR)
-        ph = cell.paragraphs[0]
-        ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        _set_para_spacing(ph, 0, 0, line_spacing=1)
-        _add_run_tnr(ph, hdr, 11, bold=True)
     KOD_ALIAS = {'Lymph#': 'LYM#', 'Lymph%': 'LYM%', 'Mid#': 'MID#', 'Mid%': 'MID%', 'Gran#': 'GRAN#', 'Gran%': 'GRAN%',
                  'Neu#': 'NEU#', 'Neu%': 'NEU%', 'Mon#': 'MON#', 'Mon%': 'MON%',
                  'Eos#': 'EOS#', 'Eos%': 'EOS%', 'Bas#': 'BAS#', 'Bas%': 'BAS%'}
     _has_5diff = any((vals.get(k) or vals.get(KOD_ALIAS.get(k, ''))) for k in CBC_HEMA_5DIFF_KEYS)
+
+    def _rang_strelka(val_str, lo, hi, norma):
+        """(rang, strelka): multi-ref lo/hi bo'lsa shu, aks holda norma matni bo'yicha."""
+        if not val_str or val_str == '-':
+            return None, ''
+        if lo is not None and hi is not None:
+            try:
+                fval = float(str(val_str).replace(',', '.'))
+                if fval > hi:
+                    return RGBColor(0xFF, 0x00, 0x00), ' ↑'   # qizil ↑
+                if fval < lo:
+                    return RGBColor(0x00, 0x00, 0xFF), ' ↓'   # ko'k ↓
+            except (ValueError, TypeError):
+                pass
+        # Multi-ref topilmasa (yoki natija normada), standart norma bilan rang hisoblash
+        color = _get_value_color_for_norma(val_str, norma, False)
+        arrow = ''
+        if color:
+            # Rang bor — strelka qo'shish
+            min_v, max_v = _parse_norma_to_min_max(norma)
+            if min_v is not None and max_v is not None:
+                try:
+                    fval = float(str(val_str).replace(',', '.'))
+                    if fval > max_v:
+                        arrow = ' ↑'
+                    elif fval < min_v:
+                        arrow = ' ↓'
+                except (ValueError, TypeError):
+                    pass
+        return color, arrow
+
+    qatorlar = []   # (ko'rsatkich, kod, natija_str, norma, birlik, lo, hi)
     for koorsatkich, kod, birlik, default_norma in CBC_HEMA_ROWS:
         natija = vals.get(kod) or vals.get(KOD_ALIAS.get(kod, ''))
         if natija is None:
@@ -3567,55 +3587,66 @@ def create_hematology_cbc_table_in_doc(doc: Document, result_data, order_info: d
         natija_str = str(natija).strip() if natija else '-'
 
         # Multi-ref norma: yosh va jinsga qarab norma aniqlash
+        # (get_multi_ref HL7 param_key ishlatadi — topilmasa alias: Lymph# -> LYM#)
         norma = default_norma
-        arrow = ''
-        color = None
-        # KOD_ALIAS teskari: DB nomlari -> HL7 nomlari (get_multi_ref HL7 param_key ishlatadi)
-        param_key = kod
-        # Alias teskari topish: masalan Lymph# -> LYM#
+        lo = hi = None
         alias_key = KOD_ALIAS.get(kod, '')
         if _hema_get_multi_ref and patient_age:
-            lo, hi, ref_str = _hema_get_multi_ref(param_key, patient_age, patient_gender)
+            lo, hi, ref_str = _hema_get_multi_ref(kod, patient_age, patient_gender)
             if not ref_str and alias_key:
                 lo, hi, ref_str = _hema_get_multi_ref(alias_key, patient_age, patient_gender)
             if ref_str:
                 norma = ref_str
-                # Natija rangi va strelka
-                if natija_str and natija_str != '-':
-                    try:
-                        fval = float(natija_str.replace(',', '.'))
-                        if lo is not None and hi is not None:
-                            if fval > hi:
-                                color = RGBColor(0xFF, 0x00, 0x00)  # qizil
-                                arrow = ' \u2191'  # ↑
-                            elif fval < lo:
-                                color = RGBColor(0x00, 0x00, 0xFF)  # ko'k
-                                arrow = ' \u2193'  # ↓
-                    except (ValueError, TypeError):
-                        pass
-        # Multi-ref topilmasa, standart norma bilan rang hisoblash
-        if not color and not arrow:
-            color = _get_value_color_for_norma(natija_str, norma, False)
-            if color:
-                # Rang bor — strelka qo'shish
-                min_v, max_v = _parse_norma_to_min_max(norma)
-                if min_v is not None and max_v is not None and natija_str != '-':
-                    try:
-                        fval = float(natija_str.replace(',', '.'))
-                        if fval > max_v:
-                            arrow = ' \u2191'
-                        elif fval < min_v:
-                            arrow = ' \u2193'
-                    except (ValueError, TypeError):
-                        pass
+            else:
+                lo = hi = None
+        qatorlar.append((koorsatkich, kod, natija_str, norma, birlik, lo, hi))
 
+    # Oldingi natija ustuni — sozlamada GEM yoqilgan va kamida bitta ko'rsatkich
+    # bo'yicha oldingi tashrif natijasi bo'lsa (aks holda jadval 5 ustunli qoladi)
+    _prev = None
+    if _oldingi_yoqilganmi('GEM'):
+        _prev = [_oldingi_cbc_topish(order_info, [q[1]] + ([KOD_ALIAS[q[1]]] if q[1] in KOD_ALIAS else []))
+                 for q in qatorlar]
+        if not any(_prev):
+            _prev = None
+    _prev_sana = _oldingi_umumiy_sana(_prev) if _prev else None
+
+    HEADER_COLOR = TABLE_HEADER_HEX
+    table = doc.add_table(rows=1, cols=6 if _prev else 5)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    if _prev:
+        _apply_table_widths(table, [5.9, 2.3, 2.5, 2.9, 3.2, 2.2])
+        headers = ["Ko'rsatkich", "Qisqa nom", "Natija", None, "Norma", "Birlik"]
+    else:
+        _apply_table_widths(table, [7.0, 2.0, 3.5, 3.5, 3.0])
+        headers = ["Ko'rsatkich", "Qisqa nom", "Natija", "Norma", "Birlik"]
+    for cell, hdr in zip(table.rows[0].cells, headers):
+        _set_cell_shading(cell, HEADER_COLOR)
+        if hdr is None:
+            _oldingi_sarlavha_yoz(cell, _prev_sana)
+            continue
+        ph = cell.paragraphs[0]
+        ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(ph, 0, 0, line_spacing=1)
+        _add_run_tnr(ph, hdr, 11, bold=True)
+
+    for _qi, (koorsatkich, kod, natija_str, norma, birlik, lo, hi) in enumerate(qatorlar):
+        color, arrow = _rang_strelka(natija_str, lo, hi, norma)
         # Natija display: qiymat + strelka
         display_natija = (natija_str + arrow) if natija_str and natija_str != '-' else '-'
 
         row = table.add_row()
         _keep_row_together(row)
         cells = row.cells
-        for i, txt in enumerate([koorsatkich, kod, display_natija, norma, birlik]):
+        matnlar = [koorsatkich, kod, display_natija, norma, birlik]
+        if _prev:
+            matnlar.insert(3, None)
+        for i, txt in enumerate(matnlar):
+            if txt is None:
+                _oldingi_katak_yoz(cells[i], _prev[_qi], _prev_sana,
+                                   rang_fn=lambda v, _lo=lo, _hi=hi, _n=norma: _rang_strelka(v, _lo, _hi, _n))
+                continue
             p = cells[i].paragraphs[0]
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER if i > 0 else WD_ALIGN_PARAGRAPH.LEFT
             _set_para_spacing(p, 0, 0, line_spacing=1)
@@ -5594,8 +5625,8 @@ def _create_revmoproba_qolda_section(doc, revmo_tests: list, test_results: dict,
 OLDINGI_NATIJA_GURUHLAR = [
     ("BIO",     "Bioximiya (yakka tahlillar + Bilirubin, Lipid spektri, Buyrak paneli)"),
     ("IFA",     "IFA (gormonlar, vitaminlar, markerlar — miqdoriy)"),
-    ("COAG",    "Koagulogramma (yakka tahlillar)"),
-    ("GEM",     "Gematologiya — yakka tahlillar (EChT va h.k.; umumiy qon tahlili hali yo'q)"),
+    ("COAG",    "Koagulogramma (yakka tahlillar + to'liq koagulogramma, PT paneli)"),
+    ("GEM",     "Gematologiya (umumiy qon tahlili + EChT va boshqa yakka tahlillar)"),
     ("URINE",   "Siydik — yakka tahlillar"),
     ("TEST",    "Boshqa testlar"),
     ("EXPRESS", "Ekspress testlar"),
@@ -5856,10 +5887,11 @@ def _oldingi_sarlavha_yoz(cell, umumiy_sana):
 
 
 def _oldingi_katak_yoz(cell, prev, umumiy_sana, norma_info=None, norma_text='', jins='',
-                       komponent=None):
+                       komponent=None, rang_fn=None):
     """Oldingi natija katagi: qiymat (norma bo'yicha yaxlitlangan, ↑/↓ va rang
     joriy natija bilan bir xil qoidada), qalin EMAS — joriy natijadan ajralib
-    tursin. Sana sarlavhada bo'lmasa katak ichida kichik kulrang qatorda."""
+    tursin. Sana sarlavhada bo'lmasa katak ichida kichik kulrang qatorda.
+    rang_fn(qiymat) -> (rang, strelka) — o'z rang qoidasi bor jadvallar (CBC)."""
     p = cell.paragraphs[0]
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _set_para_spacing(p, 0, 0, line_spacing=1)
@@ -5870,11 +5902,13 @@ def _oldingi_katak_yoz(cell, prev, umumiy_sana, norma_info=None, norma_text='', 
         val = _round_result_to_norma(val, norma_text)
     val = _quyi_chegara_matn(komponent, val)
     color, arrow = (None, '')
-    if norma_info:
-        try:
+    try:
+        if rang_fn:
+            color, arrow = rang_fn(val)
+        elif norma_info:
             color, arrow = _get_result_color_and_arrow(val, norma_info, jins)
-        except Exception:
-            color, arrow = (None, '')
+    except Exception:
+        color, arrow = (None, '')
     _add_run_tnr(p, f"{val}{arrow or ''}", 11, bold=False, color_rgb=color)
     if not umumiy_sana:
         p.add_run().add_break(WD_BREAK.LINE)
@@ -5890,6 +5924,31 @@ def _oldingi_kengliklar(widths4):
     return [nom - 1.2, natija - 0.8, 3.2, norma - 0.4, birlik - 0.8]
 
 
+def _oldingi_cbc_topish(order_info, kodlar):
+    """Umumiy qon tahlili ko'rsatkichi (WBC, Lymph#...) uchun oldingi natija.
+    Manbalar: alohida qatorlar (result_items.tahlil_nomi / test_results.test_name =
+    kod) va CBC JSON ({"type": "hematology_cbc", "WBC": ...}) — eng yangisi."""
+    data = _oldingi_natijalar(order_info)
+    nomzodlar = []
+    for kod in kodlar:
+        p = _oldingi_topish(order_info, nomi=kod)
+        if p:
+            nomzodlar.append(p)
+    for entry in list(data['by_id'].values()) + list(data['by_name'].values()):
+        if '"hematology_cbc"' not in str(entry['raw']):
+            continue
+        for kod in kodlar:
+            v = _oldingi_qiymat(entry['raw'], kod)
+            if v is not None:
+                nomzodlar.append({'qiymat': v, 'sana': entry['sana']})
+                break
+    best = None
+    for p in nomzodlar:
+        if best is None or (p['sana'] and best['sana'] and p['sana'] > best['sana']):
+            best = p
+    return best
+
+
 def _panel_oldingi(order_info, group, panel_tahlil_id, rows, azo_map=None):
     """Panel (Bilirubin/Lipid/Buyrak) qatorlari uchun oldingi natijalar ro'yxati
     (rows tartibida) yoki None — guruh o'chiq bo'lsa yoki birorta ham topilmasa."""
@@ -5900,6 +5959,15 @@ def _panel_oldingi(order_info, group, panel_tahlil_id, rows, azo_map=None):
                             azo_tahlil_id=azo_by_key.get(key))
             for key in rows]
     return prev if any(prev) else None
+
+
+# Koagulogramma JSON kalitlari va JSON qatorga yoyiladigan COAG sub-testlar nomi
+_KOAG_KALITLAR = ('pt_sek', 'pt_kviku', 'pt_mno', 'tt', 'achtv', 'fibrinogen')
+_COAG_SUB_DETECT = [
+    'pt sekundalarda', "pt bo'yicha", 'mno / inr', 'mno/inr',
+    'tromboplastin', 'achtv', 'fibrinogen',
+    'protrombin', 'prothrombin', 'pt/mno', 'pti',
+]
 
 
 def create_results_table(doc: Document, tests: list, group: str, order_info: dict, test_results: dict = None):
@@ -5930,11 +5998,32 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
         if _oldingi_yoqilganmi(group):
             _prev = [_oldingi_topish(order_info, tahlil_id=t.get('tahlil_id'), nomi=t.get('nomi'))
                      for t in regular_tests]
-            if not any(_prev):
-                _prev = None
+        # Koagulogramma JSON qatorlari (PT sek, Kviku, INR, TT, ACHTV, Fibrinogen) —
+        # oldingi JSON dan kalit bo'yicha, sozlamada COAG yoqilgan bo'lsa
+        _prev_koag = {}                              # test indeksi -> {kalit: oldingi}
+        if _oldingi_yoqilganmi('COAG'):
+            for _ti, t in enumerate(regular_tests):
+                _tn = t.get('nomi', '').lower()
+                if not (('koagulogramma' in _tn and ("to'liq" in _tn or 'toliq' in _tn))
+                        or any(k in _tn for k in _COAG_SUB_DETECT)):
+                    continue
+                _rv = test_results.get(t.get('id')) if test_results else None
+                if not (isinstance(_rv, str) and _rv.strip().startswith('{')):
+                    continue
+                _kp = {k: _oldingi_topish(order_info, tahlil_id=t.get('tahlil_id'),
+                                          nomi=t.get('nomi'), kalit=k)
+                       for k in _KOAG_KALITLAR}
+                _kp = {k: v for k, v in _kp.items() if v}
+                if _kp:
+                    _prev_koag[_ti] = _kp
+        if (_prev and any(_prev)) or _prev_koag:
+            _prev = _prev or [None] * len(regular_tests)
+        else:
+            _prev = None
         _ncol = 5 if _prev else 4
         _cN, _cU = (3, 4) if _prev else (2, 3)      # Norma / O'lchov birligi ustunlari
-        _prev_sana = _oldingi_umumiy_sana(_prev) if _prev else None
+        _prev_sana = _oldingi_umumiy_sana(
+            list(_prev) + [v for d in _prev_koag.values() for v in d.values()]) if _prev else None
 
         table = doc.add_table(rows=1, cols=_ncol)
         table.style = 'Table Grid'
@@ -5985,19 +6074,22 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
                             _add_run_tnr(hph, test_name, 11, bold=True)
                             # Sub-qatorlar
                             _koag_rows = [
-                                ("PT sekundalarda",          kd.get('pt_sek'),     "13 – 15",     "sek"),
-                                ("PT bo'yicha Kviku (%)",    kd.get('pt_kviku'),   "70,0 – 100,0", "%"),
-                                ("MNO / INR",               kd.get('pt_mno'),     "0,90 – 1,15",  "INR"),
-                                ("Trombin vaqti (TT)", kd.get('tt'),         "11 – 18",     "sek"),
-                                ("ACHTV",                    kd.get('achtv'),      "25 – 40",     "sek"),
-                                ("Fibrinogen",               kd.get('fibrinogen'), "2,0 – 4,0",   "g/l"),
+                                ("PT sekundalarda",          'pt_sek',     "13 – 15",     "sek"),
+                                ("PT bo'yicha Kviku (%)",    'pt_kviku',   "70,0 – 100,0", "%"),
+                                ("MNO / INR",               'pt_mno',     "0,90 – 1,15",  "INR"),
+                                ("Trombin vaqti (TT)", 'tt',         "11 – 18",     "sek"),
+                                ("ACHTV",                    'achtv',      "25 – 40",     "sek"),
+                                ("Fibrinogen",               'fibrinogen', "2,0 – 4,0",   "g/l"),
                             ]
-                            for sub_n, sub_v, sub_nr, sub_u in _koag_rows:
+                            for sub_n, sub_k, sub_nr, sub_u in _koag_rows:
+                                sub_v = kd.get(sub_k)
                                 if sub_v is None:
                                     continue
                                 kr = table.add_row()
                                 _keep_row_together(kr)
                                 kc = kr.cells
+                                if _prev:
+                                    _oldingi_katak_yoz(kc[2], _prev_koag.get(_ti, {}).get(sub_k), _prev_sana)
                                 kp0 = kc[0].paragraphs[0]
                                 kp0.alignment = WD_ALIGN_PARAGRAPH.LEFT
                                 _set_para_spacing(kp0, 0, 0, line_spacing=1)
@@ -6030,6 +6122,7 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
                 continue
 
             # COAG JSON kengaytirish: protrombin va individual sub-testlar uchun
+            # (_COAG_SUB_DETECT / _KOAG_KALITLAR — modul darajasida, oldingi natija uchun ham)
             _KOAG_ROWS_DEF = [
                 ("PT sekundalarda",          'pt_sek',     "13 \u2013 15",     "sek"),
                 ("PT bo\u2019yicha Kviku (%)", 'pt_kviku', "70,0 \u2013 100,0", "%"),
@@ -6038,18 +6131,13 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
                 ("ACHTV",                    'achtv',      "25 \u2013 40",     "sek"),
                 ("Fibrinogen",               'fibrinogen', "2,0 \u2013 4,0",   "g/l"),
             ]
-            _COAG_SUB_DETECT = [
-                'pt sekundalarda', "pt bo'yicha", 'mno / inr', 'mno/inr',
-                'tromboplastin', 'achtv', 'fibrinogen',
-                'protrombin', 'prothrombin', 'pt/mno', 'pti',
-            ]
             pt_expanded = False
             if any(k in test_name_lower for k in _COAG_SUB_DETECT):
                 if raw_val and isinstance(raw_val, str) and raw_val.strip().startswith('{'):
                     try:
                         rd = json.loads(raw_val)
                         if isinstance(rd, dict):
-                            _sub_rows = [(n, rd.get(k), nr, u) for n, k, nr, u in _KOAG_ROWS_DEF if rd.get(k) is not None]
+                            _sub_rows = [(n, rd.get(k), nr, u, k) for n, k, nr, u in _KOAG_ROWS_DEF if rd.get(k) is not None]
                             if _sub_rows:
                                 # Header qator
                                 _hr = table.add_row()
@@ -6060,10 +6148,12 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
                                 _hph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                 _set_para_spacing(_hph, 0, 0, line_spacing=1)
                                 _add_run_tnr(_hph, test_name, 11, bold=True)
-                                for _sn, _sv, _snr, _su in _sub_rows:
+                                for _sn, _sv, _snr, _su, _sk in _sub_rows:
                                     _kr = table.add_row()
                                     _keep_row_together(_kr)
                                     _kc = _kr.cells
+                                    if _prev:
+                                        _oldingi_katak_yoz(_kc[2], _prev_koag.get(_ti, {}).get(_sk), _prev_sana)
                                     _kp0 = _kc[0].paragraphs[0]
                                     _kp0.alignment = WD_ALIGN_PARAGRAPH.LEFT
                                     _set_para_spacing(_kp0, 0, 0, line_spacing=1)
