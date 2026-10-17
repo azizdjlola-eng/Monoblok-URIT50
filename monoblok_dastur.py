@@ -436,6 +436,10 @@ def load_blanka_config() -> dict:
         "pdf_muhr": not bool(_mijoz),
         "pdf_muhr_path": "" if _mijoz else PDF_MUHR_DEFAULT_PATH,
         "pdf_muhr_size": 3.8,  # sm (diametr)
+        # "Oldingi natija" ustuni — qaysi guruhlarda (OLDINGI_NATIJA_GURUHLAR)
+        "oldingi_natija_guruhlar": ["BIO"],
+        "oldingi_natija_max_kun": 365,
+        "oldingi_natija_takroriy_bemor": True,
     }
     # EXE ichidagi nusxa — bizning klinika sozlamasi. MIJOZ da o'qilmaydi (eski
     # versiyadan _internal da qolib ketgan bo'lishi mumkin — Inno uni o'chirmaydi).
@@ -4942,18 +4946,27 @@ def _create_bilirubin_section(doc, bili_tests: list, test_results: dict, order_i
         ("Bog\u2018langan Bilirubin", "bog_langan", "0,86 \u2013 5,3",  "mkmol/l"),
         ("Erkin Bilirubin",         "erkin",      "1,7 \u2013 17,1",  "mkmol/l"),
     ]
+    _bili_tid = next((t.get('tahlil_id') for t in bili_tests if t.get('tahlil_id')), 55)
+    _prev = _panel_oldingi(order_info, 'BIO', _bili_tid, [r[1] for r in BILI_ROWS])
+    _cN, _cU = (3, 4) if _prev else (2, 3)
+    _prev_sana = _oldingi_umumiy_sana(_prev) if _prev else None
     HEADER_COLOR = TABLE_HEADER_HEX
-    table = doc.add_table(rows=1, cols=4)
+    table = doc.add_table(rows=1, cols=5 if _prev else 4)
     table.style = 'Table Grid'
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    _apply_table_widths(table, [7.0, 4.0, 4.0, 4.0])
-    for cell, hdr in zip(table.rows[0].cells, ["Tahlil nomi", "Natija", "Norma", "O'lchov birligi"]):
+    _apply_table_widths(table, _oldingi_kengliklar([7.0, 4.0, 4.0, 4.0]) if _prev else [7.0, 4.0, 4.0, 4.0])
+    _hdrs = ["Tahlil nomi", "Natija", None, "Norma", "O'lchov birligi"] if _prev else \
+            ["Tahlil nomi", "Natija", "Norma", "O'lchov birligi"]
+    for cell, hdr in zip(table.rows[0].cells, _hdrs):
         _set_cell_shading(cell, HEADER_COLOR)
+        if hdr is None:
+            _oldingi_sarlavha_yoz(cell, _prev_sana)
+            continue
         ph = cell.paragraphs[0]
         ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_para_spacing(ph, 0, 0, line_spacing=1)
         _add_run_tnr(ph, hdr, 11, bold=True)
-    for row_name, key, norma, unit in BILI_ROWS:
+    for _ri, (row_name, key, norma, unit) in enumerate(BILI_ROWS):
         row = table.add_row()
         _keep_row_together(row)
         val = bili_result_data.get(key, '')
@@ -4969,11 +4982,14 @@ def _create_bilirubin_section(doc, bili_tests: list, test_results: dict, order_i
         _mn, _mx = _parse_norma_min_max(norma, jins)
         _rc, _ra = _get_result_color_and_arrow(val_str, {"min": _mn, "max": _mx}, jins)
         _add_run_tnr(p1, val_str + (_ra or ''), 11, bold=True, color_rgb=_rc)
-        p2 = cells_r[2].paragraphs[0]
+        if _prev:
+            _oldingi_katak_yoz(cells_r[2], _prev[_ri], _prev_sana,
+                               norma_info={"min": _mn, "max": _mx}, jins=jins)
+        p2 = cells_r[_cN].paragraphs[0]
         p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_para_spacing(p2, 0, 0, line_spacing=1)
         _add_multiline_norma(p2, norma, 11)
-        p3 = cells_r[3].paragraphs[0]
+        p3 = cells_r[_cU].paragraphs[0]
         p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_para_spacing(p3, 0, 0, line_spacing=1)
         _add_run_tnr(p3, unit, 11)
@@ -5123,18 +5139,29 @@ def _create_lipid_spektri_section(doc, lipid_tests: list, test_results: dict, or
     _add_run_tnr(heading, "LIPID SPEKTRI", 14, bold=True,
                  color_rgb=_group_title_rgb())
 
+    _lipid_tid = next((t.get('tahlil_id') for t in lipid_tests
+                       if _is_lipid_spektri_test(t.get('nomi', '')) and t.get('tahlil_id')), 126)
+    _prev = _panel_oldingi(order_info, 'BIO', _lipid_tid, [r[1] for r in LIPID_ROWS],
+                           azo_map=_lipid_id_to_key)
+    _cN, _cU = (3, 4) if _prev else (2, 3)
+    _prev_sana = _oldingi_umumiy_sana(_prev) if _prev else None
     HEADER_COLOR = TABLE_HEADER_HEX
-    table = doc.add_table(rows=1, cols=4)
+    table = doc.add_table(rows=1, cols=5 if _prev else 4)
     table.style = 'Table Grid'
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    _apply_table_widths(table, [7.0, 4.0, 4.0, 4.0])
-    for cell, hdr in zip(table.rows[0].cells, ["Tahlil nomi", "Natija", "Norma", "O'lchov birligi"]):
+    _apply_table_widths(table, _oldingi_kengliklar([7.0, 4.0, 4.0, 4.0]) if _prev else [7.0, 4.0, 4.0, 4.0])
+    _hdrs = ["Tahlil nomi", "Natija", None, "Norma", "O'lchov birligi"] if _prev else \
+            ["Tahlil nomi", "Natija", "Norma", "O'lchov birligi"]
+    for cell, hdr in zip(table.rows[0].cells, _hdrs):
         _set_cell_shading(cell, HEADER_COLOR)
+        if hdr is None:
+            _oldingi_sarlavha_yoz(cell, _prev_sana)
+            continue
         ph = cell.paragraphs[0]
         ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_para_spacing(ph, 0, 0, line_spacing=1)
         _add_run_tnr(ph, hdr, 11, bold=True)
-    for row_name, key, norma, unit in LIPID_ROWS:
+    for _ri, (row_name, key, norma, unit) in enumerate(LIPID_ROWS):
         row = table.add_row()
         _keep_row_together(row)
         val = lipid_data.get(key, '')
@@ -5153,11 +5180,14 @@ def _create_lipid_spektri_section(doc, lipid_tests: list, test_results: dict, or
         _mn, _mx = _parse_norma_min_max(norma, jins)
         _rc, _ra = _get_result_color_and_arrow(val_str, {"min": _mn, "max": _mx}, jins)
         _add_run_tnr(p1, val_str + (_ra or ''), 11, bold=True, color_rgb=_rc)
-        p2 = cells_r[2].paragraphs[0]
+        if _prev:
+            _oldingi_katak_yoz(cells_r[2], _prev[_ri], _prev_sana,
+                               norma_info={"min": _mn, "max": _mx}, jins=jins)
+        p2 = cells_r[_cN].paragraphs[0]
         p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_para_spacing(p2, 0, 0, line_spacing=1)
         _add_multiline_norma(p2, norma, 11)
-        p3 = cells_r[3].paragraphs[0]
+        p3 = cells_r[_cU].paragraphs[0]
         p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_para_spacing(p3, 0, 0, line_spacing=1)
         _add_run_tnr(p3, unit, 11)
@@ -5331,18 +5361,29 @@ def _create_buyrak_paneli_section(doc, buyrak_tests: list, test_results: dict, o
     _add_run_tnr(heading, "BUYRAK PANELI", 14, bold=True,
                  color_rgb=_group_title_rgb())
 
+    _buyrak_tid = next((t.get('tahlil_id') for t in buyrak_tests
+                        if _is_buyrak_paneli_test(t.get('nomi', '')) and t.get('tahlil_id')), 127)
+    _prev = _panel_oldingi(order_info, 'BIO', _buyrak_tid, [r[1] for r in BUYRAK_ROWS],
+                           azo_map=_buyrak_id_to_key)
+    _cN, _cU = (3, 4) if _prev else (2, 3)
+    _prev_sana = _oldingi_umumiy_sana(_prev) if _prev else None
     HEADER_COLOR = TABLE_HEADER_HEX
-    table = doc.add_table(rows=1, cols=4)
+    table = doc.add_table(rows=1, cols=5 if _prev else 4)
     table.style = 'Table Grid'
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    _apply_table_widths(table, [7.0, 4.0, 4.0, 4.0])
-    for cell, hdr in zip(table.rows[0].cells, ["Tahlil nomi", "Natija", "Norma", "O'lchov birligi"]):
+    _apply_table_widths(table, _oldingi_kengliklar([7.0, 4.0, 4.0, 4.0]) if _prev else [7.0, 4.0, 4.0, 4.0])
+    _hdrs = ["Tahlil nomi", "Natija", None, "Norma", "O'lchov birligi"] if _prev else \
+            ["Tahlil nomi", "Natija", "Norma", "O'lchov birligi"]
+    for cell, hdr in zip(table.rows[0].cells, _hdrs):
         _set_cell_shading(cell, HEADER_COLOR)
+        if hdr is None:
+            _oldingi_sarlavha_yoz(cell, _prev_sana)
+            continue
         ph = cell.paragraphs[0]
         ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_para_spacing(ph, 0, 0, line_spacing=1)
         _add_run_tnr(ph, hdr, 11, bold=True)
-    for row_name, key, norma, unit in BUYRAK_ROWS:
+    for _ri, (row_name, key, norma, unit) in enumerate(BUYRAK_ROWS):
         row = table.add_row()
         _keep_row_together(row)
         val = buyrak_data.get(key, '')
@@ -5387,11 +5428,19 @@ def _create_buyrak_paneli_section(doc, buyrak_tests: list, test_results: dict, o
             except Exception:
                 pass
         _add_run_tnr(p1, val_str + (_ra or ''), 11, bold=True, color_rgb=_rc)
-        p2 = cells_r[2].paragraphs[0]
+        if _prev:
+            if _ni:
+                _prev_ni = _ni
+            else:
+                _pmn, _pmx = _parse_norma_min_max(norma, jins_bp)
+                _prev_ni = {"norma": norma, "min": _pmn, "max": _pmx}
+            _oldingi_katak_yoz(cells_r[2], _prev[_ri], _prev_sana, norma_info=_prev_ni,
+                               norma_text=_ni.get('norma', '') if _ni else '', jins=jins_bp)
+        p2 = cells_r[_cN].paragraphs[0]
         p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_para_spacing(p2, 0, 0, line_spacing=1)
         _add_multiline_norma(p2, _norma_display, 11)
-        p3 = cells_r[3].paragraphs[0]
+        p3 = cells_r[_cU].paragraphs[0]
         p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_para_spacing(p3, 0, 0, line_spacing=1)
         _add_run_tnr(p3, _unit_display, 11)
@@ -5533,6 +5582,326 @@ def _create_revmoproba_qolda_section(doc, revmo_tests: list, test_results: dict,
                                 aslo_n.get('norma', 'Manfiy (-)'), aslo_n.get('unit', 'ME/ml'), jins)
     doc.add_paragraph()
 
+# ── OLDINGI NATIJA USTUNI (2026-10-17) ───────────────────────────────────────
+# Doimiy bemorlar blankasida "Natija" yonida "Oldingi natija" ustuni chiqadi —
+# vrach dinamikani (yaxshilandi/yomonlashdi) bir qarashda ko'radi.
+# Qaysi guruhlarda chiqishi Blanka Sozlamalari → 📈 Oldingi natija da tanlanadi
+# (standart: faqat Bioximiya). Oldingi natija bo'lmagan (birinchi tashrif)
+# bemorda ustun umuman qo'shilmaydi — blanka odatdagidek 4 ustunli qoladi.
+# Manba: result_items + test_results (load_tests bilan bir xil ustuvorlik),
+# FAQAT shu buyurtma sanasidan OLDINGI kunlardagi buyurtmalar (eski blankani
+# qayta yaratganda keyingi natija "oldingi" bo'lib chiqib qolmaydi).
+OLDINGI_NATIJA_GURUHLAR = [
+    ("BIO",     "Bioximiya (yakka tahlillar + Bilirubin, Lipid spektri, Buyrak paneli)"),
+    ("IFA",     "IFA (gormonlar, vitaminlar, markerlar — miqdoriy)"),
+    ("COAG",    "Koagulogramma (yakka tahlillar)"),
+    ("GEM",     "Gematologiya — yakka tahlillar (EChT va h.k.; umumiy qon tahlili hali yo'q)"),
+    ("URINE",   "Siydik — yakka tahlillar"),
+    ("TEST",    "Boshqa testlar"),
+    ("EXPRESS", "Ekspress testlar"),
+]
+_OLDINGI_STANDART_GURUHLAR = ["BIO"]
+
+
+def _oldingi_sozlama() -> dict:
+    try:
+        cfg = load_blanka_config()
+    except Exception:
+        cfg = {}
+    guruhlar = cfg.get('oldingi_natija_guruhlar', _OLDINGI_STANDART_GURUHLAR)
+    if not isinstance(guruhlar, list):
+        guruhlar = list(_OLDINGI_STANDART_GURUHLAR)
+    try:
+        max_kun = int(cfg.get('oldingi_natija_max_kun', 365) or 365)
+    except (TypeError, ValueError):
+        max_kun = 365
+    return {
+        'guruhlar': {str(g).upper() for g in guruhlar},
+        'max_kun': max(1, min(max_kun, 3650)),
+        'takroriy': bool(cfg.get('oldingi_natija_takroriy_bemor', True)),
+    }
+
+
+def _oldingi_bemor_idlari(cur, bemor_id, takroriy: bool) -> list:
+    """Shu bemor + (ixtiyoriy) uning TAKRORIY yozuvlari.
+    Bir odam ikki marta ro'yxatga olingan holatlar ko'p (tug'ilgan sana
+    o'rniga 01.01 qo'yilgan, telefon yozilmagan). Xavfsiz qoida: FISH bir xil
+    (nom_normalized), jinsi bir xil, tug'ilgan sana AYNAN bir xil yoki biri
+    01.01 (taxminiy) bo'lib, YILI bir xil. Boshqa odam natijasi blankaga
+    tushib qolmasligi uchun sana bo'lmagan yozuvlar qo'shilmaydi."""
+    ids = [bemor_id]
+    if not takroriy:
+        return ids
+
+    def _nom(s):
+        # bemorlar.nom_normalized to'ldirilmagan — o'zimiz: apostrof turlari, bo'shliq, registr
+        s = re.sub(r"[`'ʻʼ‘’]", "", str(s or "")).lower()
+        return " ".join(s.split())
+    try:
+        cur.execute("SELECT fish, jins, tugilgan_sana FROM bemorlar WHERE id = %s", (bemor_id,))
+        b = cur.fetchone()
+        if not b:
+            return ids
+        nom = _nom(b.get('fish'))
+        tug = b.get('tugilgan_sana')
+        if len(nom.split()) < 2 or not tug or not hasattr(tug, 'year'):
+            return ids
+        birinchi = (b.get('fish') or '').split()[0]
+        cur.execute("""SELECT id, fish, jins, tugilgan_sana FROM bemorlar
+                       WHERE fish LIKE %s AND id <> %s AND YEAR(tugilgan_sana) = %s""",
+                    (birinchi[:4] + '%', bemor_id, tug.year))
+        jins = (b.get('jins') or '').strip().lower()
+        for r in cur.fetchall():
+            if _nom(r.get('fish')) != nom:
+                continue
+            t2 = r.get('tugilgan_sana')
+            if not t2 or not hasattr(t2, 'year') or t2.year != tug.year:
+                continue
+            if (r.get('jins') or '').strip().lower() != jins:
+                continue
+            taxminiy = (t2.month, t2.day) == (1, 1) or (tug.month, tug.day) == (1, 1)
+            if t2 == tug or taxminiy:
+                ids.append(r['id'])
+    except Exception as e:
+        print(f"[OLDINGI] Takroriy bemor qidiruvida xato: {e}")
+    return ids
+
+
+def _oldingi_natijalar(order_info: dict) -> dict:
+    """Bemorning shu buyurtmadan OLDINGI natijalari (har tahlil uchun eng oxirgisi).
+    Qaytaradi: {'by_id': {tahlil_id: entry}, 'by_name': {nom_lower: entry}},
+    entry = {'raw': qiymat, 'sana': datetime, 'order_id': int}.
+    Natija order_info ichida keshlanadi (bitta blanka — bitta so'rov)."""
+    if not order_info:
+        return {'by_id': {}, 'by_name': {}}
+    kesh = order_info.get('_oldingi_natijalar')
+    if kesh is not None:
+        return kesh
+    out = {'by_id': {}, 'by_name': {}}
+    order_info['_oldingi_natijalar'] = out
+    bemor_id = order_info.get('bemor_id')
+    order_id = order_info.get('order_id')
+    sana = order_info.get('sana_vaqt')
+    if not bemor_id or not order_id or not sana:
+        return out
+    sozlama = _oldingi_sozlama()
+    cur = None
+    try:
+        conn = db_conn()
+        if not conn:
+            return out
+        cur = conn.cursor(dictionary=True)
+        bemor_ids = _oldingi_bemor_idlari(cur, bemor_id, sozlama['takroriy'])
+        ph = ','.join(['%s'] * len(bemor_ids))
+        # Faqat OLDINGI KUNLAR: shu kuni qayta ochilgan (takroriy) buyurtma
+        # "oldingi natija" hisoblanmaydi — vrachga oldingi TASHRIF kerak.
+        cur.execute(f"""
+            SELECT id, sana_vaqt FROM orders
+            WHERE bemor_id IN ({ph}) AND id <> %s
+              AND deleted_at IS NULL AND sana_vaqt IS NOT NULL
+              AND DATE(sana_vaqt) < DATE(%s)
+              AND sana_vaqt >= DATE_SUB(%s, INTERVAL %s DAY)
+            ORDER BY sana_vaqt DESC, id DESC
+            LIMIT 60
+        """, (*bemor_ids, order_id, sana, sana, sozlama['max_kun']))
+        orders = cur.fetchall()
+        if not orders:
+            return out
+        oids = [o['id'] for o in orders]
+        oph = ','.join(['%s'] * len(oids))
+
+        # order_items: test nomi → tahlil_id (test_results da faqat nom bor)
+        nom_to_tid = {}
+        cur.execute(f"""SELECT oi.order_id, oi.tahlil_id, oi.nomi, t.nomi AS t_nomi
+                        FROM order_items oi LEFT JOIN tahlillar t ON t.id = oi.tahlil_id
+                        WHERE oi.order_id IN ({oph})""", oids)
+        for r in cur.fetchall():
+            for n in (r.get('nomi'), r.get('t_nomi')):
+                if n and r.get('tahlil_id'):
+                    nom_to_tid[(r['order_id'], n.strip().lower())] = r['tahlil_id']
+
+        per_order = {oid: {} for oid in oids}   # oid -> {(tid, nom_lower): raw}
+        # 1) result_items (eski tizim) — buyurtmaning eng oxirgi results yozuvi
+        cur.execute(f"""SELECT r.order_id, ri.tahlil_id, ri.tahlil_nomi, ri.qiymat, r.id AS rid
+                        FROM result_items ri JOIN results r ON ri.result_id = r.id
+                        WHERE r.order_id IN ({oph})
+                        ORDER BY r.id ASC""", oids)
+        for r in cur.fetchall():
+            nom = (r.get('tahlil_nomi') or '').strip().lower()
+            tid = r.get('tahlil_id') or nom_to_tid.get((r['order_id'], nom))
+            if r.get('qiymat') not in (None, ''):
+                per_order[r['order_id']][(tid, nom)] = r['qiymat']
+        # 2) test_results (yangi tizim) — load_tests dagidek USTUVOR
+        cur.execute(f"""SELECT order_id, test_name, result_data FROM test_results
+                        WHERE order_id IN ({oph})
+                          AND result_data IS NOT NULL AND result_data <> '' AND result_data <> '{{}}'""",
+                    [str(o) for o in oids])
+        for r in cur.fetchall():
+            try:
+                oid = int(r['order_id'])
+            except (TypeError, ValueError):
+                continue
+            if oid not in per_order:
+                continue
+            nom = (r.get('test_name') or '').strip().lower()
+            tid = nom_to_tid.get((oid, nom))
+            per_order[oid] = {k: v for k, v in per_order[oid].items()
+                              if not (k[1] == nom or (tid and k[0] == tid))}
+            per_order[oid][(tid, nom)] = r['result_data']
+
+        for o in orders:                       # eng yangisi birinchi
+            for (tid, nom), raw in per_order[o['id']].items():
+                if _oldingi_qiymat(raw) is None and not str(raw).strip().startswith('{'):
+                    continue
+                entry = {'raw': raw, 'sana': o['sana_vaqt'], 'order_id': o['id']}
+                if tid and tid not in out['by_id']:
+                    out['by_id'][tid] = entry
+                if nom and nom not in out['by_name']:
+                    out['by_name'][nom] = entry
+    except Exception as e:
+        print(f"[OLDINGI] Oldingi natijalarni olishda xato: {e}")
+    finally:
+        try:
+            if cur:
+                cur.close()
+        except Exception:
+            pass
+    return out
+
+
+def _oldingi_qiymat(raw, kalit=None):
+    """Saqlangan qiymatdan blankaga yoziladigan qisqa matn (yoki None).
+    kalit — ko'p komponentli panel JSON i ichidagi kalit (tc, umumiy, ...)."""
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    if s.startswith('{'):
+        try:
+            d = json.loads(s)
+        except Exception:
+            return None
+        if not isinstance(d, dict):
+            return None
+        # Gemo/siydik JSON ({"type": "hematology", "result": "<namuna raqami>"}) — natija emas
+        if not kalit and d.get('type'):
+            return None
+        v = d.get(kalit) if kalit else d.get('result')
+    else:
+        if kalit:
+            return None
+        v = s
+    if v is None or isinstance(v, (dict, list)):
+        return None
+    v = str(v).strip()
+    if not v or len(v) > 20 or v.lower() in ('none', 'null', '-', '{}'):
+        return None
+    return v
+
+
+def _oldingi_topish(order_info, tahlil_id=None, nomi=None, kalit=None, azo_tahlil_id=None):
+    """Bitta qator uchun oldingi natija: {'qiymat': str, 'sana': datetime} yoki None.
+    azo_tahlil_id — panel komponenti (masalan LDL=123) yakka tahlil sifatida
+    o'lchangan bo'lsa, o'shandan olinadi."""
+    data = _oldingi_natijalar(order_info)
+    nomzodlar = []
+    if tahlil_id and tahlil_id in data['by_id']:
+        nomzodlar.append((data['by_id'][tahlil_id], kalit))
+    elif nomi and nomi.strip().lower() in data['by_name']:
+        nomzodlar.append((data['by_name'][nomi.strip().lower()], kalit))
+    if azo_tahlil_id and azo_tahlil_id in data['by_id']:
+        nomzodlar.append((data['by_id'][azo_tahlil_id], None))
+    # Bir nechta manba bo'lsa — eng yangi sanalisi
+    best = None
+    for entry, k in nomzodlar:
+        v = _oldingi_qiymat(entry['raw'], k)
+        if v is None:
+            continue
+        if best is None or (entry['sana'] and best['sana'] and entry['sana'] > best['sana']):
+            best = {'qiymat': v, 'sana': entry['sana']}
+    return best
+
+
+def _oldingi_yoqilganmi(group) -> bool:
+    return str(group or '').upper() in _oldingi_sozlama()['guruhlar']
+
+
+def _oldingi_sana_str(sana) -> str:
+    if hasattr(sana, 'strftime'):
+        return sana.strftime('%d.%m.%Y')
+    s = str(sana or '')[:10]
+    p = s.split('-')
+    return f"{p[2]}.{p[1]}.{p[0]}" if len(p) == 3 else s
+
+
+def _oldingi_umumiy_sana(prev_list):
+    """Jadvaldagi barcha oldingi natijalar bitta tashrifdan bo'lsa — o'sha sana
+    (sarlavhaga yoziladi), aks holda None (sana har katakda alohida)."""
+    sanalar = {_oldingi_sana_str(p['sana']) for p in prev_list if p}
+    return sanalar.pop() if len(sanalar) == 1 else None
+
+
+def _oldingi_sarlavha_yoz(cell, umumiy_sana):
+    ph = cell.paragraphs[0]
+    ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(ph, 0, 0, line_spacing=1)
+    _add_run_tnr(ph, "Oldingi natija", 11, bold=True)
+    if umumiy_sana:
+        # Alohida paragraf — blanka_ruscha "Oldingi natija" ni aynan topib tarjima qilsin
+        pd = cell.add_paragraph()
+        pd.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(pd, 0, 0, line_spacing=1)
+        _add_run_tnr(pd, f"({umumiy_sana})", 9, bold=False)
+
+
+def _oldingi_katak_yoz(cell, prev, umumiy_sana, norma_info=None, norma_text='', jins='',
+                       komponent=None):
+    """Oldingi natija katagi: qiymat (norma bo'yicha yaxlitlangan, ↑/↓ va rang
+    joriy natija bilan bir xil qoidada), qalin EMAS — joriy natijadan ajralib
+    tursin. Sana sarlavhada bo'lmasa katak ichida kichik kulrang qatorda."""
+    p = cell.paragraphs[0]
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(p, 0, 0, line_spacing=1)
+    if not prev:
+        return
+    val = prev['qiymat']
+    if norma_text and str(norma_text).strip() not in ('', '-'):
+        val = _round_result_to_norma(val, norma_text)
+    val = _quyi_chegara_matn(komponent, val)
+    color, arrow = (None, '')
+    if norma_info:
+        try:
+            color, arrow = _get_result_color_and_arrow(val, norma_info, jins)
+        except Exception:
+            color, arrow = (None, '')
+    _add_run_tnr(p, f"{val}{arrow or ''}", 11, bold=False, color_rgb=color)
+    if not umumiy_sana:
+        p.add_run().add_break(WD_BREAK.LINE)
+        _add_run_tnr(p, _oldingi_sana_str(prev['sana']), 8, bold=False,
+                     color_rgb=RGBColor(0x66, 0x66, 0x66))
+
+
+def _oldingi_kengliklar(widths4):
+    """4 ustunli kengliklardan 5 ustunli (Oldingi natija = 3-ustun) — jami eni o'zgarmaydi."""
+    nom, natija, norma, birlik = widths4
+    if norma >= 5.5:                      # IFA: keng norma ustuni
+        return [nom - 1.2, natija - 0.2, 3.0, norma - 1.2, birlik - 0.4]
+    return [nom - 1.2, natija - 0.8, 3.2, norma - 0.4, birlik - 0.8]
+
+
+def _panel_oldingi(order_info, group, panel_tahlil_id, rows, azo_map=None):
+    """Panel (Bilirubin/Lipid/Buyrak) qatorlari uchun oldingi natijalar ro'yxati
+    (rows tartibida) yoki None — guruh o'chiq bo'lsa yoki birorta ham topilmasa."""
+    if not _oldingi_yoqilganmi(group):
+        return None
+    azo_by_key = {v: k for k, v in (azo_map or {}).items()}
+    prev = [_oldingi_topish(order_info, tahlil_id=panel_tahlil_id, kalit=key,
+                            azo_tahlil_id=azo_by_key.get(key))
+            for key in rows]
+    return prev if any(prev) else None
+
+
 def create_results_table(doc: Document, tests: list, group: str, order_info: dict, test_results: dict = None):
     # Ginekologik va qon guruhi testlarni ajratish
     blood_tests   = [t for t in tests if is_categorical_test(t.get('nomi', ''))]
@@ -5553,24 +5922,43 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
     except:
         yosh_int = 0
 
-    # ── ODDIY 4 USTUNLI JADVAL ──────────────────────────────────────
+    # ── ODDIY 4 USTUNLI JADVAL (oldingi natija bo'lsa — 5 ustun) ─────
     if regular_tests:
-        table = doc.add_table(rows=1, cols=4)
+        # Oldingi natija ustuni: sozlamada shu guruh yoqilgan VA kamida bitta
+        # tahlilning oldingi natijasi bo'lsa (birinchi tashrifda ustun yo'q)
+        _prev = None
+        if _oldingi_yoqilganmi(group):
+            _prev = [_oldingi_topish(order_info, tahlil_id=t.get('tahlil_id'), nomi=t.get('nomi'))
+                     for t in regular_tests]
+            if not any(_prev):
+                _prev = None
+        _ncol = 5 if _prev else 4
+        _cN, _cU = (3, 4) if _prev else (2, 3)      # Norma / O'lchov birligi ustunlari
+        _prev_sana = _oldingi_umumiy_sana(_prev) if _prev else None
+
+        table = doc.add_table(rows=1, cols=_ncol)
         table.style = 'Table Grid'
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
 
         HEADER_COLOR = TABLE_HEADER_HEX
         headers = ["Tahlil nomi", "Natija", "Norma", "O'lchov birligi"]
+        if _prev:
+            headers.insert(2, None)                 # "Oldingi natija" — alohida yoziladi
         for cell, hdr in zip(table.rows[0].cells, headers):
             _set_cell_shading(cell, HEADER_COLOR)
+            if hdr is None:
+                _oldingi_sarlavha_yoz(cell, _prev_sana)
+                continue
             ph = cell.paragraphs[0]
             ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
             _set_para_spacing(ph, 0, 0, line_spacing=1)
             _add_run_tnr(ph, hdr, 11, bold=True)
         widths = [7.0, 3.0, 6.0, 3.0] if group == "IFA" else [7.0, 4.0, 4.0, 4.0]
+        if _prev:
+            widths = _oldingi_kengliklar(widths)
         _apply_table_widths(table, widths)
 
-        for test in regular_tests:
+        for _ti, test in enumerate(regular_tests):
             test_id   = test.get('id')
             test_name = test.get('nomi', 'N/A')
             test_name_lower = test_name.lower()
@@ -5589,7 +5977,7 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
                             # Header qator
                             hrow = table.add_row()
                             _keep_row_together(hrow)
-                            hmerged = hrow.cells[0].merge(hrow.cells[3])
+                            hmerged = hrow.cells[0].merge(hrow.cells[_ncol - 1])
                             _set_cell_shading(hmerged, TABLE_HEADER_HEX)
                             hph = hmerged.paragraphs[0]
                             hph.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -5618,11 +6006,11 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
                                 kp1.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                 _set_para_spacing(kp1, 0, 0, line_spacing=1)
                                 _add_run_tnr(kp1, str(sub_v), 11, bold=True)
-                                kp2 = kc[2].paragraphs[0]
+                                kp2 = kc[_cN].paragraphs[0]
                                 kp2.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                 _set_para_spacing(kp2, 0, 0, line_spacing=1)
                                 _add_multiline_norma(kp2, sub_nr, 11)
-                                kp3 = kc[3].paragraphs[0]
+                                kp3 = kc[_cU].paragraphs[0]
                                 kp3.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                 _set_para_spacing(kp3, 0, 0, line_spacing=1)
                                 _add_run_tnr(kp3, sub_u, 11)
@@ -5633,7 +6021,7 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
                     # Header qator (natija yo'q)
                     row = table.add_row()
                     _keep_row_together(row)
-                    merged = row.cells[0].merge(row.cells[3])
+                    merged = row.cells[0].merge(row.cells[_ncol - 1])
                     _set_cell_shading(merged, TABLE_HEADER_HEX)
                     ph = merged.paragraphs[0]
                     ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -5666,7 +6054,7 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
                                 # Header qator
                                 _hr = table.add_row()
                                 _keep_row_together(_hr)
-                                _hm = _hr.cells[0].merge(_hr.cells[3])
+                                _hm = _hr.cells[0].merge(_hr.cells[_ncol - 1])
                                 _set_cell_shading(_hm, TABLE_HEADER_HEX)
                                 _hph = _hm.paragraphs[0]
                                 _hph.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -5684,11 +6072,11 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
                                     _kp1.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                     _set_para_spacing(_kp1, 0, 0, line_spacing=1)
                                     _add_run_tnr(_kp1, str(_sv), 11, bold=True)
-                                    _kp2 = _kc[2].paragraphs[0]
+                                    _kp2 = _kc[_cN].paragraphs[0]
                                     _kp2.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                     _set_para_spacing(_kp2, 0, 0, line_spacing=1)
                                     _add_multiline_norma(_kp2, _snr, 11)
-                                    _kp3 = _kc[3].paragraphs[0]
+                                    _kp3 = _kc[_cU].paragraphs[0]
                                     _kp3.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                     _set_para_spacing(_kp3, 0, 0, line_spacing=1)
                                     _add_run_tnr(_kp3, _su, 11)
@@ -5781,9 +6169,17 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
             _set_para_spacing(p1, 0, 0, line_spacing=1)
             _add_run_tnr(p1, display_result, 11, bold=True, color_rgb=result_color)
 
+            # Oldingi natija (sifat IFA da ↑/↓ yo'q — joriy natija kabi)
+            if _prev:
+                _oldingi_katak_yoz(
+                    cells[2], _prev[_ti], _prev_sana,
+                    norma_info=None if _ifa_sifat else norma_info,
+                    norma_text=norma_text_for_color or analyzer_ref or '', jins=jins,
+                    komponent=_revmo_komponent(test_name, test.get('tahlil_id')))
+
             # Norma — ko'p qatorli, bemorga mos kelgan qator qalin
             norma_text = norma_info.get('norma', '-')
-            p2 = cells[2].paragraphs[0]
+            p2 = cells[_cN].paragraphs[0]
             p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
             _set_para_spacing(p2, 0, 0, line_spacing=1)
             _add_multiline_norma(p2, norma_text, 11, bold_hints=bold_hints, patient_jins=jins,
@@ -5791,7 +6187,7 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
 
             # O'lchov birligi
             unit_text = norma_info.get('unit', '')
-            p3 = cells[3].paragraphs[0]
+            p3 = cells[_cU].paragraphs[0]
             p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
             _set_para_spacing(p3, 0, 0, line_spacing=1)
             _add_run_tnr(p3, unit_text, 11)
@@ -23061,6 +23457,39 @@ Sana: {_sana_fmt}"""
                        "• Belgi olib tashlansa: blanka odatdagidek FAQAT o'zbekcha chiqadi.",
                   foreground="#555", justify=tk.LEFT).pack(anchor=tk.W, pady=(4, 0))
 
+        # ══════════════════════════════════════════════════════════════
+        # 6.55. OLDINGI NATIJA USTUNI — doimiy bemorlar uchun dinamika
+        # ══════════════════════════════════════════════════════════════
+        old_lf = ttk.LabelFrame(main_frame, text="📈 Oldingi natija ustuni", padding="8")
+        old_lf.pack(fill=tk.X, pady=(0, 8))
+        ttk.Label(old_lf, text="Quyidagi guruhlarda blankada «Natija» yonida bemorning oldingi "
+                               "tashrifdagi natijasi (sanasi bilan) chiqsin:",
+                  wraplength=600, justify=tk.LEFT).pack(anchor=tk.W, pady=(0, 4))
+        _old_saved = config.get('oldingi_natija_guruhlar', ["BIO"])
+        if not isinstance(_old_saved, list):
+            _old_saved = ["BIO"]
+        _old_saved = {str(g).upper() for g in _old_saved}
+        old_vars = {}
+        for _gk, _gtxt in OLDINGI_NATIJA_GURUHLAR:
+            old_vars[_gk] = tk.BooleanVar(value=_gk in _old_saved)
+            ttk.Checkbutton(old_lf, text=_gtxt, variable=old_vars[_gk]).pack(anchor=tk.W, padx=(10, 0))
+        _old_row = ttk.Frame(old_lf)
+        _old_row.pack(anchor=tk.W, pady=(6, 0))
+        ttk.Label(_old_row, text="Necha kungacha orqaga qaralsin:").pack(side=tk.LEFT)
+        old_kun_var = tk.StringVar(value=str(config.get('oldingi_natija_max_kun', 365)))
+        ttk.Entry(_old_row, textvariable=old_kun_var, width=6).pack(side=tk.LEFT, padx=4)
+        ttk.Label(_old_row, text="kun").pack(side=tk.LEFT)
+        old_takror_var = tk.BooleanVar(value=bool(config.get('oldingi_natija_takroriy_bemor', True)))
+        ttk.Checkbutton(old_lf,
+                        text="Bemor ikki marta ro'yxatga olingan bo'lsa ham topilsin "
+                             "(FISH + jins + tug'ilgan yil mos)",
+                        variable=old_takror_var).pack(anchor=tk.W, pady=(4, 0))
+        ttk.Label(old_lf,
+                  text="• Bemorning oldingi natijasi bo'lmasa (birinchi tashrif) — ustun chiqmaydi.\n"
+                       "• Shu kuni ochilgan boshqa buyurtma «oldingi» hisoblanmaydi — faqat oldingi kunlar.\n"
+                       "• Hamma oldingi natija bir kunga tegishli bo'lsa — sana ustun sarlavhasida yoziladi.",
+                  foreground="#555", justify=tk.LEFT).pack(anchor=tk.W, pady=(4, 0))
+
         from tkinter import filedialog as _fd
 
         # ══════════════════════════════════════════════════════════════
@@ -23164,6 +23593,12 @@ Sana: {_sana_fmt}"""
                     muhr_size_var.get().replace(',', '.')), 6.0))
             except Exception:
                 new_config["pdf_muhr_size"] = 3.8
+            new_config["oldingi_natija_guruhlar"] = [g for g, v in old_vars.items() if v.get()]
+            try:
+                new_config["oldingi_natija_max_kun"] = max(1, min(int(old_kun_var.get().strip()), 3650))
+            except Exception:
+                new_config["oldingi_natija_max_kun"] = 365
+            new_config["oldingi_natija_takroriy_bemor"] = bool(old_takror_var.get())
             for key, var in kl_fields.items():
                 new_config[key] = var.get().strip()
             for key, var in color_vars.items():
