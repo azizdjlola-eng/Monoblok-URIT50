@@ -3421,6 +3421,11 @@ CBC_HEMA_OPTIONAL_ROWS = {"Neu#", "Neu%", "Mon#", "Mon%", "Eos#", "Eos%", "Bas#"
 # 3-diff natijada (5-diff kalitlar yo'q) — eski blanka ko'rinishi saqlanadi ("-" bilan ham)
 CBC_HEMA_3DIFF_ROWS = {"Mid#", "Mid%", "Gran#", "Gran%"}
 CBC_HEMA_5DIFF_KEYS = {"Neu#", "Neu%", "Mon#", "Mon%", "Eos#", "Eos%", "Bas#", "Bas%"}
+# CBC JSON kaliti (blanka kodi) → muqobil kalit / multi-ref (HL7) kaliti
+CBC_HEMA_KOD_ALIAS = {'Lymph#': 'LYM#', 'Lymph%': 'LYM%', 'Mid#': 'MID#', 'Mid%': 'MID%',
+                      'Gran#': 'GRAN#', 'Gran%': 'GRAN%',
+                      'Neu#': 'NEU#', 'Neu%': 'NEU%', 'Mon#': 'MON#', 'Mon%': 'MON%',
+                      'Eos#': 'EOS#', 'Eos%': 'EOS%', 'Bas#': 'BAS#', 'Bas%': 'BAS%'}
 
 def _parse_norma_to_min_max(norma_str):
     """Norma matnidan (masalan '4.0 – 9.0') min, max olish. 'manfiy' -> 0, 0."""
@@ -3539,9 +3544,7 @@ def create_hematology_cbc_table_in_doc(doc: Document, result_data, order_info: d
         p_meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_para_spacing(p_meta, 0, 0, line_spacing=1.0)
         _add_run_tnr(p_meta, meta, 9)
-    KOD_ALIAS = {'Lymph#': 'LYM#', 'Lymph%': 'LYM%', 'Mid#': 'MID#', 'Mid%': 'MID%', 'Gran#': 'GRAN#', 'Gran%': 'GRAN%',
-                 'Neu#': 'NEU#', 'Neu%': 'NEU%', 'Mon#': 'MON#', 'Mon%': 'MON%',
-                 'Eos#': 'EOS#', 'Eos%': 'EOS%', 'Bas#': 'BAS#', 'Bas%': 'BAS%'}
+    KOD_ALIAS = CBC_HEMA_KOD_ALIAS
     _has_5diff = any((vals.get(k) or vals.get(KOD_ALIAS.get(k, ''))) for k in CBC_HEMA_5DIFF_KEYS)
 
     def _rang_strelka(val_str, lo, hi, norma):
@@ -16795,6 +16798,15 @@ Sana: {_sana_fmt}"""
                 )
             return
 
+        # Umumiy qon tahlili — Gemotologiya oynasidagidek to'liq ko'rinish
+        # (xato bo'lsa pastdagi oddiy oynaga qaytadi)
+        if json_type == 'hematology_cbc':
+            try:
+                self._show_hematology_cbc_popup(test_name, result_dict)
+                return
+            except Exception as _he:
+                print(f"[OGOHLANTIRISH] CBC oynasi ochilmadi, oddiy ko'rinish: {_he}")
+
         # Gemotologiya va boshqalar uchun oddiy info popup
         sid    = result_dict.get('sid', '')
         sno    = result_dict.get('sno', '')
@@ -16873,6 +16885,159 @@ Sana: {_sana_fmt}"""
         ttk.Button(popup, text="Yopish",
                    command=popup.destroy).pack(pady=10)
         popup.focus_set()
+
+    def _show_hematology_cbc_popup(self, test_name, rd):
+        """Umumiy qon tahlili natijasi — Gemotologiya oynasidagidek: ↑/↓ rangli natija,
+        yosh/jinsga mos norma, Flag va WBC/RBC/PLT gistogrammalari.
+        Qatorlar va normalar blankadagi bilan BIR XIL (CBC_HEMA_ROWS + multi-ref),
+        ya'ni oynada ko'rilgan narsa blankada ham shunday chiqadi. Faqat ko'rish."""
+        import gemo_histogram as _gh
+
+        bemor  = self.current_bemor_data or {}
+        age    = rd.get('patient_age') or bemor.get('yosh') or ''
+        gender = rd.get('patient_gender') or bemor.get('jins') or ''
+        sid    = rd.get('sid') or rd.get('sno') or ''
+        model  = rd.get('analyzer') or rd.get('source') or _hema_analyzer_label()
+
+        # ── Qatorlar (create_hematology_cbc_table_in_doc bilan bir xil qoida) ──
+        has_5diff = any((rd.get(k) or rd.get(CBC_HEMA_KOD_ALIAS.get(k, '')))
+                        for k in CBC_HEMA_5DIFF_KEYS)
+        rows = []   # (ko'rsatkich, kod, natija, birlik, norma, lo, hi)
+        for nom, kod, birlik, default_norma in CBC_HEMA_ROWS:
+            alias  = CBC_HEMA_KOD_ALIAS.get(kod, '')
+            natija = str(rd.get(kod) or rd.get(alias) or '').strip()
+            if kod in CBC_HEMA_OPTIONAL_ROWS and not natija:
+                if kod in CBC_HEMA_5DIFF_KEYS or (kod in CBC_HEMA_3DIFF_ROWS and has_5diff):
+                    continue
+            norma, lo, hi = default_norma, None, None
+            if _hema_get_multi_ref and age:
+                lo, hi, ref = _hema_get_multi_ref(kod, age, gender)
+                if not ref and alias:
+                    lo, hi, ref = _hema_get_multi_ref(alias, age, gender)
+                if ref:
+                    norma = ref
+                else:
+                    lo = hi = None
+            if lo is None or hi is None:
+                lo, hi = _parse_norma_to_min_max(norma)
+            rows.append((nom, kod, natija, birlik, norma, lo, hi))
+
+        # Kritik qiymatlar (gemotologiya oynasidagi kabi qizil fon)
+        crit_keys = set()
+        try:
+            import critical_alert
+            vmap = {k: str(rd.get(k) or '') for k in ("WBC", "RBC", "HGB", "PLT") if rd.get(k)}
+            _al, crit_keys = critical_alert.check_hematology(vmap)
+        except Exception:
+            crit_keys = set()
+
+        # ── Oyna (bitta nusxa: qayta bosilsa eskisi yopiladi) ──────────────
+        old = getattr(self, '_cbc_view_win', None)
+        try:
+            if old is not None and old.winfo_exists():
+                old.destroy()
+        except Exception:
+            pass
+        win = tk.Toplevel(self.root)
+        self._cbc_view_win = win
+        win.title(test_name)
+        win.transient(self.root)
+        _center_window_on_work_area(win, 1040, 860)
+        win.minsize(760, 560)
+        win.bind("<Escape>", lambda e: win.destroy())
+
+        hdr_bg = "#1a3a5c"
+        hdr = tk.Frame(win, bg=hdr_bg)
+        hdr.pack(fill=tk.X)
+        tk.Label(hdr, text=test_name, bg=hdr_bg, fg="white",
+                 font=("Arial", 13, "bold")).pack(side=tk.LEFT, padx=12, pady=8)
+        meta = []
+        if bemor.get('fish'):
+            meta.append(str(bemor.get('fish')))
+        if age:
+            meta.append(f"Yoshi: {age}")
+        if gender:
+            meta.append(f"Jinsi: {gender}")
+        meta.append(f"Analizator: {model}")
+        if sid:
+            meta.append(f"Sample ID: {sid}")
+        tk.Label(hdr, text="   |   ".join(meta), bg=hdr_bg, fg="#aac8e8",
+                 font=("Arial", 9)).pack(side=tk.LEFT, padx=6)
+
+        btm = ttk.Frame(win, padding=(8, 4))
+        btm.pack(side=tk.BOTTOM, fill=tk.X)
+        tk.Label(btm, text="↑ normadan yuqori", fg="red", font=("Arial", 9)).pack(side=tk.LEFT, padx=(0, 12))
+        tk.Label(btm, text="↓ normadan past", fg="blue", font=("Arial", 9)).pack(side=tk.LEFT, padx=(0, 12))
+        tk.Label(btm, text="Norma bemor yoshi va jinsiga qarab (blankadagi bilan bir xil)",
+                 fg="#666", font=("Arial", 8)).pack(side=tk.LEFT)
+        ttk.Button(btm, text="Yopish", command=win.destroy).pack(side=tk.RIGHT)
+
+        body = ttk.Frame(win, padding=6)
+        body.pack(fill=tk.BOTH, expand=True)
+
+        # Gistogrammalar (WBC / RBC / PLT) — birinchi pack → joyi kafolatlangan
+        hist_frame = tk.Frame(body, bg=_gh.BG, height=190)
+        hist_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(6, 0))
+        hist_frame.pack_propagate(False)
+        hist_cur = [_gh.unpack_histograms(rd.get('histograms'))]
+        canvases = {}
+        for k in _gh.HIST_ORDER:
+            cv = tk.Canvas(hist_frame, bg=_gh.BG, width=1, height=1,
+                           highlightthickness=1, highlightbackground="#444444")
+            cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=1, pady=1)
+            cv.bind("<Configure>", lambda e, k=k: _gh.draw_histogram(
+                canvases[k], k, hist_cur[0].get(k)))
+            canvases[k] = cv
+
+        cols = ("No.", "Ko'rsatkich", "Qisqa nom", "Natija", "Birlik", "Norma", "Flag")
+        widths = (45, 300, 85, 110, 80, 120, 55)
+        tree = ttk.Treeview(body, columns=cols, show="headings", height=len(rows))
+        for c, w in zip(cols, widths):
+            tree.heading(c, text=c)
+            tree.column(c, width=w, anchor=tk.W if c == "Ko'rsatkich" else tk.CENTER,
+                        stretch=(c == "Ko'rsatkich"))
+        tree.tag_configure("high", foreground="red", font=("Arial", 9, "bold"))
+        tree.tag_configure("low", foreground="blue", font=("Arial", 9, "bold"))
+        tree.tag_configure("normal_res", foreground="black")
+        tree.tag_configure("critical", background="#ffcccc", foreground="#a00000",
+                           font=("Arial", 9, "bold"))
+        sb = ttk.Scrollbar(body, orient=tk.VERTICAL, command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        for no, (nom, kod, natija, birlik, norma, lo, hi) in enumerate(rows, 1):
+            disp, tag, flag = (natija or '-'), "normal_res", ""
+            if natija and lo is not None and hi is not None:
+                try:
+                    fval = float(natija.replace(',', '.'))
+                    if fval > hi:
+                        disp, tag, flag = f"↑ {natija}", "high", "H"
+                    elif fval < lo:
+                        disp, tag, flag = f"↓ {natija}", "low", "L"
+                    else:
+                        flag = "N"
+                except (ValueError, TypeError):
+                    pass
+            if kod in crit_keys:
+                tag = "critical"
+            tree.insert("", tk.END, values=(no, nom, kod, disp, birlik, norma, flag), tags=(tag,))
+
+        # Eski natijalarda JSON ichida gistogramma yo'q — TXT fayldan qidiramiz
+        # (oyna ochilgandan keyin, ochilish sekinlashmasin)
+        if not hist_cur[0] and sid:
+            def _load_hist():
+                try:
+                    from hematology_window import find_histograms_by_sid
+                    hist_cur[0] = find_histograms_by_sid(sid) or {}
+                except Exception:
+                    hist_cur[0] = {}
+                if win.winfo_exists():
+                    for k, cv in canvases.items():
+                        _gh.draw_histogram(cv, k, hist_cur[0].get(k))
+            win.after(80, _load_hist)
+
+        win.focus_set()
 
     # Siydik kimyoviy qismini QO'LDA kiritish (test poloska) — analizator ishlamasa
     # yoki poloska tugaganda (mijoz talabi, 2026-10-11). Variantlar URIT poloskasi
