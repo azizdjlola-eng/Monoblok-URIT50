@@ -7495,6 +7495,43 @@ def save_pdf_to_onedrive(docx_path, date_str=None):
             pass
 
 # [16] create_blanks_for_order() - PUBLIC entry point
+BLANKA_ZAXIRA_PAPKA = "_eski blankalar (zaxira)"
+BLANKA_ZAXIRA_KUN = 30
+
+
+def _blanka_zaxiralash(full_path):
+    r"""Mavjud blankani USTIGA YOZISHDAN OLDIN eski nusxasini saqlab qo'yadi.
+
+    19.10.2026: «Blanka mavjud — Yangilaymi?» so'rovi olib tashlandi (har
+    blankada Да bosish vaqt olardi) — endi so'ramasdan yangilanadi. Eski fayl
+    Word'da qo'lda tahrirlangan bo'lishi mumkin, shuning uchun u yo'qolmasin:
+    <Word papka>\_eski blankalar (zaxira)\DD.MM.YYYY\<nom> (HH-MM-SS).docx
+    Zaxira sana papkalari ichida emas — OneDrive/PDF/tugallik skanerlari
+    ularni ko'rmaydi. 30 kundan eski zaxiralar o'chiriladi.
+    Xato bo'lsa jim o'tadi: zaxira tufayli blanka yaratish to'xtamasin.
+    """
+    try:
+        import shutil
+        kun_papka = os.path.dirname(full_path)
+        zaxira_asos = os.path.join(os.path.dirname(kun_papka), BLANKA_ZAXIRA_PAPKA)
+        zaxira_dir = os.path.join(zaxira_asos, os.path.basename(kun_papka))
+        os.makedirs(zaxira_dir, exist_ok=True)
+        nom, ext = os.path.splitext(os.path.basename(full_path))
+        zaxira = os.path.join(zaxira_dir, f"{nom} ({datetime.now().strftime('%H-%M-%S')}){ext}")
+        shutil.copy2(full_path, zaxira)
+        print(f"[ZAXIRA] Eski blanka saqlandi: {zaxira}")
+        chegara = time.time() - BLANKA_ZAXIRA_KUN * 86400
+        for p in os.listdir(zaxira_asos):
+            pp = os.path.join(zaxira_asos, p)
+            try:
+                if os.path.isdir(pp) and os.path.getmtime(pp) < chegara:
+                    shutil.rmtree(pp, ignore_errors=True)
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"[OGOHLANTIRISH] Blanka zaxirasi saqlanmadi: {e}")
+
+
 def create_blanks_for_order(order_id: int, test_results: dict = None, file_exists_callback=None):
     order_info = get_order_info(order_id)
     if not order_info:
@@ -7608,6 +7645,7 @@ def create_blanks_for_order(order_id: int, test_results: dict = None, file_exist
                 response = file_exists_callback(full_path)
                 if not response:
                     return [full_path]
+            _blanka_zaxiralash(full_path)
         _blanka_ruscha_qoshish(unified_doc)
         unified_doc.save(full_path)
         if os.path.exists(full_path):
@@ -23890,139 +23928,82 @@ Sana: {_sana_fmt}"""
         if not self._confirm_unsaved_before_blank("Blanka yaratish"):
             return
 
-        # blanka_generator.py dan to'g'ridan-to'g'ri foydalanish (hech qanday pre-state kerak emas)
-        try:
-            
-            # Progress dialog
-            progress_win = tk.Toplevel(self.root)
-            progress_win.title("Blankalar yaratilmoqda...")
-            progress_win.geometry("450x180")
-            progress_win.transient(self.root)
-            progress_win.grab_set()
-            
-            ttk.Label(progress_win, text="Blankalar yaratilmoqda...", font=("Arial", 12, "bold")).pack(pady=20)
-            progress_var = tk.StringVar(value="Tayyorlanmoqda...")
-            progress_label = ttk.Label(progress_win, textvariable=progress_var, font=("Arial", 10))
-            progress_label.pack(pady=10)
-            
-            # Progress bar (oddiy)
-            progress_bar = ttk.Progressbar(progress_win, mode='indeterminate', length=300)
-            progress_bar.pack(pady=10)
-            progress_bar.start()
-            
-            progress_win.update()
-            
-            # Blankalar yaratish (bitta chaqiruvda barcha ishlar bajariladi)
+        # ── FON OQIMIDA YARATISH + YASHIL XABAR (19.10.2026) ──────────────
+        # Ilgari har blankada 3 ta modal oyna chiqardi: progress, «Blanka
+        # mavjud — Yangilaymi?» va «Ochishni xohlaysizmi?». Kuniga o'nlab
+        # bemorda Да/Нет bosish ishni sekinlashtirardi. Endi blanka fon
+        # oqimida yaratiladi (oyna qotmaydi), mavjud blanka so'ramasdan
+        # yangilanadi (eski nusxa _blanka_zaxiralash bilan saqlanadi), natija
+        # pastda yashil xabar (oyna_xabar.toast) + «📂 Ochish» tugmasi.
+        # Xatolar va Word'da ochiq (qulflangan) blanka — MODAL bo'lib qoladi.
+        order_id = self.current_order_id
+        band = getattr(self, '_blanka_band_orderlar', None)
+        if band is None:
+            band = self._blanka_band_orderlar = set()
+        if order_id in band:
+            self.status_var.set("[KUTING] Bu bemorning blankasi hali yaratilmoqda...")
+            return
+        band.add(order_id)
+
+        # Fon oqimiga faqat NUSXALAR beriladi: laborant shu orada boshqa
+        # bemorni ochsa ham blanka to'g'ri bemorga yaratiladi.
+        test_results = dict(self.test_results or {})
+        sana_vaqt = (self.current_bemor_data or {}).get('sana_vaqt')
+        tahlil_soni = len(self.current_tests or [])
+        holat = {'band_fayl': None, 'yangilandi': False}
+
+        def file_exists_callback(file_path):
+            """Mavjud blanka — so'ramasdan yangilanadi. Faqat Word'da ochiq
+            (qulflangan) bo'lsa tegilmaydi: laborant buni bilishi shart."""
             try:
-                # Fayl mavjud bo'lsa, dialog ochish uchun callback funksiya
-                def file_exists_callback(file_path):
-                    """Fayl mavjud bo'lsa, yangilashni so'rash"""
-                    import os
-                    response = messagebox.askyesno(
-                        "Blanka mavjud",
-                        f"Blanka allaqachon mavjud:\n{os.path.basename(file_path)}\n\n"
-                        "Yangilaymi?",
-                        icon="question"
-                    )
-                    return response
-                
+                with open(file_path, 'r+b'):
+                    pass
+            except PermissionError:
+                holat['band_fayl'] = file_path
+                return False
+            except OSError:
+                pass
+            holat['yangilandi'] = True
+            return True
+
+        def ishchi():
+            created, xato = None, None
+            try:
                 created = create_blanks_for_order(
-                    self.current_order_id, 
-                    self.test_results,
-                    file_exists_callback=file_exists_callback
-                )
+                    order_id, test_results,
+                    file_exists_callback=file_exists_callback)
             except Exception as e:
-                progress_win.destroy()
-                error_msg = f"Blanka yaratishda xato:\n{str(e)}"
-                # Batafsil xatolik ma'lumotlari
                 import traceback
-                error_details = traceback.format_exc()
-                print(f"[XATO] Blanka yaratishda batafsil xato:\n{error_details}")
-                messagebox.showerror("Xatolik", error_msg)
+                print(f"[XATO] Blanka yaratishda batafsil xato:\n{traceback.format_exc()}")
+                xato = e
+            # Tkinter'ga faqat asosiy oqimdan (after → _after_oqimga_xavfsiz navbati)
+            self.root.after(0, tugadi, created, xato)
+
+        def tugadi(created, xato):
+            band.discard(order_id)
+            if xato is not None:
+                self.status_var.set("[XATO] Blanka yaratilmadi")
+                messagebox.showerror("Xatolik", f"Blanka yaratishda xato:\n{xato}")
                 return
-            
-            progress_win.destroy()
-            
-            # created - bu list yoki bitta string bo'lishi mumkin
-            if created:
-                # Agar list bo'lsa
-                if isinstance(created, list) and len(created) > 0:
-                    files_list = "\n".join([f"  • {os.path.basename(f)}" for f in created[:10]])
-                    if len(created) > 10:
-                        files_list += f"\n  ... va yana {len(created) - 10} ta"
-                    
-                    result = messagebox.askyesno(
-                        "Muvaffaqiyat", 
-                        f"[OK] {len(created)} ta blanka yaratildi!\n\n{files_list}\n\n"
-                        "Blankalarni ochishni xohlaysizmi?"
-                    )
-                    
-                    if result:
-                        # Blankalarni ochish
-                        for file_path in created[:5]:  # Faqat birinchi 5 tasini ochish
-                            try:
-                                os.startfile(file_path)
-                            except:
-                                pass
+            if isinstance(created, str):
+                created = [created]
 
-                    self.status_var.set(f"[OK] {len(created)} ta blanka yaratildi")
-                    # PDF nusxasini OneDrive ga saqlash (Word ochilgandan keyin, fon threadda)
-                    try:
-                        import threading
-                        _ord_date = None
-                        _sv = (self.current_bemor_data or {}).get('sana_vaqt')
-                        if _sv:
-                            try:
-                                import datetime as _dt
-                                _d = str(_sv)[:10]  # "2026-03-16"
-                                _ord_date = _dt.datetime.strptime(_d, "%Y-%m-%d").strftime("%d.%m.%Y")
-                            except Exception:
-                                pass
-                        for _fp in created[:5]:
-                            threading.Thread(target=save_pdf_to_onedrive, args=(_fp, _ord_date), daemon=True).start()
-                    except Exception:
-                        pass
-                # Agar bitta fayl (string) bo'lsa
-                elif isinstance(created, str):
-                    result = messagebox.askyesno(
-                        "Muvaffaqiyat",
-                        f"[OK] Blanka yaratildi!\n\n{os.path.basename(created)}\n\n"
-                        "Blankani ochishni xohlaysizmi?"
-                    )
+            if holat['band_fayl']:
+                self.status_var.set("[TO'XTATILDI] Blanka Word'da ochiq — yopib qayta bosing")
+                messagebox.showwarning(
+                    "Blanka Word'da ochiq",
+                    f"Blanka YANGILANMADI — u hozir Word'da ochiq:\n"
+                    f"{os.path.basename(holat['band_fayl'])}\n\n"
+                    "Word'dagi blankani yoping va «Blanka Yaratish» ni qayta bosing.")
+                return
 
-                    if result:
-                        try:
-                            os.startfile(created)
-                        except:
-                            pass
-
-                    self.status_var.set(f"[OK] Blanka yaratildi")
-                    # PDF nusxasini OneDrive ga saqlash
-                    try:
-                        import threading
-                        _ord_date2 = None
-                        _sv2 = (self.current_bemor_data or {}).get('sana_vaqt')
-                        if _sv2:
-                            try:
-                                import datetime as _dt
-                                _d2 = str(_sv2)[:10]
-                                _ord_date2 = _dt.datetime.strptime(_d2, "%Y-%m-%d").strftime("%d.%m.%Y")
-                            except Exception:
-                                pass
-                        threading.Thread(target=save_pdf_to_onedrive, args=(created, _ord_date2), daemon=True).start()
-                    except Exception:
-                        pass
-            else:
+            if not created:
                 # Batafsil xatolik xabari - shablonlar holatini tekshirish
                 error_details = []
-                if not self.current_order_id:
-                    error_details.append("• Buyurtma ID topilmadi")
-                if not self.current_tests:
+                if not tahlil_soni:
                     error_details.append("• Tahlillar topilmadi")
                 else:
-                    error_details.append(f"• {len(self.current_tests)} ta tahlil mavjud, lekin blankalar yaratilmadi")
-                    
-                    # Shablonlar holatini tekshirish
+                    error_details.append(f"• {tahlil_soni} ta tahlil mavjud, lekin blankalar yaratilmadi")
                     templates_dir = os.path.join(os.path.dirname(__file__), "templates")
                     if os.path.exists(templates_dir):
                         template_files = os.listdir(templates_dir)
@@ -24032,20 +24013,55 @@ Sana: {_sana_fmt}"""
                             error_details.append("• Templates papkasi bo'sh")
                     else:
                         error_details.append("• Templates papkasi topilmadi")
-                    
                     error_details.append("• Standart blankalar yaratilishi kerak edi")
-                
-                error_msg = "Blanka yaratilmadi.\n\n" + "\n".join(error_details)
-                messagebox.showwarning("Diqqat", error_msg)
                 self.status_var.set("[OGOHLANTIRISH] Blanka yaratilmadi")
-        
-        except ImportError as e:
-            messagebox.showerror("Xatolik", f"Modul topilmadi: {e}\n\nblanka_generator.py faylini tekshiring.")
+                messagebox.showwarning("Diqqat", "Blanka yaratilmadi.\n\n" + "\n".join(error_details))
+                return
+
+            soz = "yangilandi" if holat['yangilandi'] else "yaratildi"
+            self.status_var.set(f"[OK] {len(created)} ta blanka {soz} - "
+                                f"{datetime.now().strftime('%H:%M:%S')}")
+            nomlar = "\n".join(f"• {os.path.basename(f)}" for f in created[:3])
+            if len(created) > 3:
+                nomlar += f"\n... va yana {len(created) - 3} ta"
+            matn = f"✅ Blanka {soz}\n{nomlar}"
+            if holat['yangilandi']:
+                matn += "\n(eski nusxa zaxiraga olindi)"
+
+            def _ochish(fayllar=tuple(created[:5])):
+                for fp in fayllar:
+                    try:
+                        os.startfile(fp)
+                    except Exception as e:
+                        messagebox.showerror("Xatolik", f"Blanka ochilmadi:\n{fp}\n\n{e}")
+
+            try:
+                from oyna_xabar import toast
+                toast(self.root, matn, davomiylik_ms=10000,
+                      tugmalar=[("📂 Ochish", _ochish)])
+            except Exception as e:
+                print(f"[OGOHLANTIRISH] Yashil xabar ko'rsatilmadi: {e}")
+
+            # PDF nusxasini OneDrive ga saqlash (fon threadda)
+            try:
+                _ord_date = None
+                if sana_vaqt:
+                    try:
+                        _ord_date = datetime.strptime(str(sana_vaqt)[:10], "%Y-%m-%d").strftime("%d.%m.%Y")
+                    except Exception:
+                        pass
+                for _fp in created[:5]:
+                    threading.Thread(target=save_pdf_to_onedrive, args=(_fp, _ord_date), daemon=True).start()
+            except Exception:
+                pass
+
+        self.status_var.set("[...] Blanka yaratilmoqda — ishlashda davom etavering")
+        try:
+            threading.Thread(target=ishchi, daemon=True, name="blanka_yaratish").start()
         except Exception as e:
+            band.discard(order_id)
             messagebox.showerror("Xatolik", f"Blanka yaratishda xato: {e}")
-            import traceback
-            traceback.print_exc()
-    
+
     # ── BLANKA OLDIDAN: SAQLANMAGAN NATIJA TEKSHIRUVI ─────────────────────
     # MUAMMO (2026-09-29): ogohlantirish oynasida hamshiralar «Tuzataman
     # (saqlanmasin)» ni bosib, keyin «Blanka Yaratish» bilan qog'oz
