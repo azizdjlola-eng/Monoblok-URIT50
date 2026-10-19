@@ -24021,8 +24021,8 @@ Sana: {_sana_fmt}"""
         # mavjud — Yangilaymi?» va «Ochishni xohlaysizmi?». Kuniga o'nlab
         # bemorda Да/Нет bosish ishni sekinlashtirardi. Endi blanka fon
         # oqimida yaratiladi (oyna qotmaydi), mavjud blanka so'ramasdan
-        # yangilanadi (eski nusxa _blanka_zaxiralash bilan saqlanadi), natija
-        # pastda yashil xabar (oyna_xabar.toast) + «📂 Ochish» tugmasi.
+        # yangilanadi (eski nusxa _blanka_zaxiralash bilan saqlanadi), blanka
+        # avtomatik ochiladi va pastda yashil xabar (oyna_xabar.toast) chiqadi.
         # Xatolar va Word'da ochiq (qulflangan) blanka — MODAL bo'lib qoladi.
         order_id = self.current_order_id
         band = getattr(self, '_blanka_band_orderlar', None)
@@ -24112,7 +24112,7 @@ Sana: {_sana_fmt}"""
             nomlar = "\n".join(f"• {os.path.basename(f)}" for f in created[:3])
             if len(created) > 3:
                 nomlar += f"\n... va yana {len(created) - 3} ta"
-            matn = f"✅ Blanka {soz}\n{nomlar}"
+            matn = f"✅ Blanka {soz} va ochildi\n{nomlar}"
             if holat['yangilandi']:
                 matn += "\n(eski nusxa zaxiraga olindi)"
 
@@ -24123,10 +24123,14 @@ Sana: {_sana_fmt}"""
                     except Exception as e:
                         messagebox.showerror("Xatolik", f"Blanka ochilmadi:\n{fp}\n\n{e}")
 
+            # Blanka avtomatik ochiladi (egasi talabi, 19.10.2026) — tugmani
+            # bosish shart emas. «Qayta ochish» — Word yopib yuborilsa.
+            # (F2 / print_results bu yerdan o'tmaydi — u oynasiz chop etadi.)
+            _ochish()
             try:
                 from oyna_xabar import toast
-                toast(self.root, matn, davomiylik_ms=10000,
-                      tugmalar=[("📂 Ochish", _ochish)])
+                toast(self.root, matn, davomiylik_ms=6000,
+                      tugmalar=[("📂 Qayta ochish", _ochish)])
             except Exception as e:
                 print(f"[OGOHLANTIRISH] Yashil xabar ko'rsatilmadi: {e}")
 
