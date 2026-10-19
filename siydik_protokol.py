@@ -27,8 +27,11 @@ O'rganilgan hujjatlar (2026-09):
     "Date:YYYY-MM-DD HH:MM", "No. xxxx", "ID：..." (to'liq kenglikdagi ikki nuqta!),
     kodlar: UBG BIL KET CRE BLD PRO ALB NIT LEU GLU SG PH VC Ca A:C RT;
     SP1=0xAB ajratuvchi bayt ishlatiladi (kodirovkada buziladi → bo'sh joyga almashtiramiz).
-  * Mindray UA-66 — RS-232, 11 parametr (URO BIL KET BLD PRO NIT LEU GLU SG VC PH),
-    printer-uslubidagi matn bloki; Mindray UA-600/UA-1600 — HL7 (MLLP, TCP).
+  * Mindray UA-66 — RS-232, 11 parametr (URO BIL KET BLD PRO NIT LEU GLU SG ASC PH),
+    JONLI SINALGAN 17.10.2026 (COM4, 57600 8N1, URIT kabeli emas — o'z RS232 kabeli bilan):
+    STX/ETX yo'q, "YYYY-MM-DD" / "HH:MM:SS" / "004" (namuna raqami, NO. siz) / " KOD<TAB>qiymat".
+    ID va '*' yuborilmaydi; musbat natija faqat son ("KET<TAB>4.0 mmol/L") yoki daraja ("LEU<TAB>2+").
+    Batafsil: docs/siydik_analizator_ulanish.md. Mindray UA-600/UA-1600 — HL7 (MLLP, TCP).
   * Dirui H-500/H-800/FUS — HL7 yoki ASTM (LIS sozlamasiga qarab).
 """
 
@@ -127,8 +130,9 @@ PROFILES = {
     "mindray_ua66": {
         "name": "Mindray UA-66 (RS-232)",
         "connection_type": "serial", "protocol": "text",
-        "baudrate": 9600, "bytesize": 8, "parity": "N", "stopbits": 1,
-        "hint": "11 parametr: URO BIL KET BLD PRO NIT LEU GLU SG VC PH. Setup → Communication → Transmit ON.",
+        "baudrate": 57600, "bytesize": 8, "parity": "N", "stopbits": 1,
+        "hint": "11 parametr (ASC=Vc). Baud = analizator Setup dagi bilan bir xil (17.10.2026 qurilmada 57600). "
+                "ID yuborilmaydi — natija yuborishdan oldin bemor shtrix-kodini skanerlang.",
     },
     "mindray_ua_hl7": {
         "name": "Mindray UA-600 / UA-1600 / UA-5600 (HL7, TCP)",
@@ -253,10 +257,18 @@ def parse_text_block(block: str) -> dict:
     values, abnormal, extra = {}, set(), {}
 
     # 1) Sarlavha: ID / NO / sana / vaqt
+    seen_code = False
     for line in lines:
         lc = line.strip()
         if not lc:
             continue
+        # Mindray UA-66: namuna raqami alohida qatorda, "NO." belgisisiz ("004") —
+        # faqat birinchi analit qatoridan oldin (keyingi raqamlar qiymat davomi bo'lishi mumkin)
+        if not seen_code and result["NO"] is None and re.fullmatch(r"\d{1,6}", lc):
+            result["NO"] = lc
+            continue
+        if not seen_code and _CODE_LINE_RE.match(lc) and normalize_code(_CODE_LINE_RE.match(lc).group(2)):
+            seen_code = True
         m = re.match(r"^\*?\s*ID\s*[:：]\s*(.*)$", lc, re.IGNORECASE)
         if m and result["ID"] is None:
             result["ID"] = m.group(1).strip()

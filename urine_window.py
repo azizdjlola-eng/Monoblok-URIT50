@@ -517,6 +517,9 @@ def open_window(parent=None, on_import_callback=None):
                             new_lines.append(f"{prefix}  {new_val}\n")
                             continue
                 new_lines.append(line)
+            # Mindray UA-66 va h.k. ID satrini yubormaydi — boshiga qo'shamiz
+            if new_sample_id is not None and not any(l.strip().startswith('ID:') for l in lines):
+                new_lines.insert(0, f"ID:{new_sample_id}\n")
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.writelines(new_lines)
             return True

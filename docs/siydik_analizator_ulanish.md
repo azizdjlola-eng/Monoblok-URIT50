@@ -47,12 +47,44 @@ LIS: HL7 (TCP). Analizator **LIS sozlamasi → HL7, Server IP = kompyuter IP, Po
 Dasturda: `tcp_server`, `hl7`. OBX-3 kodlari alias jadvali orqali moslanadi, OBX-8 flag (`A/H/L`) → `ABNORMAL`.
 Sample ID: OBR-3 → SPM-2 → PID-3 tartibida.
 
-### Mindray UA-66
-RS-232, 11 parametr (URO BIL KET BLD PRO NIT LEU GLU SG VC PH), printer-uslubidagi matn.
-Profil: `mindray_ua66` (serial, text, 9600 8N1). Aniq bayt tartibi rasmiy hujjatdan tekshirilmagan
-(manualslib bot-tekshiruvi ochilmadi) — parser qator boshidagi kodni tanib oladi, shuning uchun
-qatorlar tartibi/bo'sh joylar farq qilsa ham ishlaydi. Birinchi ulashda `Urit/RAW_LOGS` dagi RAW faylni
-ko'rib, `EXTRA` da noma'lum kod chiqsa `CODE_ALIASES` ga qo'shish kifoya.
+### Mindray UA-66 — ✅ jonli sinovdan o'tgan (17.10.2026)
+Boshqa klinikadan vaqtincha olingan UA-66 bilan sinaldi: natijalar dasturga tushdi
+(RAW fayl + Siydik oynasi + blanka). Sinovdan keyin URIT-50 qayta ulanib, u ham avvalgidek ishladi.
+
+**Sozlama:** model `Mindray UA-66 (RS-232)`, `serial`, protokol `text`, **COM4 (USB-serial CH340), 57600 8N1**.
+Baud analizatorning o'z Setup → Communication sahifasidagi qiymat bilan bir xil bo'lishi shart
+(sinalgan qurilmada 57600 edi; profil standarti ham 57600).
+
+**Kabel:** URIT-50 ning RS232 kabeli bilan 0 bayt keldi — UA-66 ga boshqa RS232 kabel ulangandan
+keyin ishladi. Ya'ni UA-66 uchun mos (o'z) kabeli kerak.
+
+**Haqiqiy format** (STX/ETX YO'Q — blok `idle_timeout` jimlik bilan yopiladi; `\t` = TAB):
+```
+2026-10-17
+12:25:40
+004                       ← namuna raqami ("NO." belgisisiz) → NO
+ LEU\t-
+ URO\t3.5 umol/L
+ PH \t5.5
+ KET\tNeg.                 ← musbat bo'lsa faqat son: "KET\t4.0 mmol/L", "GLU\t60 mmol/L", "BIL\t35 umol/L"
+ LEU\t2+                   ← ba'zilari faqat daraja
+ ASC\t1.14 mmol/L          ← ASC = Vc (askorbin)
+```
+Namuna: `ua66_raw_004.bin` (side-session notes). Kod: bo'sh raqam qatori birinchi analitdan oldin
+bo'lsa `NO` sifatida olinadi (2041 ta URIT-50 RAW fayl regressiyasi — farq 0).
+
+**Cheklovlar (URIT-50 dan farqi):**
+- **ID yuborilmaydi** → natija bemorga avtomatik bog'lanmaydi. Servisdagi skaner (`input()`)
+  oynasiz servisga yetmaydi. Bog'lash: Siydik oynasi → **✏ Taxrirlash → Sample ID** (ID satri
+  bo'lmagan faylga boshiga `ID:` qo'shiladi) yoki asosiy oynada **⬆ Natijani qo'shish**.
+- `*` (patologiya) belgisi yo'q va qog'ozdagi daraja + son (`2+ 1.14 mmol/L`) portga bitta ustun
+  bo'lib keladi → `ABNORMAL` bo'sh, blankada musbat natija qalin chiqmaydi. Doimiy ishlatilsa —
+  sondan musbatni aniqlash qoidasi qo'shilishi kerak.
+- 11 parametr (MA/Ca/CR/ACR yo'q).
+
+**Diagnostika saboqlari:** "Ulanishni tekshirish" dagi `PermissionError 13` = portni servis band
+qilgan (normal). RS232 da port ochilishi qurilma ulanganini bildirmaydi. 0 bayt = kabel/transmit;
+noto'g'ri baud = tushunarsiz baytlar.
 
 ### Mindray UA-600 / UA-1600 / UA-5600
 HL7 (MLLP, TCP) — BC-20S kabi. Profil `mindray_ua_hl7`, `tcp_server`, port 5200.

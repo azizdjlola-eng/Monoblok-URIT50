@@ -33,6 +33,8 @@ import threading
 import datetime
 import subprocess
 
+import bulut_papka
+
 # ── Papka (manba yoki EXE) ────────────────────────────────────────────────
 if getattr(sys, "frozen", False):
     BASE_DIR = os.path.dirname(sys.executable)
@@ -125,94 +127,37 @@ def _save_state(state):
 # ══════════════════════════════════════════════════════════════════════════
 def get_onedrive_root():
     """OneDrive ildiz papkasi (env -> registry -> home)."""
-    root = os.environ.get("OneDrive") or os.environ.get("OneDriveConsumer")
-    if root and os.path.isdir(root):
-        return root
-    try:
-        ps = ("(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\OneDrive' "
-              "-Name UserFolder -ErrorAction SilentlyContinue).UserFolder")
-        r = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
-                           capture_output=True, text=True, timeout=10,
-                           creationflags=_NO_WIN)
-        path = (r.stdout or "").strip()
-        if path and os.path.isdir(path):
-            return path
-    except Exception:
-        pass
-    cand = os.path.join(os.path.expanduser("~"), "OneDrive")
-    return cand if os.path.isdir(cand) else ""
+    return bulut_papka.get_onedrive_root()
 
 
 def get_natijalar_root():
     """Natija PDF lari saqlanadigan ildiz papka.
-    Blanka sozlamasidagi pdf_save_dir ustun (monoblok_dastur bilan bir xil mantiq).
+    Blanka sozlamasidagi pdf_save_dir ustun, keyin tanlangan bulut
+    (OneDrive / Google Drive) — monoblok_dastur bilan bir xil mantiq (bulut_papka).
     """
-    try:
-        if os.path.exists(_BLANKA_CFG_PATH):
-            with open(_BLANKA_CFG_PATH, "r", encoding="utf-8") as f:
-                custom = (json.load(f).get("pdf_save_dir", "") or "").strip()
-            if custom:
-                return custom
-    except Exception:
-        pass
-    root = get_onedrive_root()
-    if root:
-        return os.path.join(root, "Natijalar")
-    return ""
+    return bulut_papka.get_natijalar_root()
 
 
 def is_inside_onedrive(path):
-    """Natijalar papkasi umuman OneDrive ichidami? (bo'lmasa sinxronizatsiya yo'q)"""
-    od = get_onedrive_root()
-    if not od or not path:
-        return False
-    try:
-        a = os.path.normcase(os.path.abspath(path))
-        b = os.path.normcase(os.path.abspath(od))
-        return a == b or a.startswith(b + os.sep)
-    except Exception:
-        return False
+    """Natijalar papkasi umuman tanlangan bulut ichidami? (bo'lmasa sinxronizatsiya yo'q)"""
+    return bulut_papka.is_inside_cloud(path)
+
+
+def provider_nomi():
+    return bulut_papka.provider_nomi()
 
 
 # ══════════════════════════════════════════════════════════════════════════
 #  JARAYON
 # ══════════════════════════════════════════════════════════════════════════
 def is_onedrive_running():
-    try:
-        r = subprocess.run(["tasklist", "/FI", "IMAGENAME eq OneDrive.exe", "/NH"],
-                           capture_output=True, text=True, timeout=20,
-                           creationflags=_NO_WIN)
-        return "OneDrive.exe" in (r.stdout or "")
-    except Exception as e:
-        print(f"[OneDrive] Jarayonni tekshirishda xato: {e}")
-        return True  # tekshira olmadik — yolg'on signal bermaymiz
-
-
-def _onedrive_exe():
-    for p in [
-        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "OneDrive", "OneDrive.exe"),
-        r"C:\Program Files\Microsoft OneDrive\OneDrive.exe",
-        r"C:\Program Files (x86)\Microsoft OneDrive\OneDrive.exe",
-    ]:
-        if p and os.path.isfile(p):
-            return p
-    return None
+    """Tanlangan bulut klienti (OneDrive.exe / GoogleDriveFS.exe) ishlayaptimi?"""
+    return bulut_papka.is_client_running()
 
 
 def restart_onedrive():
-    """OneDrive.exe ni qayta ishga tushirish. Qaytaradi: (True/False, xabar)"""
-    exe = _onedrive_exe()
-    if not exe:
-        return False, "OneDrive.exe topilmadi"
-    try:
-        if is_onedrive_running():
-            subprocess.run(["taskkill", "/IM", "OneDrive.exe", "/F"],
-                           capture_output=True, timeout=25, creationflags=_NO_WIN)
-            time.sleep(2)
-        subprocess.Popen([exe, "/background"], creationflags=_NO_WIN)
-        return True, "OneDrive qayta ishga tushirildi"
-    except Exception as e:
-        return False, f"Qayta ishga tushirishda xato: {e}"
+    """Tanlangan bulut klientini qayta ishga tushirish. Qaytaradi: (True/False, xabar)"""
+    return bulut_papka.restart_client()
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -376,6 +321,25 @@ def _fod_seen(natijalar_root, state):
     return False
 
 
+def _mahalliy_zaxira_root():
+    """Google Drive topilmaganda PDF tushadigan mahalliy papka (monoblok_dastur bilan bir xil)."""
+    return os.path.join(os.path.expanduser("~"), "Natijalar_PDF", "Natijalar")
+
+
+def _mahalliy_qolganlar(days=3):
+    """Mahalliy zaxira papkasida oxirgi kunlarda qolgan PDF/DOCX soni."""
+    n = 0
+    chegara = datetime.date.today() - datetime.timedelta(days=days)
+    for _d, folder in _day_folders(_mahalliy_zaxira_root(), days):
+        if _d < chegara:
+            continue
+        try:
+            n += sum(1 for f in os.listdir(folder) if f.lower().endswith((".pdf", ".docx")))
+        except Exception:
+            pass
+    return n
+
+
 # ══════════════════════════════════════════════════════════════════════════
 #  ASOSIY TEKSHIRUV
 # ══════════════════════════════════════════════════════════════════════════
@@ -392,14 +356,33 @@ def check(cfg=None, days=None):
     state = _load_state()
     now_ts = time.time()
 
+    provider = bulut_papka.get_provider()
+    nomi = bulut_papka.provider_nomi(provider)
+    exe = bulut_papka.PROVAYDERLAR[provider]["exe"]
     natijalar_root = get_natijalar_root()
     stats = {"natijalar_root": natijalar_root, "process": None, "total": 0,
              "synced": 0, "pending": 0, "oldest_min": 0.0, "folders": [],
-             "examples": []}
+             "examples": [], "provider": provider, "provider_nomi": nomi, "exe": exe}
     problems = []
     level = "ok"
 
     if not natijalar_root or not os.path.isdir(natijalar_root):
+        running = is_onedrive_running()
+        stats["process"] = running
+        if provider == bulut_papka.GDRIVE and not natijalar_root:
+            # Stream rejimida GoogleDriveFS to'xtasa disk umuman yo'qoladi —
+            # PDF lar mahalliy Natijalar_PDF ga tushadi, bulutga chiqmaydi.
+            return {"level": "crit",
+                    "problems": ["Google Drive diski topilmadi" +
+                                 ("" if running else " — GoogleDriveFS.exe ISHLAMAYAPTI") +
+                                 ".\n   PDF lar vaqtincha mahalliy papkaga saqlanmoqda:\n   " +
+                                 _mahalliy_zaxira_root()],
+                    "summary": "Google Drive ulanmagan — natija bulutga chiqmayapti",
+                    "stats": stats}
+        if not natijalar_root and running is False:
+            return {"level": "crit",
+                    "problems": [f"{exe} ISHLAMAYAPTI va {nomi} papkasi topilmadi."],
+                    "summary": f"{nomi} ishlamayapti", "stats": stats}
         return {"level": "warn",
                 "problems": ["Natijalar papkasi topilmadi: " + (natijalar_root or "(aniqlanmadi)")],
                 "summary": "Natijalar papkasi yo'q", "stats": stats}
@@ -407,22 +390,33 @@ def check(cfg=None, days=None):
     in_od = is_inside_onedrive(natijalar_root)
     stats["in_onedrive"] = in_od
     if not in_od:
-        # PDF lar OneDrive dan tashqariga saqlanmoqda — bulutga umuman chiqmaydi
+        # PDF lar bulutdan tashqariga saqlanmoqda — bulutga umuman chiqmaydi
         return {"level": "warn",
-                "problems": ["Natijalar OneDrive papkasida EMAS:\n   " + natijalar_root +
+                "problems": [f"Natijalar {nomi} papkasida EMAS:\n   " + natijalar_root +
                              "\n   Bu papka bulutga sinxronlanmaydi — SMS ham ketmaydi."],
-                "summary": "Natijalar papkasi OneDrive dan tashqarida",
+                "summary": f"Natijalar papkasi {nomi} dan tashqarida",
                 "stats": stats}
 
     # 1) Jarayon
     running = is_onedrive_running()
     stats["process"] = running
     if not running:
-        problems.append("OneDrive.exe ISHLAMAYAPTI — hech narsa bulutga chiqmaydi.")
+        problems.append(f"{exe} ISHLAMAYAPTI — hech narsa bulutga chiqmaydi.")
         level = "crit"
 
+    # Google Drive o'chiq paytida mahalliy papkaga tushib qolgan PDF lar
+    qolgan = _mahalliy_qolganlar()
+    if qolgan:
+        problems.append("{} ta PDF bulut o'chiq paytida mahalliy papkada qolgan:\n   {}"
+                        "\n   Ularni {} ga ko'chiring.".format(qolgan, _mahalliy_zaxira_root(),
+                                                             natijalar_root))
+        if level != "crit":
+            level = "warn"
+
     # 2) Papkalarni skanerlash
-    fod = _fod_seen(natijalar_root, state)
+    # Placeholder (reparse) belgisi faqat OneDrive da bor — Google Drive da
+    # fayl darajasidagi tekshiruv yo'q, faqat jarayon/disk tekshiriladi.
+    fod = _fod_seen(natijalar_root, state) if provider == bulut_papka.ONEDRIVE else False
     stats["fod"] = fod
     day_count = days or int(cfg.get("check_days", 3) or 3)
     all_pending = []
@@ -457,6 +451,9 @@ def check(cfg=None, days=None):
                 "kuzatilmoqda.".format(len(old), int(old[0][2])))
             if level != "crit":
                 level = "warn"
+    elif provider == bulut_papka.GDRIVE:
+        stats["note"] = ("Google Drive: fayl darajasidagi sinxronizatsiya belgisi yo'q — "
+                         "GoogleDriveFS jarayoni va disk ulanganligi tekshirilmoqda.")
     else:
         # Placeholder belgisi hech qachon ko'rilmagan — atribut bo'yicha hukm
         # qilib bo'lmaydi (Files On-Demand o'chiq bo'lishi mumkin).
@@ -466,11 +463,15 @@ def check(cfg=None, days=None):
     _save_state(state)
 
     if level == "ok":
-        summary = "OneDrive ishlayapti — {}/{} natija bulutda".format(stats["synced"], stats["total"])
+        if fod:
+            summary = "{} ishlayapti — {}/{} natija bulutda".format(nomi, stats["synced"], stats["total"])
+        else:
+            summary = "{} ishlayapti — {} ta natija".format(nomi, stats["total"])
     elif level == "warn":
-        summary = "OneDrive: {} natija navbatda".format(stats["pending"])
+        summary = ("{}: {} natija navbatda".format(nomi, stats["pending"]) if stats["pending"]
+                   else "{}: diqqat".format(nomi))
     else:
-        summary = "OneDrive SINXRONLAMAYAPTI — {} natija bulutga chiqmagan".format(stats["pending"])
+        summary = "{} SINXRONLAMAYAPTI — {} natija bulutga chiqmagan".format(nomi, stats["pending"])
 
     return {"level": level, "problems": problems, "summary": summary, "stats": stats}
 
@@ -485,7 +486,9 @@ def format_report(res):
     if res.get("problems"):
         lines.append("")
     lines.append("Papka: " + str(s.get("natijalar_root", "")))
-    lines.append("OneDrive.exe: " + ("ishlayapti" if s.get("process") else "ISHLAMAYAPTI"))
+    lines.append("Bulut: " + str(s.get("provider_nomi") or provider_nomi()))
+    lines.append(str(s.get("exe") or "OneDrive.exe") + ": " +
+                 ("ishlayapti" if s.get("process") else "ISHLAMAYAPTI"))
     if s.get("folders"):
         lines.append("")
         lines.append("Kunlar bo'yicha:")

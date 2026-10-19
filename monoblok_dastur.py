@@ -382,6 +382,12 @@ LOGO_DEFAULT_PATH = r"G:\DASTUR\URIT 50\logo.jpg"
 #         (QR orqali telefonda ochilsa ham to'g'ri). Kerak bo'lsa shu qiymatni False qiling.
 PDF_STRIP_FONTS = True
 
+# ── PDF elektron muhr ────────────────────────────────────────────────────────
+# Qog'oz (Word) blankaga muhr QO'LDA bosiladi; bemor botdan oladigan PDF nusxaga
+# esa "ELEKTRON NUSXA" muhri avtomatik qo'yiladi (Word fayl o'zgarmaydi).
+# Blanka Sozlamalari → 🔏 PDF elektron muhr da yoqiladi/o'chiriladi.
+PDF_MUHR_DEFAULT_PATH = r"G:\DASTUR\URIT 50\muhr\elektron_muhr.png"
+
 
 def _mijoz_belgisi() -> dict:
     """MIJOZ (sotib oluvchi klinika) buildi belgisi — build_mijoz.py EXE ichiga
@@ -426,6 +432,14 @@ def load_blanka_config() -> dict:
         # boshqacha bo'lishi mumkin, shuning uchun Blanka Sozlamalaridan sozlanadi.
         "word_save_dir": "",   # bo'sh = G:\Қилинган анализлар
         "pdf_save_dir": "",    # bo'sh = OneDrive\Natijalar
+        # PDF nusxaga elektron muhr (MIJOZ buildida o'chiq — muhr bizning klinikaniki)
+        "pdf_muhr": not bool(_mijoz),
+        "pdf_muhr_path": "" if _mijoz else PDF_MUHR_DEFAULT_PATH,
+        "pdf_muhr_size": 3.8,  # sm (diametr)
+        # "Oldingi natija" ustuni — qaysi guruhlarda (OLDINGI_NATIJA_GURUHLAR)
+        "oldingi_natija_guruhlar": ["BIO"],
+        "oldingi_natija_max_kun": 365,
+        "oldingi_natija_takroriy_bemor": True,
     }
     # EXE ichidagi nusxa — bizning klinika sozlamasi. MIJOZ da o'qilmaydi (eski
     # versiyadan _internal da qolib ketgan bo'lishi mumkin — Inno uni o'chirmaydi).
@@ -3407,6 +3421,11 @@ CBC_HEMA_OPTIONAL_ROWS = {"Neu#", "Neu%", "Mon#", "Mon%", "Eos#", "Eos%", "Bas#"
 # 3-diff natijada (5-diff kalitlar yo'q) — eski blanka ko'rinishi saqlanadi ("-" bilan ham)
 CBC_HEMA_3DIFF_ROWS = {"Mid#", "Mid%", "Gran#", "Gran%"}
 CBC_HEMA_5DIFF_KEYS = {"Neu#", "Neu%", "Mon#", "Mon%", "Eos#", "Eos%", "Bas#", "Bas%"}
+# CBC JSON kaliti (blanka kodi) → muqobil kalit / multi-ref (HL7) kaliti
+CBC_HEMA_KOD_ALIAS = {'Lymph#': 'LYM#', 'Lymph%': 'LYM%', 'Mid#': 'MID#', 'Mid%': 'MID%',
+                      'Gran#': 'GRAN#', 'Gran%': 'GRAN%',
+                      'Neu#': 'NEU#', 'Neu%': 'NEU%', 'Mon#': 'MON#', 'Mon%': 'MON%',
+                      'Eos#': 'EOS#', 'Eos%': 'EOS%', 'Bas#': 'BAS#', 'Bas%': 'BAS%'}
 
 def _parse_norma_to_min_max(norma_str):
     """Norma matnidan (masalan '4.0 – 9.0') min, max olish. 'manfiy' -> 0, 0."""
@@ -3525,22 +3544,40 @@ def create_hematology_cbc_table_in_doc(doc: Document, result_data, order_info: d
         p_meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_para_spacing(p_meta, 0, 0, line_spacing=1.0)
         _add_run_tnr(p_meta, meta, 9)
-    HEADER_COLOR = TABLE_HEADER_HEX
-    table = doc.add_table(rows=1, cols=5)
-    table.style = 'Table Grid'
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    _apply_table_widths(table, [7.0, 2.0, 3.5, 3.5, 3.0])
-    headers = ["Ko'rsatkich", "Qisqa nom", "Natija", "Norma", "Birlik"]
-    for cell, hdr in zip(table.rows[0].cells, headers):
-        _set_cell_shading(cell, HEADER_COLOR)
-        ph = cell.paragraphs[0]
-        ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        _set_para_spacing(ph, 0, 0, line_spacing=1)
-        _add_run_tnr(ph, hdr, 11, bold=True)
-    KOD_ALIAS = {'Lymph#': 'LYM#', 'Lymph%': 'LYM%', 'Mid#': 'MID#', 'Mid%': 'MID%', 'Gran#': 'GRAN#', 'Gran%': 'GRAN%',
-                 'Neu#': 'NEU#', 'Neu%': 'NEU%', 'Mon#': 'MON#', 'Mon%': 'MON%',
-                 'Eos#': 'EOS#', 'Eos%': 'EOS%', 'Bas#': 'BAS#', 'Bas%': 'BAS%'}
+    KOD_ALIAS = CBC_HEMA_KOD_ALIAS
     _has_5diff = any((vals.get(k) or vals.get(KOD_ALIAS.get(k, ''))) for k in CBC_HEMA_5DIFF_KEYS)
+
+    def _rang_strelka(val_str, lo, hi, norma):
+        """(rang, strelka): multi-ref lo/hi bo'lsa shu, aks holda norma matni bo'yicha."""
+        if not val_str or val_str == '-':
+            return None, ''
+        if lo is not None and hi is not None:
+            try:
+                fval = float(str(val_str).replace(',', '.'))
+                if fval > hi:
+                    return RGBColor(0xFF, 0x00, 0x00), ' ↑'   # qizil ↑
+                if fval < lo:
+                    return RGBColor(0x00, 0x00, 0xFF), ' ↓'   # ko'k ↓
+            except (ValueError, TypeError):
+                pass
+        # Multi-ref topilmasa (yoki natija normada), standart norma bilan rang hisoblash
+        color = _get_value_color_for_norma(val_str, norma, False)
+        arrow = ''
+        if color:
+            # Rang bor — strelka qo'shish
+            min_v, max_v = _parse_norma_to_min_max(norma)
+            if min_v is not None and max_v is not None:
+                try:
+                    fval = float(str(val_str).replace(',', '.'))
+                    if fval > max_v:
+                        arrow = ' ↑'
+                    elif fval < min_v:
+                        arrow = ' ↓'
+                except (ValueError, TypeError):
+                    pass
+        return color, arrow
+
+    qatorlar = []   # (ko'rsatkich, kod, natija_str, norma, birlik, lo, hi)
     for koorsatkich, kod, birlik, default_norma in CBC_HEMA_ROWS:
         natija = vals.get(kod) or vals.get(KOD_ALIAS.get(kod, ''))
         if natija is None:
@@ -3553,55 +3590,66 @@ def create_hematology_cbc_table_in_doc(doc: Document, result_data, order_info: d
         natija_str = str(natija).strip() if natija else '-'
 
         # Multi-ref norma: yosh va jinsga qarab norma aniqlash
+        # (get_multi_ref HL7 param_key ishlatadi — topilmasa alias: Lymph# -> LYM#)
         norma = default_norma
-        arrow = ''
-        color = None
-        # KOD_ALIAS teskari: DB nomlari -> HL7 nomlari (get_multi_ref HL7 param_key ishlatadi)
-        param_key = kod
-        # Alias teskari topish: masalan Lymph# -> LYM#
+        lo = hi = None
         alias_key = KOD_ALIAS.get(kod, '')
         if _hema_get_multi_ref and patient_age:
-            lo, hi, ref_str = _hema_get_multi_ref(param_key, patient_age, patient_gender)
+            lo, hi, ref_str = _hema_get_multi_ref(kod, patient_age, patient_gender)
             if not ref_str and alias_key:
                 lo, hi, ref_str = _hema_get_multi_ref(alias_key, patient_age, patient_gender)
             if ref_str:
                 norma = ref_str
-                # Natija rangi va strelka
-                if natija_str and natija_str != '-':
-                    try:
-                        fval = float(natija_str.replace(',', '.'))
-                        if lo is not None and hi is not None:
-                            if fval > hi:
-                                color = RGBColor(0xFF, 0x00, 0x00)  # qizil
-                                arrow = ' \u2191'  # ↑
-                            elif fval < lo:
-                                color = RGBColor(0x00, 0x00, 0xFF)  # ko'k
-                                arrow = ' \u2193'  # ↓
-                    except (ValueError, TypeError):
-                        pass
-        # Multi-ref topilmasa, standart norma bilan rang hisoblash
-        if not color and not arrow:
-            color = _get_value_color_for_norma(natija_str, norma, False)
-            if color:
-                # Rang bor — strelka qo'shish
-                min_v, max_v = _parse_norma_to_min_max(norma)
-                if min_v is not None and max_v is not None and natija_str != '-':
-                    try:
-                        fval = float(natija_str.replace(',', '.'))
-                        if fval > max_v:
-                            arrow = ' \u2191'
-                        elif fval < min_v:
-                            arrow = ' \u2193'
-                    except (ValueError, TypeError):
-                        pass
+            else:
+                lo = hi = None
+        qatorlar.append((koorsatkich, kod, natija_str, norma, birlik, lo, hi))
 
+    # Oldingi natija ustuni — sozlamada GEM yoqilgan va kamida bitta ko'rsatkich
+    # bo'yicha oldingi tashrif natijasi bo'lsa (aks holda jadval 5 ustunli qoladi)
+    _prev = None
+    if _oldingi_yoqilganmi('GEM'):
+        _prev = [_oldingi_cbc_topish(order_info, [q[1]] + ([KOD_ALIAS[q[1]]] if q[1] in KOD_ALIAS else []))
+                 for q in qatorlar]
+        if not any(_prev):
+            _prev = None
+    _prev_sana = _oldingi_umumiy_sana(_prev) if _prev else None
+
+    HEADER_COLOR = TABLE_HEADER_HEX
+    table = doc.add_table(rows=1, cols=6 if _prev else 5)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    if _prev:
+        _apply_table_widths(table, [5.9, 2.3, 2.5, 2.9, 3.2, 2.2])
+        headers = ["Ko'rsatkich", "Qisqa nom", "Natija", None, "Norma", "Birlik"]
+    else:
+        _apply_table_widths(table, [7.0, 2.0, 3.5, 3.5, 3.0])
+        headers = ["Ko'rsatkich", "Qisqa nom", "Natija", "Norma", "Birlik"]
+    for cell, hdr in zip(table.rows[0].cells, headers):
+        _set_cell_shading(cell, HEADER_COLOR)
+        if hdr is None:
+            _oldingi_sarlavha_yoz(cell, _prev_sana)
+            continue
+        ph = cell.paragraphs[0]
+        ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(ph, 0, 0, line_spacing=1)
+        _add_run_tnr(ph, hdr, 11, bold=True)
+
+    for _qi, (koorsatkich, kod, natija_str, norma, birlik, lo, hi) in enumerate(qatorlar):
+        color, arrow = _rang_strelka(natija_str, lo, hi, norma)
         # Natija display: qiymat + strelka
         display_natija = (natija_str + arrow) if natija_str and natija_str != '-' else '-'
 
         row = table.add_row()
         _keep_row_together(row)
         cells = row.cells
-        for i, txt in enumerate([koorsatkich, kod, display_natija, norma, birlik]):
+        matnlar = [koorsatkich, kod, display_natija, norma, birlik]
+        if _prev:
+            matnlar.insert(3, None)
+        for i, txt in enumerate(matnlar):
+            if txt is None:
+                _oldingi_katak_yoz(cells[i], _prev[_qi], _prev_sana,
+                                   rang_fn=lambda v, _lo=lo, _hi=hi, _n=norma: _rang_strelka(v, _lo, _hi, _n))
+                continue
             p = cells[i].paragraphs[0]
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER if i > 0 else WD_ALIGN_PARAGRAPH.LEFT
             _set_para_spacing(p, 0, 0, line_spacing=1)
@@ -4932,18 +4980,27 @@ def _create_bilirubin_section(doc, bili_tests: list, test_results: dict, order_i
         ("Bog\u2018langan Bilirubin", "bog_langan", "0,86 \u2013 5,3",  "mkmol/l"),
         ("Erkin Bilirubin",         "erkin",      "1,7 \u2013 17,1",  "mkmol/l"),
     ]
+    _bili_tid = next((t.get('tahlil_id') for t in bili_tests if t.get('tahlil_id')), 55)
+    _prev = _panel_oldingi(order_info, 'BIO', _bili_tid, [r[1] for r in BILI_ROWS])
+    _cN, _cU = (3, 4) if _prev else (2, 3)
+    _prev_sana = _oldingi_umumiy_sana(_prev) if _prev else None
     HEADER_COLOR = TABLE_HEADER_HEX
-    table = doc.add_table(rows=1, cols=4)
+    table = doc.add_table(rows=1, cols=5 if _prev else 4)
     table.style = 'Table Grid'
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    _apply_table_widths(table, [7.0, 4.0, 4.0, 4.0])
-    for cell, hdr in zip(table.rows[0].cells, ["Tahlil nomi", "Natija", "Norma", "O'lchov birligi"]):
+    _apply_table_widths(table, _oldingi_kengliklar([7.0, 4.0, 4.0, 4.0]) if _prev else [7.0, 4.0, 4.0, 4.0])
+    _hdrs = ["Tahlil nomi", "Natija", None, "Norma", "O'lchov birligi"] if _prev else \
+            ["Tahlil nomi", "Natija", "Norma", "O'lchov birligi"]
+    for cell, hdr in zip(table.rows[0].cells, _hdrs):
         _set_cell_shading(cell, HEADER_COLOR)
+        if hdr is None:
+            _oldingi_sarlavha_yoz(cell, _prev_sana)
+            continue
         ph = cell.paragraphs[0]
         ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_para_spacing(ph, 0, 0, line_spacing=1)
         _add_run_tnr(ph, hdr, 11, bold=True)
-    for row_name, key, norma, unit in BILI_ROWS:
+    for _ri, (row_name, key, norma, unit) in enumerate(BILI_ROWS):
         row = table.add_row()
         _keep_row_together(row)
         val = bili_result_data.get(key, '')
@@ -4959,11 +5016,14 @@ def _create_bilirubin_section(doc, bili_tests: list, test_results: dict, order_i
         _mn, _mx = _parse_norma_min_max(norma, jins)
         _rc, _ra = _get_result_color_and_arrow(val_str, {"min": _mn, "max": _mx}, jins)
         _add_run_tnr(p1, val_str + (_ra or ''), 11, bold=True, color_rgb=_rc)
-        p2 = cells_r[2].paragraphs[0]
+        if _prev:
+            _oldingi_katak_yoz(cells_r[2], _prev[_ri], _prev_sana,
+                               norma_info={"min": _mn, "max": _mx}, jins=jins)
+        p2 = cells_r[_cN].paragraphs[0]
         p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_para_spacing(p2, 0, 0, line_spacing=1)
         _add_multiline_norma(p2, norma, 11)
-        p3 = cells_r[3].paragraphs[0]
+        p3 = cells_r[_cU].paragraphs[0]
         p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_para_spacing(p3, 0, 0, line_spacing=1)
         _add_run_tnr(p3, unit, 11)
@@ -5113,18 +5173,29 @@ def _create_lipid_spektri_section(doc, lipid_tests: list, test_results: dict, or
     _add_run_tnr(heading, "LIPID SPEKTRI", 14, bold=True,
                  color_rgb=_group_title_rgb())
 
+    _lipid_tid = next((t.get('tahlil_id') for t in lipid_tests
+                       if _is_lipid_spektri_test(t.get('nomi', '')) and t.get('tahlil_id')), 126)
+    _prev = _panel_oldingi(order_info, 'BIO', _lipid_tid, [r[1] for r in LIPID_ROWS],
+                           azo_map=_lipid_id_to_key)
+    _cN, _cU = (3, 4) if _prev else (2, 3)
+    _prev_sana = _oldingi_umumiy_sana(_prev) if _prev else None
     HEADER_COLOR = TABLE_HEADER_HEX
-    table = doc.add_table(rows=1, cols=4)
+    table = doc.add_table(rows=1, cols=5 if _prev else 4)
     table.style = 'Table Grid'
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    _apply_table_widths(table, [7.0, 4.0, 4.0, 4.0])
-    for cell, hdr in zip(table.rows[0].cells, ["Tahlil nomi", "Natija", "Norma", "O'lchov birligi"]):
+    _apply_table_widths(table, _oldingi_kengliklar([7.0, 4.0, 4.0, 4.0]) if _prev else [7.0, 4.0, 4.0, 4.0])
+    _hdrs = ["Tahlil nomi", "Natija", None, "Norma", "O'lchov birligi"] if _prev else \
+            ["Tahlil nomi", "Natija", "Norma", "O'lchov birligi"]
+    for cell, hdr in zip(table.rows[0].cells, _hdrs):
         _set_cell_shading(cell, HEADER_COLOR)
+        if hdr is None:
+            _oldingi_sarlavha_yoz(cell, _prev_sana)
+            continue
         ph = cell.paragraphs[0]
         ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_para_spacing(ph, 0, 0, line_spacing=1)
         _add_run_tnr(ph, hdr, 11, bold=True)
-    for row_name, key, norma, unit in LIPID_ROWS:
+    for _ri, (row_name, key, norma, unit) in enumerate(LIPID_ROWS):
         row = table.add_row()
         _keep_row_together(row)
         val = lipid_data.get(key, '')
@@ -5143,11 +5214,14 @@ def _create_lipid_spektri_section(doc, lipid_tests: list, test_results: dict, or
         _mn, _mx = _parse_norma_min_max(norma, jins)
         _rc, _ra = _get_result_color_and_arrow(val_str, {"min": _mn, "max": _mx}, jins)
         _add_run_tnr(p1, val_str + (_ra or ''), 11, bold=True, color_rgb=_rc)
-        p2 = cells_r[2].paragraphs[0]
+        if _prev:
+            _oldingi_katak_yoz(cells_r[2], _prev[_ri], _prev_sana,
+                               norma_info={"min": _mn, "max": _mx}, jins=jins)
+        p2 = cells_r[_cN].paragraphs[0]
         p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_para_spacing(p2, 0, 0, line_spacing=1)
         _add_multiline_norma(p2, norma, 11)
-        p3 = cells_r[3].paragraphs[0]
+        p3 = cells_r[_cU].paragraphs[0]
         p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_para_spacing(p3, 0, 0, line_spacing=1)
         _add_run_tnr(p3, unit, 11)
@@ -5321,18 +5395,29 @@ def _create_buyrak_paneli_section(doc, buyrak_tests: list, test_results: dict, o
     _add_run_tnr(heading, "BUYRAK PANELI", 14, bold=True,
                  color_rgb=_group_title_rgb())
 
+    _buyrak_tid = next((t.get('tahlil_id') for t in buyrak_tests
+                        if _is_buyrak_paneli_test(t.get('nomi', '')) and t.get('tahlil_id')), 127)
+    _prev = _panel_oldingi(order_info, 'BIO', _buyrak_tid, [r[1] for r in BUYRAK_ROWS],
+                           azo_map=_buyrak_id_to_key)
+    _cN, _cU = (3, 4) if _prev else (2, 3)
+    _prev_sana = _oldingi_umumiy_sana(_prev) if _prev else None
     HEADER_COLOR = TABLE_HEADER_HEX
-    table = doc.add_table(rows=1, cols=4)
+    table = doc.add_table(rows=1, cols=5 if _prev else 4)
     table.style = 'Table Grid'
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    _apply_table_widths(table, [7.0, 4.0, 4.0, 4.0])
-    for cell, hdr in zip(table.rows[0].cells, ["Tahlil nomi", "Natija", "Norma", "O'lchov birligi"]):
+    _apply_table_widths(table, _oldingi_kengliklar([7.0, 4.0, 4.0, 4.0]) if _prev else [7.0, 4.0, 4.0, 4.0])
+    _hdrs = ["Tahlil nomi", "Natija", None, "Norma", "O'lchov birligi"] if _prev else \
+            ["Tahlil nomi", "Natija", "Norma", "O'lchov birligi"]
+    for cell, hdr in zip(table.rows[0].cells, _hdrs):
         _set_cell_shading(cell, HEADER_COLOR)
+        if hdr is None:
+            _oldingi_sarlavha_yoz(cell, _prev_sana)
+            continue
         ph = cell.paragraphs[0]
         ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_para_spacing(ph, 0, 0, line_spacing=1)
         _add_run_tnr(ph, hdr, 11, bold=True)
-    for row_name, key, norma, unit in BUYRAK_ROWS:
+    for _ri, (row_name, key, norma, unit) in enumerate(BUYRAK_ROWS):
         row = table.add_row()
         _keep_row_together(row)
         val = buyrak_data.get(key, '')
@@ -5377,11 +5462,19 @@ def _create_buyrak_paneli_section(doc, buyrak_tests: list, test_results: dict, o
             except Exception:
                 pass
         _add_run_tnr(p1, val_str + (_ra or ''), 11, bold=True, color_rgb=_rc)
-        p2 = cells_r[2].paragraphs[0]
+        if _prev:
+            if _ni:
+                _prev_ni = _ni
+            else:
+                _pmn, _pmx = _parse_norma_min_max(norma, jins_bp)
+                _prev_ni = {"norma": norma, "min": _pmn, "max": _pmx}
+            _oldingi_katak_yoz(cells_r[2], _prev[_ri], _prev_sana, norma_info=_prev_ni,
+                               norma_text=_ni.get('norma', '') if _ni else '', jins=jins_bp)
+        p2 = cells_r[_cN].paragraphs[0]
         p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_para_spacing(p2, 0, 0, line_spacing=1)
         _add_multiline_norma(p2, _norma_display, 11)
-        p3 = cells_r[3].paragraphs[0]
+        p3 = cells_r[_cU].paragraphs[0]
         p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_para_spacing(p3, 0, 0, line_spacing=1)
         _add_run_tnr(p3, _unit_display, 11)
@@ -5523,6 +5616,363 @@ def _create_revmoproba_qolda_section(doc, revmo_tests: list, test_results: dict,
                                 aslo_n.get('norma', 'Manfiy (-)'), aslo_n.get('unit', 'ME/ml'), jins)
     doc.add_paragraph()
 
+# ── OLDINGI NATIJA USTUNI (2026-10-17) ───────────────────────────────────────
+# Doimiy bemorlar blankasida "Natija" yonida "Oldingi natija" ustuni chiqadi —
+# vrach dinamikani (yaxshilandi/yomonlashdi) bir qarashda ko'radi.
+# Qaysi guruhlarda chiqishi Blanka Sozlamalari → 📈 Oldingi natija da tanlanadi
+# (standart: faqat Bioximiya). Oldingi natija bo'lmagan (birinchi tashrif)
+# bemorda ustun umuman qo'shilmaydi — blanka odatdagidek 4 ustunli qoladi.
+# Manba: result_items + test_results (load_tests bilan bir xil ustuvorlik),
+# FAQAT shu buyurtma sanasidan OLDINGI kunlardagi buyurtmalar (eski blankani
+# qayta yaratganda keyingi natija "oldingi" bo'lib chiqib qolmaydi).
+OLDINGI_NATIJA_GURUHLAR = [
+    ("BIO",     "Bioximiya (yakka tahlillar + Bilirubin, Lipid spektri, Buyrak paneli)"),
+    ("IFA",     "IFA (gormonlar, vitaminlar, markerlar — miqdoriy)"),
+    ("COAG",    "Koagulogramma (yakka tahlillar + to'liq koagulogramma, PT paneli)"),
+    ("GEM",     "Gematologiya (umumiy qon tahlili + EChT va boshqa yakka tahlillar)"),
+    ("URINE",   "Siydik — yakka tahlillar"),
+    ("TEST",    "Boshqa testlar"),
+    ("EXPRESS", "Ekspress testlar"),
+]
+_OLDINGI_STANDART_GURUHLAR = ["BIO"]
+
+
+def _oldingi_sozlama() -> dict:
+    try:
+        cfg = load_blanka_config()
+    except Exception:
+        cfg = {}
+    guruhlar = cfg.get('oldingi_natija_guruhlar', _OLDINGI_STANDART_GURUHLAR)
+    if not isinstance(guruhlar, list):
+        guruhlar = list(_OLDINGI_STANDART_GURUHLAR)
+    try:
+        max_kun = int(cfg.get('oldingi_natija_max_kun', 365) or 365)
+    except (TypeError, ValueError):
+        max_kun = 365
+    return {
+        'guruhlar': {str(g).upper() for g in guruhlar},
+        'max_kun': max(1, min(max_kun, 3650)),
+        'takroriy': bool(cfg.get('oldingi_natija_takroriy_bemor', True)),
+    }
+
+
+def _oldingi_bemor_idlari(cur, bemor_id, takroriy: bool) -> list:
+    """Shu bemor + (ixtiyoriy) uning TAKRORIY yozuvlari.
+    Bir odam ikki marta ro'yxatga olingan holatlar ko'p (tug'ilgan sana
+    o'rniga 01.01 qo'yilgan, telefon yozilmagan). Xavfsiz qoida: FISH bir xil
+    (nom_normalized), jinsi bir xil, tug'ilgan sana AYNAN bir xil yoki biri
+    01.01 (taxminiy) bo'lib, YILI bir xil. Boshqa odam natijasi blankaga
+    tushib qolmasligi uchun sana bo'lmagan yozuvlar qo'shilmaydi."""
+    ids = [bemor_id]
+    if not takroriy:
+        return ids
+
+    def _nom(s):
+        # bemorlar.nom_normalized to'ldirilmagan — o'zimiz: apostrof turlari, bo'shliq, registr
+        s = re.sub(r"[`'ʻʼ‘’]", "", str(s or "")).lower()
+        return " ".join(s.split())
+    try:
+        cur.execute("SELECT fish, jins, tugilgan_sana FROM bemorlar WHERE id = %s", (bemor_id,))
+        b = cur.fetchone()
+        if not b:
+            return ids
+        nom = _nom(b.get('fish'))
+        tug = b.get('tugilgan_sana')
+        if len(nom.split()) < 2 or not tug or not hasattr(tug, 'year'):
+            return ids
+        birinchi = (b.get('fish') or '').split()[0]
+        cur.execute("""SELECT id, fish, jins, tugilgan_sana FROM bemorlar
+                       WHERE fish LIKE %s AND id <> %s AND YEAR(tugilgan_sana) = %s""",
+                    (birinchi[:4] + '%', bemor_id, tug.year))
+        jins = (b.get('jins') or '').strip().lower()
+        for r in cur.fetchall():
+            if _nom(r.get('fish')) != nom:
+                continue
+            t2 = r.get('tugilgan_sana')
+            if not t2 or not hasattr(t2, 'year') or t2.year != tug.year:
+                continue
+            if (r.get('jins') or '').strip().lower() != jins:
+                continue
+            taxminiy = (t2.month, t2.day) == (1, 1) or (tug.month, tug.day) == (1, 1)
+            if t2 == tug or taxminiy:
+                ids.append(r['id'])
+    except Exception as e:
+        print(f"[OLDINGI] Takroriy bemor qidiruvida xato: {e}")
+    return ids
+
+
+def _oldingi_natijalar(order_info: dict) -> dict:
+    """Bemorning shu buyurtmadan OLDINGI natijalari (har tahlil uchun eng oxirgisi).
+    Qaytaradi: {'by_id': {tahlil_id: entry}, 'by_name': {nom_lower: entry}},
+    entry = {'raw': qiymat, 'sana': datetime, 'order_id': int}.
+    Natija order_info ichida keshlanadi (bitta blanka — bitta so'rov)."""
+    if not order_info:
+        return {'by_id': {}, 'by_name': {}}
+    kesh = order_info.get('_oldingi_natijalar')
+    if kesh is not None:
+        return kesh
+    out = {'by_id': {}, 'by_name': {}}
+    order_info['_oldingi_natijalar'] = out
+    bemor_id = order_info.get('bemor_id')
+    order_id = order_info.get('order_id')
+    sana = order_info.get('sana_vaqt')
+    if not bemor_id or not order_id or not sana:
+        return out
+    sozlama = _oldingi_sozlama()
+    cur = None
+    try:
+        conn = db_conn()
+        if not conn:
+            return out
+        cur = conn.cursor(dictionary=True)
+        bemor_ids = _oldingi_bemor_idlari(cur, bemor_id, sozlama['takroriy'])
+        ph = ','.join(['%s'] * len(bemor_ids))
+        # Faqat OLDINGI KUNLAR: shu kuni qayta ochilgan (takroriy) buyurtma
+        # "oldingi natija" hisoblanmaydi — vrachga oldingi TASHRIF kerak.
+        cur.execute(f"""
+            SELECT id, sana_vaqt FROM orders
+            WHERE bemor_id IN ({ph}) AND id <> %s
+              AND deleted_at IS NULL AND sana_vaqt IS NOT NULL
+              AND DATE(sana_vaqt) < DATE(%s)
+              AND sana_vaqt >= DATE_SUB(%s, INTERVAL %s DAY)
+            ORDER BY sana_vaqt DESC, id DESC
+            LIMIT 60
+        """, (*bemor_ids, order_id, sana, sana, sozlama['max_kun']))
+        orders = cur.fetchall()
+        if not orders:
+            return out
+        oids = [o['id'] for o in orders]
+        oph = ','.join(['%s'] * len(oids))
+
+        # order_items: test nomi → tahlil_id (test_results da faqat nom bor)
+        nom_to_tid = {}
+        cur.execute(f"""SELECT oi.order_id, oi.tahlil_id, oi.nomi, t.nomi AS t_nomi
+                        FROM order_items oi LEFT JOIN tahlillar t ON t.id = oi.tahlil_id
+                        WHERE oi.order_id IN ({oph})""", oids)
+        for r in cur.fetchall():
+            for n in (r.get('nomi'), r.get('t_nomi')):
+                if n and r.get('tahlil_id'):
+                    nom_to_tid[(r['order_id'], n.strip().lower())] = r['tahlil_id']
+
+        per_order = {oid: {} for oid in oids}   # oid -> {(tid, nom_lower): raw}
+        # 1) result_items (eski tizim) — buyurtmaning eng oxirgi results yozuvi
+        cur.execute(f"""SELECT r.order_id, ri.tahlil_id, ri.tahlil_nomi, ri.qiymat, r.id AS rid
+                        FROM result_items ri JOIN results r ON ri.result_id = r.id
+                        WHERE r.order_id IN ({oph})
+                        ORDER BY r.id ASC""", oids)
+        for r in cur.fetchall():
+            nom = (r.get('tahlil_nomi') or '').strip().lower()
+            tid = r.get('tahlil_id') or nom_to_tid.get((r['order_id'], nom))
+            if r.get('qiymat') not in (None, ''):
+                per_order[r['order_id']][(tid, nom)] = r['qiymat']
+        # 2) test_results (yangi tizim) — load_tests dagidek USTUVOR
+        cur.execute(f"""SELECT order_id, test_name, result_data FROM test_results
+                        WHERE order_id IN ({oph})
+                          AND result_data IS NOT NULL AND result_data <> '' AND result_data <> '{{}}'""",
+                    [str(o) for o in oids])
+        for r in cur.fetchall():
+            try:
+                oid = int(r['order_id'])
+            except (TypeError, ValueError):
+                continue
+            if oid not in per_order:
+                continue
+            nom = (r.get('test_name') or '').strip().lower()
+            tid = nom_to_tid.get((oid, nom))
+            per_order[oid] = {k: v for k, v in per_order[oid].items()
+                              if not (k[1] == nom or (tid and k[0] == tid))}
+            per_order[oid][(tid, nom)] = r['result_data']
+
+        for o in orders:                       # eng yangisi birinchi
+            for (tid, nom), raw in per_order[o['id']].items():
+                if _oldingi_qiymat(raw) is None and not str(raw).strip().startswith('{'):
+                    continue
+                entry = {'raw': raw, 'sana': o['sana_vaqt'], 'order_id': o['id']}
+                if tid and tid not in out['by_id']:
+                    out['by_id'][tid] = entry
+                if nom and nom not in out['by_name']:
+                    out['by_name'][nom] = entry
+    except Exception as e:
+        print(f"[OLDINGI] Oldingi natijalarni olishda xato: {e}")
+    finally:
+        try:
+            if cur:
+                cur.close()
+        except Exception:
+            pass
+    return out
+
+
+def _oldingi_qiymat(raw, kalit=None):
+    """Saqlangan qiymatdan blankaga yoziladigan qisqa matn (yoki None).
+    kalit — ko'p komponentli panel JSON i ichidagi kalit (tc, umumiy, ...)."""
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    if s.startswith('{'):
+        try:
+            d = json.loads(s)
+        except Exception:
+            return None
+        if not isinstance(d, dict):
+            return None
+        # Gemo/siydik JSON ({"type": "hematology", "result": "<namuna raqami>"}) — natija emas
+        if not kalit and d.get('type'):
+            return None
+        v = d.get(kalit) if kalit else d.get('result')
+    else:
+        if kalit:
+            return None
+        v = s
+    if v is None or isinstance(v, (dict, list)):
+        return None
+    v = str(v).strip()
+    if not v or len(v) > 20 or v.lower() in ('none', 'null', '-', '{}'):
+        return None
+    return v
+
+
+def _oldingi_topish(order_info, tahlil_id=None, nomi=None, kalit=None, azo_tahlil_id=None):
+    """Bitta qator uchun oldingi natija: {'qiymat': str, 'sana': datetime} yoki None.
+    azo_tahlil_id — panel komponenti (masalan LDL=123) yakka tahlil sifatida
+    o'lchangan bo'lsa, o'shandan olinadi."""
+    data = _oldingi_natijalar(order_info)
+    nomzodlar = []
+    if tahlil_id and tahlil_id in data['by_id']:
+        nomzodlar.append((data['by_id'][tahlil_id], kalit))
+    elif nomi and nomi.strip().lower() in data['by_name']:
+        nomzodlar.append((data['by_name'][nomi.strip().lower()], kalit))
+    if azo_tahlil_id and azo_tahlil_id in data['by_id']:
+        nomzodlar.append((data['by_id'][azo_tahlil_id], None))
+    # Bir nechta manba bo'lsa — eng yangi sanalisi
+    best = None
+    for entry, k in nomzodlar:
+        v = _oldingi_qiymat(entry['raw'], k)
+        if v is None:
+            continue
+        if best is None or (entry['sana'] and best['sana'] and entry['sana'] > best['sana']):
+            best = {'qiymat': v, 'sana': entry['sana']}
+    return best
+
+
+def _oldingi_yoqilganmi(group) -> bool:
+    return str(group or '').upper() in _oldingi_sozlama()['guruhlar']
+
+
+def _oldingi_sana_str(sana) -> str:
+    if hasattr(sana, 'strftime'):
+        return sana.strftime('%d.%m.%Y')
+    s = str(sana or '')[:10]
+    p = s.split('-')
+    return f"{p[2]}.{p[1]}.{p[0]}" if len(p) == 3 else s
+
+
+def _oldingi_umumiy_sana(prev_list):
+    """Jadvaldagi barcha oldingi natijalar bitta tashrifdan bo'lsa — o'sha sana
+    (sarlavhaga yoziladi), aks holda None (sana har katakda alohida)."""
+    sanalar = {_oldingi_sana_str(p['sana']) for p in prev_list if p}
+    return sanalar.pop() if len(sanalar) == 1 else None
+
+
+def _oldingi_sarlavha_yoz(cell, umumiy_sana):
+    ph = cell.paragraphs[0]
+    ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(ph, 0, 0, line_spacing=1)
+    _add_run_tnr(ph, "Oldingi natija", 11, bold=True)
+    if umumiy_sana:
+        # Alohida paragraf — blanka_ruscha "Oldingi natija" ni aynan topib tarjima qilsin
+        pd = cell.add_paragraph()
+        pd.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(pd, 0, 0, line_spacing=1)
+        _add_run_tnr(pd, f"({umumiy_sana})", 9, bold=False)
+
+
+def _oldingi_katak_yoz(cell, prev, umumiy_sana, norma_info=None, norma_text='', jins='',
+                       komponent=None, rang_fn=None):
+    """Oldingi natija katagi: qiymat (norma bo'yicha yaxlitlangan, ↑/↓ va rang
+    joriy natija bilan bir xil qoidada), qalin EMAS — joriy natijadan ajralib
+    tursin. Sana sarlavhada bo'lmasa katak ichida kichik kulrang qatorda.
+    rang_fn(qiymat) -> (rang, strelka) — o'z rang qoidasi bor jadvallar (CBC)."""
+    p = cell.paragraphs[0]
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(p, 0, 0, line_spacing=1)
+    if not prev:
+        return
+    val = prev['qiymat']
+    if norma_text and str(norma_text).strip() not in ('', '-'):
+        val = _round_result_to_norma(val, norma_text)
+    val = _quyi_chegara_matn(komponent, val)
+    color, arrow = (None, '')
+    try:
+        if rang_fn:
+            color, arrow = rang_fn(val)
+        elif norma_info:
+            color, arrow = _get_result_color_and_arrow(val, norma_info, jins)
+    except Exception:
+        color, arrow = (None, '')
+    _add_run_tnr(p, f"{val}{arrow or ''}", 11, bold=False, color_rgb=color)
+    if not umumiy_sana:
+        p.add_run().add_break(WD_BREAK.LINE)
+        _add_run_tnr(p, _oldingi_sana_str(prev['sana']), 8, bold=False,
+                     color_rgb=RGBColor(0x66, 0x66, 0x66))
+
+
+def _oldingi_kengliklar(widths4):
+    """4 ustunli kengliklardan 5 ustunli (Oldingi natija = 3-ustun) — jami eni o'zgarmaydi."""
+    nom, natija, norma, birlik = widths4
+    if norma >= 5.5:                      # IFA: keng norma ustuni
+        return [nom - 1.2, natija - 0.2, 3.0, norma - 1.2, birlik - 0.4]
+    return [nom - 1.2, natija - 0.8, 3.2, norma - 0.4, birlik - 0.8]
+
+
+def _oldingi_cbc_topish(order_info, kodlar):
+    """Umumiy qon tahlili ko'rsatkichi (WBC, Lymph#...) uchun oldingi natija.
+    Manbalar: alohida qatorlar (result_items.tahlil_nomi / test_results.test_name =
+    kod) va CBC JSON ({"type": "hematology_cbc", "WBC": ...}) — eng yangisi."""
+    data = _oldingi_natijalar(order_info)
+    nomzodlar = []
+    for kod in kodlar:
+        p = _oldingi_topish(order_info, nomi=kod)
+        if p:
+            nomzodlar.append(p)
+    for entry in list(data['by_id'].values()) + list(data['by_name'].values()):
+        if '"hematology_cbc"' not in str(entry['raw']):
+            continue
+        for kod in kodlar:
+            v = _oldingi_qiymat(entry['raw'], kod)
+            if v is not None:
+                nomzodlar.append({'qiymat': v, 'sana': entry['sana']})
+                break
+    best = None
+    for p in nomzodlar:
+        if best is None or (p['sana'] and best['sana'] and p['sana'] > best['sana']):
+            best = p
+    return best
+
+
+def _panel_oldingi(order_info, group, panel_tahlil_id, rows, azo_map=None):
+    """Panel (Bilirubin/Lipid/Buyrak) qatorlari uchun oldingi natijalar ro'yxati
+    (rows tartibida) yoki None — guruh o'chiq bo'lsa yoki birorta ham topilmasa."""
+    if not _oldingi_yoqilganmi(group):
+        return None
+    azo_by_key = {v: k for k, v in (azo_map or {}).items()}
+    prev = [_oldingi_topish(order_info, tahlil_id=panel_tahlil_id, kalit=key,
+                            azo_tahlil_id=azo_by_key.get(key))
+            for key in rows]
+    return prev if any(prev) else None
+
+
+# Koagulogramma JSON kalitlari va JSON qatorga yoyiladigan COAG sub-testlar nomi
+_KOAG_KALITLAR = ('pt_sek', 'pt_kviku', 'pt_mno', 'tt', 'achtv', 'fibrinogen')
+_COAG_SUB_DETECT = [
+    'pt sekundalarda', "pt bo'yicha", 'mno / inr', 'mno/inr',
+    'tromboplastin', 'achtv', 'fibrinogen',
+    'protrombin', 'prothrombin', 'pt/mno', 'pti',
+]
+
+
 def create_results_table(doc: Document, tests: list, group: str, order_info: dict, test_results: dict = None):
     # Ginekologik va qon guruhi testlarni ajratish
     blood_tests   = [t for t in tests if is_categorical_test(t.get('nomi', ''))]
@@ -5543,24 +5993,64 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
     except:
         yosh_int = 0
 
-    # ── ODDIY 4 USTUNLI JADVAL ──────────────────────────────────────
+    # ── ODDIY 4 USTUNLI JADVAL (oldingi natija bo'lsa — 5 ustun) ─────
     if regular_tests:
-        table = doc.add_table(rows=1, cols=4)
+        # Oldingi natija ustuni: sozlamada shu guruh yoqilgan VA kamida bitta
+        # tahlilning oldingi natijasi bo'lsa (birinchi tashrifda ustun yo'q)
+        _prev = None
+        if _oldingi_yoqilganmi(group):
+            _prev = [_oldingi_topish(order_info, tahlil_id=t.get('tahlil_id'), nomi=t.get('nomi'))
+                     for t in regular_tests]
+        # Koagulogramma JSON qatorlari (PT sek, Kviku, INR, TT, ACHTV, Fibrinogen) —
+        # oldingi JSON dan kalit bo'yicha, sozlamada COAG yoqilgan bo'lsa
+        _prev_koag = {}                              # test indeksi -> {kalit: oldingi}
+        if _oldingi_yoqilganmi('COAG'):
+            for _ti, t in enumerate(regular_tests):
+                _tn = t.get('nomi', '').lower()
+                if not (('koagulogramma' in _tn and ("to'liq" in _tn or 'toliq' in _tn))
+                        or any(k in _tn for k in _COAG_SUB_DETECT)):
+                    continue
+                _rv = test_results.get(t.get('id')) if test_results else None
+                if not (isinstance(_rv, str) and _rv.strip().startswith('{')):
+                    continue
+                _kp = {k: _oldingi_topish(order_info, tahlil_id=t.get('tahlil_id'),
+                                          nomi=t.get('nomi'), kalit=k)
+                       for k in _KOAG_KALITLAR}
+                _kp = {k: v for k, v in _kp.items() if v}
+                if _kp:
+                    _prev_koag[_ti] = _kp
+        if (_prev and any(_prev)) or _prev_koag:
+            _prev = _prev or [None] * len(regular_tests)
+        else:
+            _prev = None
+        _ncol = 5 if _prev else 4
+        _cN, _cU = (3, 4) if _prev else (2, 3)      # Norma / O'lchov birligi ustunlari
+        _prev_sana = _oldingi_umumiy_sana(
+            list(_prev) + [v for d in _prev_koag.values() for v in d.values()]) if _prev else None
+
+        table = doc.add_table(rows=1, cols=_ncol)
         table.style = 'Table Grid'
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
 
         HEADER_COLOR = TABLE_HEADER_HEX
         headers = ["Tahlil nomi", "Natija", "Norma", "O'lchov birligi"]
+        if _prev:
+            headers.insert(2, None)                 # "Oldingi natija" — alohida yoziladi
         for cell, hdr in zip(table.rows[0].cells, headers):
             _set_cell_shading(cell, HEADER_COLOR)
+            if hdr is None:
+                _oldingi_sarlavha_yoz(cell, _prev_sana)
+                continue
             ph = cell.paragraphs[0]
             ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
             _set_para_spacing(ph, 0, 0, line_spacing=1)
             _add_run_tnr(ph, hdr, 11, bold=True)
         widths = [7.0, 3.0, 6.0, 3.0] if group == "IFA" else [7.0, 4.0, 4.0, 4.0]
+        if _prev:
+            widths = _oldingi_kengliklar(widths)
         _apply_table_widths(table, widths)
 
-        for test in regular_tests:
+        for _ti, test in enumerate(regular_tests):
             test_id   = test.get('id')
             test_name = test.get('nomi', 'N/A')
             test_name_lower = test_name.lower()
@@ -5579,7 +6069,7 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
                             # Header qator
                             hrow = table.add_row()
                             _keep_row_together(hrow)
-                            hmerged = hrow.cells[0].merge(hrow.cells[3])
+                            hmerged = hrow.cells[0].merge(hrow.cells[_ncol - 1])
                             _set_cell_shading(hmerged, TABLE_HEADER_HEX)
                             hph = hmerged.paragraphs[0]
                             hph.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -5587,19 +6077,22 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
                             _add_run_tnr(hph, test_name, 11, bold=True)
                             # Sub-qatorlar
                             _koag_rows = [
-                                ("PT sekundalarda",          kd.get('pt_sek'),     "13 – 15",     "sek"),
-                                ("PT bo'yicha Kviku (%)",    kd.get('pt_kviku'),   "70,0 – 100,0", "%"),
-                                ("MNO / INR",               kd.get('pt_mno'),     "0,90 – 1,15",  "INR"),
-                                ("Trombin vaqti (TT)", kd.get('tt'),         "11 – 18",     "sek"),
-                                ("ACHTV",                    kd.get('achtv'),      "25 – 40",     "sek"),
-                                ("Fibrinogen",               kd.get('fibrinogen'), "2,0 – 4,0",   "g/l"),
+                                ("PT sekundalarda",          'pt_sek',     "13 – 15",     "sek"),
+                                ("PT bo'yicha Kviku (%)",    'pt_kviku',   "70,0 – 100,0", "%"),
+                                ("MNO / INR",               'pt_mno',     "0,90 – 1,15",  "INR"),
+                                ("Trombin vaqti (TT)", 'tt',         "11 – 18",     "sek"),
+                                ("ACHTV",                    'achtv',      "25 – 40",     "sek"),
+                                ("Fibrinogen",               'fibrinogen', "2,0 – 4,0",   "g/l"),
                             ]
-                            for sub_n, sub_v, sub_nr, sub_u in _koag_rows:
+                            for sub_n, sub_k, sub_nr, sub_u in _koag_rows:
+                                sub_v = kd.get(sub_k)
                                 if sub_v is None:
                                     continue
                                 kr = table.add_row()
                                 _keep_row_together(kr)
                                 kc = kr.cells
+                                if _prev:
+                                    _oldingi_katak_yoz(kc[2], _prev_koag.get(_ti, {}).get(sub_k), _prev_sana)
                                 kp0 = kc[0].paragraphs[0]
                                 kp0.alignment = WD_ALIGN_PARAGRAPH.LEFT
                                 _set_para_spacing(kp0, 0, 0, line_spacing=1)
@@ -5608,11 +6101,11 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
                                 kp1.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                 _set_para_spacing(kp1, 0, 0, line_spacing=1)
                                 _add_run_tnr(kp1, str(sub_v), 11, bold=True)
-                                kp2 = kc[2].paragraphs[0]
+                                kp2 = kc[_cN].paragraphs[0]
                                 kp2.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                 _set_para_spacing(kp2, 0, 0, line_spacing=1)
                                 _add_multiline_norma(kp2, sub_nr, 11)
-                                kp3 = kc[3].paragraphs[0]
+                                kp3 = kc[_cU].paragraphs[0]
                                 kp3.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                 _set_para_spacing(kp3, 0, 0, line_spacing=1)
                                 _add_run_tnr(kp3, sub_u, 11)
@@ -5623,7 +6116,7 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
                     # Header qator (natija yo'q)
                     row = table.add_row()
                     _keep_row_together(row)
-                    merged = row.cells[0].merge(row.cells[3])
+                    merged = row.cells[0].merge(row.cells[_ncol - 1])
                     _set_cell_shading(merged, TABLE_HEADER_HEX)
                     ph = merged.paragraphs[0]
                     ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -5632,6 +6125,7 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
                 continue
 
             # COAG JSON kengaytirish: protrombin va individual sub-testlar uchun
+            # (_COAG_SUB_DETECT / _KOAG_KALITLAR — modul darajasida, oldingi natija uchun ham)
             _KOAG_ROWS_DEF = [
                 ("PT sekundalarda",          'pt_sek',     "13 \u2013 15",     "sek"),
                 ("PT bo\u2019yicha Kviku (%)", 'pt_kviku', "70,0 \u2013 100,0", "%"),
@@ -5640,32 +6134,29 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
                 ("ACHTV",                    'achtv',      "25 \u2013 40",     "sek"),
                 ("Fibrinogen",               'fibrinogen', "2,0 \u2013 4,0",   "g/l"),
             ]
-            _COAG_SUB_DETECT = [
-                'pt sekundalarda', "pt bo'yicha", 'mno / inr', 'mno/inr',
-                'tromboplastin', 'achtv', 'fibrinogen',
-                'protrombin', 'prothrombin', 'pt/mno', 'pti',
-            ]
             pt_expanded = False
             if any(k in test_name_lower for k in _COAG_SUB_DETECT):
                 if raw_val and isinstance(raw_val, str) and raw_val.strip().startswith('{'):
                     try:
                         rd = json.loads(raw_val)
                         if isinstance(rd, dict):
-                            _sub_rows = [(n, rd.get(k), nr, u) for n, k, nr, u in _KOAG_ROWS_DEF if rd.get(k) is not None]
+                            _sub_rows = [(n, rd.get(k), nr, u, k) for n, k, nr, u in _KOAG_ROWS_DEF if rd.get(k) is not None]
                             if _sub_rows:
                                 # Header qator
                                 _hr = table.add_row()
                                 _keep_row_together(_hr)
-                                _hm = _hr.cells[0].merge(_hr.cells[3])
+                                _hm = _hr.cells[0].merge(_hr.cells[_ncol - 1])
                                 _set_cell_shading(_hm, TABLE_HEADER_HEX)
                                 _hph = _hm.paragraphs[0]
                                 _hph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                 _set_para_spacing(_hph, 0, 0, line_spacing=1)
                                 _add_run_tnr(_hph, test_name, 11, bold=True)
-                                for _sn, _sv, _snr, _su in _sub_rows:
+                                for _sn, _sv, _snr, _su, _sk in _sub_rows:
                                     _kr = table.add_row()
                                     _keep_row_together(_kr)
                                     _kc = _kr.cells
+                                    if _prev:
+                                        _oldingi_katak_yoz(_kc[2], _prev_koag.get(_ti, {}).get(_sk), _prev_sana)
                                     _kp0 = _kc[0].paragraphs[0]
                                     _kp0.alignment = WD_ALIGN_PARAGRAPH.LEFT
                                     _set_para_spacing(_kp0, 0, 0, line_spacing=1)
@@ -5674,11 +6165,11 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
                                     _kp1.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                     _set_para_spacing(_kp1, 0, 0, line_spacing=1)
                                     _add_run_tnr(_kp1, str(_sv), 11, bold=True)
-                                    _kp2 = _kc[2].paragraphs[0]
+                                    _kp2 = _kc[_cN].paragraphs[0]
                                     _kp2.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                     _set_para_spacing(_kp2, 0, 0, line_spacing=1)
                                     _add_multiline_norma(_kp2, _snr, 11)
-                                    _kp3 = _kc[3].paragraphs[0]
+                                    _kp3 = _kc[_cU].paragraphs[0]
                                     _kp3.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                     _set_para_spacing(_kp3, 0, 0, line_spacing=1)
                                     _add_run_tnr(_kp3, _su, 11)
@@ -5771,9 +6262,17 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
             _set_para_spacing(p1, 0, 0, line_spacing=1)
             _add_run_tnr(p1, display_result, 11, bold=True, color_rgb=result_color)
 
+            # Oldingi natija (sifat IFA da ↑/↓ yo'q — joriy natija kabi)
+            if _prev:
+                _oldingi_katak_yoz(
+                    cells[2], _prev[_ti], _prev_sana,
+                    norma_info=None if _ifa_sifat else norma_info,
+                    norma_text=norma_text_for_color or analyzer_ref or '', jins=jins,
+                    komponent=_revmo_komponent(test_name, test.get('tahlil_id')))
+
             # Norma — ko'p qatorli, bemorga mos kelgan qator qalin
             norma_text = norma_info.get('norma', '-')
-            p2 = cells[2].paragraphs[0]
+            p2 = cells[_cN].paragraphs[0]
             p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
             _set_para_spacing(p2, 0, 0, line_spacing=1)
             _add_multiline_norma(p2, norma_text, 11, bold_hints=bold_hints, patient_jins=jins,
@@ -5781,7 +6280,7 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
 
             # O'lchov birligi
             unit_text = norma_info.get('unit', '')
-            p3 = cells[3].paragraphs[0]
+            p3 = cells[_cU].paragraphs[0]
             p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
             _set_para_spacing(p3, 0, 0, line_spacing=1)
             _add_run_tnr(p3, unit_text, 11)
@@ -6595,11 +7094,25 @@ def _get_onedrive_natijalar(date_str=None):
     # 0-usul: Blanka Sozlamalarida qo'lda ko'rsatilgan PDF papkasi (eng ustun).
     # Ko'rsatilgan bo'lsa — o'sha papka ostida DD.MM.YYYY yaratiladi.
     try:
-        _custom_pdf = (load_blanka_config().get('pdf_save_dir', '') or '').strip()
+        _bcfg = load_blanka_config()
     except Exception:
-        _custom_pdf = ''
+        _bcfg = {}
+    _custom_pdf = (_bcfg.get('pdf_save_dir', '') or '').strip()
     if _custom_pdf:
         return os.path.join(_custom_pdf, date_str)
+    # Tanlangan bulut (OneDrive / Google Drive) — bulut_papka.py
+    try:
+        import bulut_papka
+        _root = bulut_papka.get_natijalar_root(_bcfg)
+        if _root:
+            return os.path.join(_root, date_str)
+        if bulut_papka.get_provider(_bcfg) == bulut_papka.GDRIVE:
+            # Google Drive diski ulanmagan (GoogleDriveFS to'xtagan) — PDF
+            # yo'qolmasin, mahalliy papkaga tushadi; nazorat signal beradi.
+            print("[PDF] Google Drive topilmadi — PDF mahalliy papkaga saqlanadi")
+            return os.path.join(os.path.expanduser('~'), 'Natijalar_PDF', 'Natijalar', date_str)
+    except Exception as e:
+        print(f"[PDF] Bulut papkasini aniqlashda xato: {e}")
     # 1-usul: OneDrive muhit o'zgaruvchisi (eng ishonchli)
     onedrive_root = os.environ.get('OneDrive') or os.environ.get('OneDriveConsumer')
     # 2-usul: home papkadan topish
@@ -6612,6 +7125,122 @@ def _get_onedrive_natijalar(date_str=None):
     if not onedrive_root:
         onedrive_root = os.path.join(os.path.expanduser('~'), 'Natijalar_PDF')
     return os.path.join(onedrive_root, 'Natijalar', date_str)
+
+def _muhr_joyini_top(page, anchor, size):
+    """Muhr uchun joy: «Laborant vrach:» bilan familiya ORASIDA, imzo qatorini
+    kesib o'tadi, lekin HECH QANDAY yozuvni (tepadagi jadval normalari, sahifa
+    raqami, «Sana/Vaqt») va rasmni (gistogramma) yopmaydi. Jadval chiziqlari
+    ustidan o'tishi mumkin — qog'ozdagi muhr kabi.
+    Joy yetmasa muhr 2.6 sm gacha kichrayadi. Qaytaradi: (cx, cy, size) pt."""
+    import fitz  # pymupdf
+    pr = page.rect
+    words = [w for w in page.get_text("words") if w[4].strip()]
+    mid = (anchor.y0 + anchor.y1) / 2
+    # Imzo qatoridagi so'zlar: chap = «Laborant vrach:», o'ng = familiya
+    row = [w for w in words if w[1] <= mid <= w[3]]
+    gx0 = max([w[2] for w in row if w[0] <= anchor.x1 + 15] or [anchor.x1])
+    gx1 = min([w[0] for w in row if w[0] > gx0 + 5] or [pr.x1 - 30])
+    obst = [fitz.Rect(w[:4]) + (-1.5, -1.5, 1.5, 1.5) for w in words]
+    try:
+        obst += [fitz.Rect(i["bbox"]) for i in page.get_image_info()
+                 if i.get("width", 9) * i.get("height", 9) > 4]  # 1×1 bo'sh rasm emas
+    except Exception:
+        pass
+    r_max = size / 2
+    obst = [o for o in obst if o.y1 > mid - 2.2 * r_max and o.y0 < mid + 2.2 * r_max]
+
+    def _bo_sh(cx, cy, r):
+        if cx - r < pr.x0 + 8 or cx + r > pr.x1 - 8 or cy - r < pr.y0 + 8 or cy + r > pr.y1 - 8:
+            return False
+        rr = (r * 0.98) ** 2  # muhrning tashqi halqasi
+        for o in obst:
+            dx = max(o.x0 - cx, 0, cx - o.x1)
+            dy = max(o.y0 - cy, 0, cy - o.y1)
+            if dx * dx + dy * dy < rr:
+                return False
+        return True
+
+    ideal_x = (gx0 + gx1) / 2
+    s_min = min(size, 2.6 / 2.54 * 72)
+    s = size
+    while s >= s_min - 0.01:
+        r = s / 2
+        ideal_y = mid + 0.2 * r  # qog'ozdagidek — qatordan biroz pastroq
+        cands = []
+        x = gx0 - r
+        while x <= gx1 + r:
+            y = mid - 0.55 * r  # imzo qatori har doim muhr ichida qoladi
+            while y <= mid + 0.75 * r:
+                cands.append(((x - ideal_x) ** 2 + 2 * (y - ideal_y) ** 2, x, y))
+                y += 2
+            x += 3
+        for _d, x, y in sorted(cands):
+            if _bo_sh(x, y, r):
+                return x, y, s
+        s -= 0.1 / 2.54 * 72
+    # Hech qayerga sig'madi — eng kichik o'lchamda oraliq o'rtasiga
+    return ideal_x, mid + 0.2 * s_min / 2, s_min
+
+
+def _pdf_elektron_muhr_qoy(pdf_path):
+    """PDF nusxaga elektron muhr qo'yadi — «Laborant vrach:» qatori ustiga,
+    qog'ozda qo'lda bosiladigan joyga. Word fayl o'zgarmaydi.
+    Blanka Sozlamalarida o'chiq bo'lsa yoki muhr fayli topilmasa — hech narsa
+    qilmaydi. Xatolik PDF yaratishni to'xtatmaydi. True = muhr qo'yildi."""
+    try:
+        cfg = load_blanka_config()
+        if not cfg.get('pdf_muhr', False):
+            return False
+        muhr = (cfg.get('pdf_muhr_path') or '').strip()
+        if not muhr or not os.path.exists(muhr):
+            print(f"[PDF] Elektron muhr fayli topilmadi: {muhr or '(bo`sh)'}")
+            return False
+        try:
+            size_cm = float(str(cfg.get('pdf_muhr_size', 3.8)).replace(',', '.'))
+        except Exception:
+            size_cm = 3.8
+        size = max(2.0, min(size_cm, 6.0)) / 2.54 * 72  # sm → pt
+
+        import fitz  # pymupdf
+        doc = fitz.open(pdf_path)
+        page, anchor = None, None
+        # Imzo qatori oxirgi sahifada bo'ladi — oxiridan qidiramiz
+        for _pno in range(len(doc) - 1, -1, -1):
+            _hits = doc[_pno].search_for("Laborant vrach")
+            if _hits:
+                page, anchor = doc[_pno], _hits[-1]
+                break
+        if page is None:
+            page = doc[-1]
+        pr = page.rect
+        if anchor is not None:
+            cx, cy, size = _muhr_joyini_top(page, anchor, size)
+        else:
+            # Imzo qatori topilmadi — oxirgi sahifa pastki o'ng burchagi
+            cx = pr.x1 - size * 0.9
+            cy = pr.y1 - size * 1.1
+            cx = max(pr.x0 + size / 2 + 10, min(cx, pr.x1 - size / 2 - 10))
+            cy = max(pr.y0 + size / 2 + 10, min(cy, pr.y1 - size / 2 - 28))
+        rect = fitz.Rect(cx - size / 2, cy - size / 2, cx + size / 2, cy + size / 2)
+        page.insert_image(rect, filename=muhr, overlay=True, keep_proportion=True)
+        _pno = page.number + 1
+        _tmp = pdf_path + ".muhr.tmp"
+        doc.save(_tmp, garbage=3, deflate=True)
+        doc.close()
+        os.replace(_tmp, pdf_path)
+        print(f"[PDF] Elektron muhr qo'yildi (sahifa {_pno})")
+        return True
+    except ImportError:
+        print("[PDF] pymupdf o'rnatilmagan — elektron muhr qo'yilmadi")
+    except Exception as e:
+        print(f"[PDF] Elektron muhr qo'yilmadi: {e}")
+        try:
+            if os.path.exists(pdf_path + ".muhr.tmp"):
+                os.remove(pdf_path + ".muhr.tmp")
+        except Exception:
+            pass
+    return False
+
 
 def save_pdf_to_onedrive(docx_path, date_str=None):
     """DOCX faylni ixcham PDF ga aylantirib OneDrive\\Natijalar\\DD.MM.YYYY papkaga saqlaydi.
@@ -6695,6 +7324,9 @@ def save_pdf_to_onedrive(docx_path, date_str=None):
             except Exception as e:
                 print(f"[PDF] docx2pdf xato: {e}")
         if os.path.exists(pdf_path):
+            # Elektron muhr — siqishdan OLDIN (keyingi bosqichlar "kichraygandagina
+            # almashtiradi" — muhr qo'shilgan faylni asos qilib olishlari kerak)
+            _pdf_elektron_muhr_qoy(pdf_path)
             _sz_before = os.path.getsize(pdf_path) / 1024
             print(f"[PDF] Dastlabki hajm: {_sz_before:.0f} KB")
 
@@ -6877,6 +7509,43 @@ def save_pdf_to_onedrive(docx_path, date_str=None):
             pass
 
 # [16] create_blanks_for_order() - PUBLIC entry point
+BLANKA_ZAXIRA_PAPKA = "_eski blankalar (zaxira)"
+BLANKA_ZAXIRA_KUN = 30
+
+
+def _blanka_zaxiralash(full_path):
+    r"""Mavjud blankani USTIGA YOZISHDAN OLDIN eski nusxasini saqlab qo'yadi.
+
+    19.10.2026: «Blanka mavjud — Yangilaymi?» so'rovi olib tashlandi (har
+    blankada Да bosish vaqt olardi) — endi so'ramasdan yangilanadi. Eski fayl
+    Word'da qo'lda tahrirlangan bo'lishi mumkin, shuning uchun u yo'qolmasin:
+    <Word papka>\_eski blankalar (zaxira)\DD.MM.YYYY\<nom> (HH-MM-SS).docx
+    Zaxira sana papkalari ichida emas — OneDrive/PDF/tugallik skanerlari
+    ularni ko'rmaydi. 30 kundan eski zaxiralar o'chiriladi.
+    Xato bo'lsa jim o'tadi: zaxira tufayli blanka yaratish to'xtamasin.
+    """
+    try:
+        import shutil
+        kun_papka = os.path.dirname(full_path)
+        zaxira_asos = os.path.join(os.path.dirname(kun_papka), BLANKA_ZAXIRA_PAPKA)
+        zaxira_dir = os.path.join(zaxira_asos, os.path.basename(kun_papka))
+        os.makedirs(zaxira_dir, exist_ok=True)
+        nom, ext = os.path.splitext(os.path.basename(full_path))
+        zaxira = os.path.join(zaxira_dir, f"{nom} ({datetime.now().strftime('%H-%M-%S')}){ext}")
+        shutil.copy2(full_path, zaxira)
+        print(f"[ZAXIRA] Eski blanka saqlandi: {zaxira}")
+        chegara = time.time() - BLANKA_ZAXIRA_KUN * 86400
+        for p in os.listdir(zaxira_asos):
+            pp = os.path.join(zaxira_asos, p)
+            try:
+                if os.path.isdir(pp) and os.path.getmtime(pp) < chegara:
+                    shutil.rmtree(pp, ignore_errors=True)
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"[OGOHLANTIRISH] Blanka zaxirasi saqlanmadi: {e}")
+
+
 def create_blanks_for_order(order_id: int, test_results: dict = None, file_exists_callback=None):
     order_info = get_order_info(order_id)
     if not order_info:
@@ -6990,6 +7659,7 @@ def create_blanks_for_order(order_id: int, test_results: dict = None, file_exist
                 response = file_exists_callback(full_path)
                 if not response:
                     return [full_path]
+            _blanka_zaxiralash(full_path)
         _blanka_ruscha_qoshish(unified_doc)
         unified_doc.save(full_path)
         if os.path.exists(full_path):
@@ -9745,6 +10415,48 @@ def filial_mijozi_tekshir(order_id):
         return False, ""
 
 
+def koag_kviku_model(points):
+    """PT kalibrlash nuqtalaridan Kviku egri chizig'i (analizator usuli).
+
+    points: [[kviku_%, sek], ...] — analizatordagi "Setup PT" jadvali
+    (masalan BioSystems COAX: 100%=13.0s, 50%=18.5s, 33%=24.1s, 25%=29.5s).
+    Model: 1/PT = c + d * Kviku%  (chiziqli regressiya; COAX ekranidagi R²
+    aynan shu modelniki — 0.979). Bo'sh (0) qatorlar tashlanadi.
+
+    Qaytaradi: (sek_dan_kviku, kviku_dan_sek, r2) yoki None (nuqtalar yetarli emas).
+    """
+    pts = []
+    for p in points or []:
+        try:
+            q, s = float(p[0]), float(p[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if q > 0 and s > 0:
+            pts.append((q, 1.0 / s))
+    if len(pts) < 2:
+        return None
+    n = len(pts)
+    mx = sum(q for q, _ in pts) / n
+    my = sum(y for _, y in pts) / n
+    sxx = sum((q - mx) ** 2 for q, _ in pts)
+    syy = sum((y - my) ** 2 for _, y in pts)
+    sxy = sum((q - mx) * (y - my) for q, y in pts)
+    if sxx == 0 or syy == 0 or sxy <= 0:   # % oshsa vaqt kamayishi (1/PT oshishi) shart
+        return None
+    d = sxy / sxx
+    c = my - d * mx
+    r2 = sxy * sxy / (sxx * syy)
+
+    def sek_dan_kviku(sek):
+        return (1.0 / sek - c) / d if sek > 0 else None
+
+    def kviku_dan_sek(q):
+        y = c + d * q
+        return 1.0 / y if y > 0 else None
+
+    return sek_dan_kviku, kviku_dan_sek, r2
+
+
 class MonoblokApp:
     def __init__(self, root):
         self.root = root
@@ -10841,6 +11553,18 @@ class MonoblokApp:
             print(f"[XATO] OneDrive nazoratini yoqishda xato: {e}")
             return False
 
+    def _bulut_nomi(self):
+        """Blanka Sozlamalarida tanlangan bulut: 'OneDrive' / 'Google Drive'."""
+        try:
+            import bulut_papka
+            return bulut_papka.provider_nomi()
+        except Exception:
+            return "OneDrive"
+
+    def _bulut_qisqa_nomi(self):
+        """Toolbar tugmasi uchun qisqa nom (tugma eni 14 belgi)."""
+        return "GDrive" if self._bulut_nomi() == "Google Drive" else "OneDrive"
+
     def _onedrive_status_update(self, res):
         """Har tekshiruvdan keyin tugma rangi/matnini yangilash (UI oqimi)."""
         try:
@@ -10849,14 +11573,15 @@ class MonoblokApp:
             if not btn:
                 return
             level = res.get("level", "ok")
+            nom = self._bulut_qisqa_nomi()
             if level == "ok":
-                btn.config(text="☁ OneDrive ✓", bg="#DFF5DF", activebackground="#DFF5DF",
+                btn.config(text=f"☁ {nom} ✓", bg="#DFF5DF", activebackground="#DFF5DF",
                            fg="#005500")
             elif level == "warn":
-                btn.config(text="☁ OneDrive !", bg="#FFF3CD", activebackground="#FFF3CD",
+                btn.config(text=f"☁ {nom} !", bg="#FFF3CD", activebackground="#FFF3CD",
                            fg="#8A6D00")
             else:
-                btn.config(text="☁ OneDrive ✗", bg="#F8B4B4", activebackground="#F8B4B4",
+                btn.config(text=f"☁ {nom} ✗", bg="#F8B4B4", activebackground="#F8B4B4",
                            fg="#8B0000")
         except Exception as e:
             print(f"[OneDrive] Holat tugmasini yangilashda xato: {e}")
@@ -10875,18 +11600,19 @@ class MonoblokApp:
                         winsound.MessageBeep(-1)
                     except Exception:
                         pass
-            self.status_var.set("[OGOHLANTIRISH] " + res.get("summary", "OneDrive muammosi"))
+            nom = self._bulut_nomi()
+            self.status_var.set("[OGOHLANTIRISH] " + res.get("summary", f"{nom} muammosi"))
             if not cfg.get("popup", True):
                 return
 
             body = (onedrive_monitor.format_report(res) + "\n\n"
                     "Natijalar bulutga chiqmasa, nargi kompyuter ularni ko'rmaydi\n"
                     "va bemorga SMS ketmaydi.\n\n"
-                    "OneDrive ni hozir qayta ishga tushiraymi?")
-            if messagebox.askyesno("⚠ ONEDRIVE — NATIJA BULUTGA CHIQMAYAPTI",
+                    f"{nom} ni hozir qayta ishga tushiraymi?")
+            if messagebox.askyesno(f"⚠ {nom.upper()} — NATIJA BULUTGA CHIQMAYAPTI",
                                    body, parent=self.root, icon="warning"):
                 ok, msg = onedrive_monitor.restart_onedrive()
-                messagebox.showinfo("OneDrive", msg, parent=self.root)
+                messagebox.showinfo(nom, msg, parent=self.root)
                 if ok:
                     # 3 daqiqadan keyin qayta tekshiramiz
                     self.root.after(180000, lambda: threading.Thread(
@@ -10900,8 +11626,9 @@ class MonoblokApp:
             messagebox.showwarning("OneDrive", "onedrive_monitor.py topilmadi.", parent=self.root)
             return
 
+        nom = self._bulut_nomi()
         win = tk.Toplevel(self.root)
-        win.title("☁ OneDrive — natija sinxronizatsiyasi")
+        win.title(f"☁ {nom} — natija sinxronizatsiyasi")
         win.geometry("760x560")
         win.transient(self.root)
 
@@ -10938,7 +11665,7 @@ class MonoblokApp:
 
         def _restart():
             ok, msg = onedrive_monitor.restart_onedrive()
-            messagebox.showinfo("OneDrive", msg, parent=win)
+            messagebox.showinfo(nom, msg, parent=win)
             if ok:
                 win.after(20000, _refresh)
 
@@ -10947,10 +11674,10 @@ class MonoblokApp:
             if path and os.path.isdir(path):
                 os.startfile(path)
             else:
-                messagebox.showwarning("OneDrive", "Papka topilmadi.", parent=win)
+                messagebox.showwarning(nom, "Papka topilmadi.", parent=win)
 
         ttk.Button(btns, text="🔄 Qayta tekshirish", command=_refresh, width=20).pack(side=tk.LEFT, padx=3)
-        ttk.Button(btns, text="♻ OneDrive ni qayta yoqish", command=_restart, width=26).pack(side=tk.LEFT, padx=3)
+        ttk.Button(btns, text=f"♻ {nom} ni qayta yoqish", command=_restart, width=28).pack(side=tk.LEFT, padx=3)
         ttk.Button(btns, text="📁 Natijalar papkasi", command=_open_folder, width=20).pack(side=tk.LEFT, padx=3)
         ttk.Button(btns, text="Yopish", command=win.destroy, width=10).pack(side=tk.RIGHT, padx=3)
 
@@ -11301,7 +12028,7 @@ class MonoblokApp:
         # (ttk emas, tk.Button — chunki rangni o'zgartirish kerak: yashil/sariq/qizil)
         self.onedrive_btn = tk.Button(
             left_buttons,
-            text="☁ OneDrive …",
+            text=f"☁ {self._bulut_qisqa_nomi()} …",
             command=self.open_onedrive_status,
             width=14,
             relief=tk.RAISED,
@@ -16138,6 +16865,15 @@ Sana: {_sana_fmt}"""
                 )
             return
 
+        # Umumiy qon tahlili — Gemotologiya oynasidagidek to'liq ko'rinish
+        # (xato bo'lsa pastdagi oddiy oynaga qaytadi)
+        if json_type == 'hematology_cbc':
+            try:
+                self._show_hematology_cbc_popup(test_name, result_dict)
+                return
+            except Exception as _he:
+                print(f"[OGOHLANTIRISH] CBC oynasi ochilmadi, oddiy ko'rinish: {_he}")
+
         # Gemotologiya va boshqalar uchun oddiy info popup
         sid    = result_dict.get('sid', '')
         sno    = result_dict.get('sno', '')
@@ -16216,6 +16952,159 @@ Sana: {_sana_fmt}"""
         ttk.Button(popup, text="Yopish",
                    command=popup.destroy).pack(pady=10)
         popup.focus_set()
+
+    def _show_hematology_cbc_popup(self, test_name, rd):
+        """Umumiy qon tahlili natijasi — Gemotologiya oynasidagidek: ↑/↓ rangli natija,
+        yosh/jinsga mos norma, Flag va WBC/RBC/PLT gistogrammalari.
+        Qatorlar va normalar blankadagi bilan BIR XIL (CBC_HEMA_ROWS + multi-ref),
+        ya'ni oynada ko'rilgan narsa blankada ham shunday chiqadi. Faqat ko'rish."""
+        import gemo_histogram as _gh
+
+        bemor  = self.current_bemor_data or {}
+        age    = rd.get('patient_age') or bemor.get('yosh') or ''
+        gender = rd.get('patient_gender') or bemor.get('jins') or ''
+        sid    = rd.get('sid') or rd.get('sno') or ''
+        model  = rd.get('analyzer') or rd.get('source') or _hema_analyzer_label()
+
+        # ── Qatorlar (create_hematology_cbc_table_in_doc bilan bir xil qoida) ──
+        has_5diff = any((rd.get(k) or rd.get(CBC_HEMA_KOD_ALIAS.get(k, '')))
+                        for k in CBC_HEMA_5DIFF_KEYS)
+        rows = []   # (ko'rsatkich, kod, natija, birlik, norma, lo, hi)
+        for nom, kod, birlik, default_norma in CBC_HEMA_ROWS:
+            alias  = CBC_HEMA_KOD_ALIAS.get(kod, '')
+            natija = str(rd.get(kod) or rd.get(alias) or '').strip()
+            if kod in CBC_HEMA_OPTIONAL_ROWS and not natija:
+                if kod in CBC_HEMA_5DIFF_KEYS or (kod in CBC_HEMA_3DIFF_ROWS and has_5diff):
+                    continue
+            norma, lo, hi = default_norma, None, None
+            if _hema_get_multi_ref and age:
+                lo, hi, ref = _hema_get_multi_ref(kod, age, gender)
+                if not ref and alias:
+                    lo, hi, ref = _hema_get_multi_ref(alias, age, gender)
+                if ref:
+                    norma = ref
+                else:
+                    lo = hi = None
+            if lo is None or hi is None:
+                lo, hi = _parse_norma_to_min_max(norma)
+            rows.append((nom, kod, natija, birlik, norma, lo, hi))
+
+        # Kritik qiymatlar (gemotologiya oynasidagi kabi qizil fon)
+        crit_keys = set()
+        try:
+            import critical_alert
+            vmap = {k: str(rd.get(k) or '') for k in ("WBC", "RBC", "HGB", "PLT") if rd.get(k)}
+            _al, crit_keys = critical_alert.check_hematology(vmap)
+        except Exception:
+            crit_keys = set()
+
+        # ── Oyna (bitta nusxa: qayta bosilsa eskisi yopiladi) ──────────────
+        old = getattr(self, '_cbc_view_win', None)
+        try:
+            if old is not None and old.winfo_exists():
+                old.destroy()
+        except Exception:
+            pass
+        win = tk.Toplevel(self.root)
+        self._cbc_view_win = win
+        win.title(test_name)
+        win.transient(self.root)
+        _center_window_on_work_area(win, 1040, 860)
+        win.minsize(760, 560)
+        win.bind("<Escape>", lambda e: win.destroy())
+
+        hdr_bg = "#1a3a5c"
+        hdr = tk.Frame(win, bg=hdr_bg)
+        hdr.pack(fill=tk.X)
+        tk.Label(hdr, text=test_name, bg=hdr_bg, fg="white",
+                 font=("Arial", 13, "bold")).pack(side=tk.LEFT, padx=12, pady=8)
+        meta = []
+        if bemor.get('fish'):
+            meta.append(str(bemor.get('fish')))
+        if age:
+            meta.append(f"Yoshi: {age}")
+        if gender:
+            meta.append(f"Jinsi: {gender}")
+        meta.append(f"Analizator: {model}")
+        if sid:
+            meta.append(f"Sample ID: {sid}")
+        tk.Label(hdr, text="   |   ".join(meta), bg=hdr_bg, fg="#aac8e8",
+                 font=("Arial", 9)).pack(side=tk.LEFT, padx=6)
+
+        btm = ttk.Frame(win, padding=(8, 4))
+        btm.pack(side=tk.BOTTOM, fill=tk.X)
+        tk.Label(btm, text="↑ normadan yuqori", fg="red", font=("Arial", 9)).pack(side=tk.LEFT, padx=(0, 12))
+        tk.Label(btm, text="↓ normadan past", fg="blue", font=("Arial", 9)).pack(side=tk.LEFT, padx=(0, 12))
+        tk.Label(btm, text="Norma bemor yoshi va jinsiga qarab (blankadagi bilan bir xil)",
+                 fg="#666", font=("Arial", 8)).pack(side=tk.LEFT)
+        ttk.Button(btm, text="Yopish", command=win.destroy).pack(side=tk.RIGHT)
+
+        body = ttk.Frame(win, padding=6)
+        body.pack(fill=tk.BOTH, expand=True)
+
+        # Gistogrammalar (WBC / RBC / PLT) — birinchi pack → joyi kafolatlangan
+        hist_frame = tk.Frame(body, bg=_gh.BG, height=190)
+        hist_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(6, 0))
+        hist_frame.pack_propagate(False)
+        hist_cur = [_gh.unpack_histograms(rd.get('histograms'))]
+        canvases = {}
+        for k in _gh.HIST_ORDER:
+            cv = tk.Canvas(hist_frame, bg=_gh.BG, width=1, height=1,
+                           highlightthickness=1, highlightbackground="#444444")
+            cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=1, pady=1)
+            cv.bind("<Configure>", lambda e, k=k: _gh.draw_histogram(
+                canvases[k], k, hist_cur[0].get(k)))
+            canvases[k] = cv
+
+        cols = ("No.", "Ko'rsatkich", "Qisqa nom", "Natija", "Birlik", "Norma", "Flag")
+        widths = (45, 300, 85, 110, 80, 120, 55)
+        tree = ttk.Treeview(body, columns=cols, show="headings", height=len(rows))
+        for c, w in zip(cols, widths):
+            tree.heading(c, text=c)
+            tree.column(c, width=w, anchor=tk.W if c == "Ko'rsatkich" else tk.CENTER,
+                        stretch=(c == "Ko'rsatkich"))
+        tree.tag_configure("high", foreground="red", font=("Arial", 9, "bold"))
+        tree.tag_configure("low", foreground="blue", font=("Arial", 9, "bold"))
+        tree.tag_configure("normal_res", foreground="black")
+        tree.tag_configure("critical", background="#ffcccc", foreground="#a00000",
+                           font=("Arial", 9, "bold"))
+        sb = ttk.Scrollbar(body, orient=tk.VERTICAL, command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        for no, (nom, kod, natija, birlik, norma, lo, hi) in enumerate(rows, 1):
+            disp, tag, flag = (natija or '-'), "normal_res", ""
+            if natija and lo is not None and hi is not None:
+                try:
+                    fval = float(natija.replace(',', '.'))
+                    if fval > hi:
+                        disp, tag, flag = f"↑ {natija}", "high", "H"
+                    elif fval < lo:
+                        disp, tag, flag = f"↓ {natija}", "low", "L"
+                    else:
+                        flag = "N"
+                except (ValueError, TypeError):
+                    pass
+            if kod in crit_keys:
+                tag = "critical"
+            tree.insert("", tk.END, values=(no, nom, kod, disp, birlik, norma, flag), tags=(tag,))
+
+        # Eski natijalarda JSON ichida gistogramma yo'q — TXT fayldan qidiramiz
+        # (oyna ochilgandan keyin, ochilish sekinlashmasin)
+        if not hist_cur[0] and sid:
+            def _load_hist():
+                try:
+                    from hematology_window import find_histograms_by_sid
+                    hist_cur[0] = find_histograms_by_sid(sid) or {}
+                except Exception:
+                    hist_cur[0] = {}
+                if win.winfo_exists():
+                    for k, cv in canvases.items():
+                        _gh.draw_histogram(cv, k, hist_cur[0].get(k))
+            win.after(80, _load_hist)
+
+        win.focus_set()
 
     # Siydik kimyoviy qismini QO'LDA kiritish (test poloska) — analizator ishlamasa
     # yoki poloska tugaganda (mijoz talabi, 2026-10-11). Variantlar URIT poloskasi
@@ -21042,7 +21931,83 @@ Sana: {_sana_fmt}"""
 
         # Birinchi marta hisoblash
         calculate_values()
-        
+
+        # ── PT (sek) <-> Kviku (%) <-> MNO/INR avtomatik hisob ─────────────
+        # Qo'lda kiritishda: PT sek yozilsa -> Kviku va INR; Kviku % yozilsa
+        # -> PT sek va INR. Koeffitsientlar reagent pasportidan
+        # (analizator_config.json -> "koagulogramma"). Traslar eski natija
+        # YUKLANGANDAN KEYIN ulanadi — analizator qiymatlarini bosib ketmaydi.
+        if 'pt_sek' in component_vars and 'pt_kviku' in component_vars:
+            try:
+                _kc = get_analyzer("koagulogramma") or {}
+            except Exception:
+                _kc = {}
+            try:
+                _isi = float(_kc.get("isi", 1.14))
+                _mnpt = float(_kc.get("mnpt", 13.0))
+            except (TypeError, ValueError):
+                _isi, _mnpt = 1.14, 13.0
+            _kmodel = koag_kviku_model(_kc.get("kalibrlash"))
+            if _kc.get("avto_hisob", True) and _kmodel and _mnpt > 0:
+                _sek_to_q, _q_to_sek, _ = _kmodel
+                _pt_busy = [False]
+                _pt_auto = set()   # avtomatik to'ldirilgan maydonlar
+
+                def _num(s):
+                    try:
+                        return float(str(s).strip().replace(",", "."))
+                    except ValueError:
+                        return None
+
+                def _pt_set(key, text):
+                    if key in component_vars:
+                        component_vars[key].set(text)
+                        if text:
+                            _pt_auto.add(key)
+                        else:
+                            _pt_auto.discard(key)
+
+                def _pt_from(src):
+                    if _pt_busy[0]:
+                        return
+                    _pt_busy[0] = True
+                    try:
+                        _pt_auto.discard(src)   # laborant o'zi yozdi
+                        v = _num(component_vars[src].get())
+                        pt = None
+                        if src == 'pt_sek':
+                            q = _sek_to_q(v) if (v is not None and v >= 3) else None
+                            if q is not None and q > 0:
+                                pt = v
+                                _pt_set('pt_kviku', f"{q:.1f}")
+                        elif v is not None and v > 0:
+                            pt = _q_to_sek(v)
+                            if pt is not None:
+                                pt = round(pt, 1)
+                                _pt_set('pt_sek', f"{pt:.1f}")
+                        if pt is not None:
+                            _pt_set('pt_mno', f"{(pt / _mnpt) ** _isi:.2f}")
+                        else:
+                            # manba o'chirildi — faqat avtomatik qiymatlarni tozalaymiz
+                            for k in ('pt_sek', 'pt_kviku', 'pt_mno'):
+                                if k != src and k in _pt_auto:
+                                    _pt_set(k, "")
+                    finally:
+                        _pt_busy[0] = False
+
+                component_vars['pt_sek'].trace_add("write", lambda *a: _pt_from('pt_sek'))
+                component_vars['pt_kviku'].trace_add("write", lambda *a: _pt_from('pt_kviku'))
+                if 'pt_mno' in component_vars:
+                    component_vars['pt_mno'].trace_add(
+                        "write", lambda *a: None if _pt_busy[0] else _pt_auto.discard('pt_mno'))
+                ttk.Label(
+                    main_container,
+                    text=(f"ℹ PT sekund yoki Kviku % yozilsa, qolganlari avtomatik hisoblanadi "
+                          f"(ISI={_isi:g}, Normal={_mnpt:g} sek). Kalibrovka/reagent o'zgarsa: "
+                          f"Tizim Sozlamalari → 🩸 Koagulogramma."),
+                    font=("Arial", 8), foreground="#1565C0", wraplength=520, justify=tk.LEFT
+                ).pack(anchor=tk.W, padx=12, pady=(6, 0))
+
         def save_and_close():
             # Kamida bitta maydon to'ldirilganligini tekshirish (hamma shart emas)
             required_components = [c for c in template.get("components", []) if not c.get("readonly")]
@@ -22170,6 +23135,113 @@ Sana: {_sana_fmt}"""
             foreground="#555", justify=tk.LEFT, wraplength=580).grid(
             row=4, column=0, columnspan=2, sticky=tk.W, padx=8, pady=(4, 8))
 
+        # ───────────────────────── KOAGULOGRAMMA ────────────────────────
+        # PT sek <-> Kviku % <-> MNO/INR qo'lda kiritishdagi avtomatik hisob.
+        # Qiymatlar analizatordagi "Setup PT" ekrani bilan BIR XIL kiritiladi
+        # (ISI, Normal, kalibrlash nuqtalari). Model: koag_kviku_model().
+        from monoblok_db_config import DEFAULT_CONFIG as _DEF_CFG
+        DEFAULT_KOAG = _DEF_CFG["koagulogramma"]
+        tab_k = ttk.Frame(nb)
+        nb.add(tab_k, text="🩸 Koagulogramma")
+        _kcfg = cfg.get("koagulogramma", {}) or {}
+        _k_avto = tk.BooleanVar(value=bool(_kcfg.get("avto_hisob", True)))
+        vars_map[("koagulogramma", "avto_hisob")] = _k_avto
+        ttk.Checkbutton(tab_k, text="PT sek / Kviku % yozilganda qolganlarini avtomatik hisoblash",
+                        variable=_k_avto).grid(row=0, column=0, columnspan=3, sticky=tk.W, padx=8, pady=(12, 8))
+        _k_vars = {}
+        for _r, (_key, _lbl, _hint) in enumerate([
+            ("isi",  "ISI:",           "analizator «Setup PT» → ISI (reagent pasportida)"),
+            ("mnpt", "Normal, sek:",   "analizator «Setup PT» → Normal (o'rtacha normal PT)"),
+        ], start=1):
+            ttk.Label(tab_k, text=_lbl).grid(row=_r, column=0, sticky=tk.W, padx=8, pady=3)
+            _v = tk.StringVar(value=str(_kcfg.get(_key, DEFAULT_KOAG.get(_key, ""))))
+            ttk.Entry(tab_k, textvariable=_v, width=10).grid(row=_r, column=1, sticky=tk.W, padx=4, pady=3)
+            ttk.Label(tab_k, text=_hint, foreground="#777").grid(row=_r, column=2, sticky=tk.W, padx=4)
+            vars_map[("koagulogramma", _key)] = _v
+            _k_vars[_key] = _v
+
+        ttk.Label(tab_k, text="Kalibrlash (analizatordagi «Setup PT» jadvali — Kviku % = sekund):",
+                  font=("Arial", 9, "bold")).grid(row=3, column=0, columnspan=3, sticky=tk.W, padx=8, pady=(12, 2))
+        _kal_fr = ttk.Frame(tab_k)
+        _kal_fr.grid(row=4, column=0, columnspan=3, sticky=tk.W, padx=20)
+        _kal_saved = _kcfg.get("kalibrlash")
+        if not isinstance(_kal_saved, list):
+            _kal_saved = DEFAULT_KOAG["kalibrlash"]
+        _kal_vars = []   # [(foiz_var, sek_var), ...] — 5 qator, analizatordagidek
+        for _i in range(5):
+            try:
+                _q0, _s0 = _kal_saved[_i]
+                _q0, _s0 = f"{float(_q0):g}", f"{float(_s0):g}"
+            except Exception:
+                _q0, _s0 = "", ""
+            _qv, _sv = tk.StringVar(value=_q0), tk.StringVar(value=_s0)
+            ttk.Label(_kal_fr, text=f"{_i + 1}:").grid(row=_i, column=0, sticky=tk.E, pady=2)
+            ttk.Entry(_kal_fr, textvariable=_qv, width=8, justify=tk.RIGHT).grid(row=_i, column=1, padx=(4, 2))
+            ttk.Label(_kal_fr, text="%  =").grid(row=_i, column=2)
+            ttk.Entry(_kal_fr, textvariable=_sv, width=8, justify=tk.RIGHT).grid(row=_i, column=3, padx=(4, 2))
+            ttk.Label(_kal_fr, text="s").grid(row=_i, column=4, sticky=tk.W)
+            _kal_vars.append((_qv, _sv))
+
+        def _k_kal_points():
+            """Kalibrlash jadvali -> [[foiz, sek], ...]; bo'sh/0 qatorlar tashlanadi.
+            Noto'g'ri raqam bo'lsa ValueError."""
+            out = []
+            for _qv, _sv in _kal_vars:
+                qs, ss = _qv.get().strip().replace(",", "."), _sv.get().strip().replace(",", ".")
+                if not qs and not ss:
+                    continue
+                q, s = float(qs or 0), float(ss or 0)
+                if q > 0 and s > 0:
+                    out.append([q, s])
+            return out
+
+        _k_preview = ttk.Label(tab_k, text="", foreground="#1565C0", justify=tk.LEFT,
+                               font=("Consolas", 9))
+        _k_preview.grid(row=5, column=0, columnspan=3, sticky=tk.W, padx=8, pady=(10, 4))
+
+        def _k_hisob(*_a):
+            try:
+                isi = float(_k_vars["isi"].get().replace(",", "."))
+                mnpt = float(_k_vars["mnpt"].get().replace(",", "."))
+                model = koag_kviku_model(_k_kal_points())
+                if model is None or mnpt <= 0:
+                    raise ValueError
+                to_q, _to_s, r2 = model
+                rows = [f"PT {pt:>4g} sek  →  Kviku {to_q(pt):6.1f} %   INR {(pt / mnpt) ** isi:.2f}"
+                        for pt in (12, 13, 15, 18, 25)]
+                _k_preview.config(
+                    text=f"R² = {r2:.3f}   (analizator ekranidagi R² bilan bir xil bo'lishi kerak)\n\n"
+                         "Tekshiruv:\n" + "\n".join(rows),
+                    foreground="#1565C0")
+            except Exception:
+                _k_preview.config(text="ISI, Normal va kamida 2 ta kalibrlash nuqtasini to'g'ri kiriting "
+                                       "(% oshganda sekund kamayishi kerak)", foreground="#c62828")
+
+        for _v in list(_k_vars.values()) + [v for pair in _kal_vars for v in pair]:
+            _v.trace_add("write", _k_hisob)
+        _k_hisob()
+
+        def _k_standart():
+            _k_vars["isi"].set(f"{DEFAULT_KOAG['isi']:g}")
+            _k_vars["mnpt"].set(f"{DEFAULT_KOAG['mnpt']:g}")
+            for _i, (_qv, _sv) in enumerate(_kal_vars):
+                try:
+                    _q0, _s0 = DEFAULT_KOAG["kalibrlash"][_i]
+                    _qv.set(f"{_q0:g}"); _sv.set(f"{_s0:g}")
+                except IndexError:
+                    _qv.set(""); _sv.set("")
+
+        ttk.Button(tab_k, text="↺ Standart (COAX, exp 11/2026)", command=_k_standart
+                   ).grid(row=6, column=0, columnspan=2, sticky=tk.W, padx=8, pady=(4, 6))
+        ttk.Label(
+            tab_k,
+            text="• Analizatorda yangi kalibrovka qilinganda «Setup PT» ekranidagi ISI, Normal va "
+                 "nuqtalarni (1: 100% = 13.0s ...) shu yerga xuddi o'zidek ko'chiring va «Saqlash» bosing.\n"
+                 "• INR = (PT / Normal) ^ ISI.  Kviku % — kalibrlash nuqtalaridan (1/PT ~ %), analizator usulida.\n"
+                 "• Analizatordan kelgan natijalarga tegilmaydi — faqat qo'lda kiritishda ishlaydi.",
+            foreground="#555", justify=tk.LEFT, wraplength=620).grid(
+            row=7, column=0, columnspan=3, sticky=tk.W, padx=8, pady=(6, 8))
+
         # ───────────────────────── PAPKALAR ─────────────────────────────
         # Analizatordan kelgan RAW/TXT fayllar qayerga tushadi (natija_papka.py).
         # Mijozda G: disk yo'q — papka shu yerdan tanlanadi (2026-10-11).
@@ -22342,7 +23414,7 @@ Sana: {_sana_fmt}"""
         def save_settings():
             new_cfg = load_config()
             int_keys = {"port", "baudrate", "bytesize", "stopbits", "reconnect_interval", "lis_port"}
-            float_keys = {"timeout"}
+            float_keys = {"timeout", "isi", "mnpt"}
             try:
                 for (section, key), var in vars_map.items():
                     new_cfg.setdefault(section, {})
@@ -22358,6 +23430,22 @@ Sana: {_sana_fmt}"""
             except ValueError as e:
                 messagebox.showerror("Xato", f"Raqamli maydon noto'g'ri: {e}", parent=dialog)
                 return
+
+            # Koagulogramma kalibrlash jadvali (ro'yxat — vars_map dan tashqarida)
+            try:
+                _kal = _k_kal_points()
+            except ValueError:
+                messagebox.showerror("Xato", "Koagulogramma: kalibrlash jadvalida noto'g'ri raqam bor.",
+                                     parent=dialog)
+                return
+            if koag_kviku_model(_kal) is None or new_cfg["koagulogramma"].get("mnpt", 0) <= 0:
+                messagebox.showerror(
+                    "Xato", "Koagulogramma: Normal (sek) va kamida 2 ta to'g'ri kalibrlash nuqtasi kerak\n"
+                            "(% oshganda sekund kamayishi kerak).", parent=dialog)
+                return
+            new_cfg["koagulogramma"]["kalibrlash"] = _kal
+            for _old in ("kviku_a", "kviku_b"):   # 13.10.2026 dagi eski A/B sozlamasi
+                new_cfg["koagulogramma"].pop(_old, None)
 
             # Printer: sentinel yorlig'i -> "" (Windows standart printeri)
             try:
@@ -22691,18 +23779,88 @@ Sana: {_sana_fmt}"""
                        "• Belgi olib tashlansa: blanka odatdagidek FAQAT o'zbekcha chiqadi.",
                   foreground="#555", justify=tk.LEFT).pack(anchor=tk.W, pady=(4, 0))
 
+        # ══════════════════════════════════════════════════════════════
+        # 6.55. OLDINGI NATIJA USTUNI — doimiy bemorlar uchun dinamika
+        # ══════════════════════════════════════════════════════════════
+        old_lf = ttk.LabelFrame(main_frame, text="📈 Oldingi natija ustuni", padding="8")
+        old_lf.pack(fill=tk.X, pady=(0, 8))
+        ttk.Label(old_lf, text="Quyidagi guruhlarda blankada «Natija» yonida bemorning oldingi "
+                               "tashrifdagi natijasi (sanasi bilan) chiqsin:",
+                  wraplength=600, justify=tk.LEFT).pack(anchor=tk.W, pady=(0, 4))
+        _old_saved = config.get('oldingi_natija_guruhlar', ["BIO"])
+        if not isinstance(_old_saved, list):
+            _old_saved = ["BIO"]
+        _old_saved = {str(g).upper() for g in _old_saved}
+        old_vars = {}
+        for _gk, _gtxt in OLDINGI_NATIJA_GURUHLAR:
+            old_vars[_gk] = tk.BooleanVar(value=_gk in _old_saved)
+            ttk.Checkbutton(old_lf, text=_gtxt, variable=old_vars[_gk]).pack(anchor=tk.W, padx=(10, 0))
+        _old_row = ttk.Frame(old_lf)
+        _old_row.pack(anchor=tk.W, pady=(6, 0))
+        ttk.Label(_old_row, text="Necha kungacha orqaga qaralsin:").pack(side=tk.LEFT)
+        old_kun_var = tk.StringVar(value=str(config.get('oldingi_natija_max_kun', 365)))
+        ttk.Entry(_old_row, textvariable=old_kun_var, width=6).pack(side=tk.LEFT, padx=4)
+        ttk.Label(_old_row, text="kun").pack(side=tk.LEFT)
+        old_takror_var = tk.BooleanVar(value=bool(config.get('oldingi_natija_takroriy_bemor', True)))
+        ttk.Checkbutton(old_lf,
+                        text="Bemor ikki marta ro'yxatga olingan bo'lsa ham topilsin "
+                             "(FISH + jins + tug'ilgan yil mos)",
+                        variable=old_takror_var).pack(anchor=tk.W, pady=(4, 0))
+        ttk.Label(old_lf,
+                  text="• Bemorning oldingi natijasi bo'lmasa (birinchi tashrif) — ustun chiqmaydi.\n"
+                       "• Shu kuni ochilgan boshqa buyurtma «oldingi» hisoblanmaydi — faqat oldingi kunlar.\n"
+                       "• Hamma oldingi natija bir kunga tegishli bo'lsa — sana ustun sarlavhasida yoziladi.",
+                  foreground="#555", justify=tk.LEFT).pack(anchor=tk.W, pady=(4, 0))
+
         from tkinter import filedialog as _fd
+
+        # ══════════════════════════════════════════════════════════════
+        # 6.6. PDF ELEKTRON MUHR — faqat PDF nusxaga (Word/qog'oz o'zgarmaydi)
+        # ══════════════════════════════════════════════════════════════
+        muhr_lf = ttk.LabelFrame(main_frame, text="🔏 PDF elektron muhr", padding="8")
+        muhr_lf.pack(fill=tk.X, pady=(0, 8))
+        muhr_lf.columnconfigure(1, weight=1)
+        muhr_on_var = tk.BooleanVar(value=bool(config.get('pdf_muhr', False)))
+        ttk.Checkbutton(muhr_lf, text="Bemorga ketadigan PDF nusxaga elektron muhr qo'yilsin",
+                        variable=muhr_on_var).grid(row=0, column=0, columnspan=4, sticky=tk.W)
+        ttk.Label(muhr_lf, text="Muhr rasmi (PNG):").grid(row=1, column=0, sticky=tk.W, pady=3, padx=(0, 5))
+        muhr_path_var = tk.StringVar(value=config.get('pdf_muhr_path', ''))
+        ttk.Entry(muhr_lf, textvariable=muhr_path_var, width=48).grid(
+            row=1, column=1, sticky=tk.EW, pady=3, padx=(0, 5))
+
+        def _pick_muhr():
+            f = _fd.askopenfilename(title="Muhr rasmini tanlang (shaffof PNG)", parent=dialog,
+                                    filetypes=[("PNG rasm", "*.png"), ("Barcha rasmlar", "*.png *.jpg *.jpeg")])
+            if f:
+                muhr_path_var.set(os.path.normpath(f))
+        ttk.Button(muhr_lf, text="Tanlash...", command=_pick_muhr).grid(row=1, column=2, pady=3)
+        ttk.Label(muhr_lf, text="Diametr (sm):").grid(row=2, column=0, sticky=tk.W, pady=3, padx=(0, 5))
+        muhr_size_var = tk.StringVar(value=str(config.get('pdf_muhr_size', 3.8)))
+        ttk.Entry(muhr_lf, textvariable=muhr_size_var, width=6).grid(row=2, column=1, sticky=tk.W, pady=3)
+        ttk.Label(muhr_lf,
+                  text="• Qog'oz blankaga muhr odatdagidek QO'LDA bosiladi — Word fayl o'zgarmaydi.\n"
+                       "• Muhr faqat bulut/botga ketadigan PDF ga, «Laborant vrach» qatoriga qo'yiladi.",
+                  foreground="#555", justify=tk.LEFT).grid(row=3, column=0, columnspan=4, sticky=tk.W, pady=(4, 0))
 
         save_lf = ttk.LabelFrame(main_frame, text="📁 Saqlash yo'llari (Word / PDF)", padding="8")
         save_lf.pack(fill=tk.X, pady=(0, 8))
         save_lf.columnconfigure(1, weight=1)
+
+        # Natija PDF lari qaysi bulutga chiqadi (bulut_papka.py)
+        bulut_var = tk.StringVar(value=(config.get('bulut_provayder') or 'onedrive'))
+        ttk.Label(save_lf, text="Natija buluti:").grid(row=0, column=0, sticky=tk.W, pady=3, padx=(0, 5))
+        bulut_fr = ttk.Frame(save_lf)
+        bulut_fr.grid(row=0, column=1, columnspan=3, sticky=tk.W, pady=3)
+        bulut_info = ttk.Label(save_lf, text="", foreground="#336699", wraplength=560, justify=tk.LEFT)
+        bulut_info.grid(row=1, column=1, columnspan=3, sticky=tk.W, pady=(0, 4))
 
         wp_fields = {}
         wp_rows = [
             ("word_save_dir", "Word (.docx) papkasi:"),
             ("pdf_save_dir",  "PDF nusxa papkasi:"),
         ]
-        for i, (key, label) in enumerate(wp_rows):
+        WP_ROW0 = 2  # 0-1 qatorlar — bulut tanlovi
+        for i, (key, label) in enumerate(wp_rows, start=WP_ROW0):
             ttk.Label(save_lf, text=label).grid(row=i, column=0, sticky=tk.W, pady=3, padx=(0, 5))
             var = tk.StringVar(value=config.get(key, ''))
             wp_fields[key] = var
@@ -22718,14 +23876,52 @@ Sana: {_sana_fmt}"""
             ttk.Button(save_lf, text="Tozalash",
                        command=lambda v=var: v.set("")).grid(row=i, column=3, pady=3)
 
+        def _bulut_yangila(almashdi=False):
+            """Tanlangan bulut bo'yicha natija papkasini ko'rsatadi. Bulut
+            almashtirilganda eski bulut ichidagi qo'lda PDF yo'li tozalanadi —
+            aks holda u ustun bo'lib, tanlov ishlamay qoladi."""
+            try:
+                import bulut_papka as _bp
+                prov = bulut_var.get()
+                pdf_v = wp_fields["pdf_save_dir"]
+                if almashdi and pdf_v.get().strip():
+                    for boshqa in _bp.PROVAYDERLAR:
+                        if boshqa != prov and _bp.is_inside_cloud(pdf_v.get().strip(), boshqa):
+                            pdf_v.set("")
+                            break
+                if pdf_v.get().strip():
+                    bulut_info.config(text="→ PDF qo'lda ko'rsatilgan papkaga saqlanadi (pastda). "
+                                           "Bulut tanlovi ishlashi uchun «Tozalash» bosing.",
+                                      foreground="#8A6D00")
+                    return
+                root = _bp.get_cloud_root(prov, {"gdrive_root": config.get("gdrive_root", "")})
+                nom = _bp.provider_nomi(prov)
+                if root:
+                    bulut_info.config(text=f"→ PDF: {os.path.join(root, 'Natijalar')}\\DD.MM.YYYY",
+                                      foreground="#005500")
+                else:
+                    bulut_info.config(text=f"⚠ {nom} papkasi topilmadi — {nom} dasturi o'rnatilib, "
+                                           f"akkauntga kirilganini tekshiring.",
+                                      foreground="#8B0000")
+            except Exception as e:
+                bulut_info.config(text=f"Bulutni aniqlashda xato: {e}", foreground="#8B0000")
+
+        ttk.Radiobutton(bulut_fr, text="OneDrive", variable=bulut_var, value="onedrive",
+                        command=lambda: _bulut_yangila(True)).pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Radiobutton(bulut_fr, text="Google Drive", variable=bulut_var, value="gdrive",
+                        command=lambda: _bulut_yangila(True)).pack(side=tk.LEFT)
+        wp_fields["pdf_save_dir"].trace_add("write", lambda *_: _bulut_yangila())
+        _bulut_yangila()
+
         ttk.Label(
             save_lf,
             text="• Bo'sh qoldirilsa — standart yo'l ishlatiladi "
-                 "(Word: G:\\Қилинган анализлар, PDF: OneDrive\\Natijalar).\n"
+                 "(Word: G:\\Қилинган анализлар, PDF: <tanlangan bulut>\\Natijalar).\n"
                  "• Har papka ostida avtomatik «DD.MM.YYYY» (sana) papkasi yaratiladi.\n"
+                 "• Nargi kompyuter (SMS/bot) ham XUDDI SHU bulutga ulangan bo'lishi kerak.\n"
                  "• Boshqa kompyuterda yo'l boshqacha bo'lsa — shu yerda ko'rsating.",
             foreground="#555", justify=tk.LEFT, wraplength=560).grid(
-            row=len(wp_rows), column=0, columnspan=4, sticky=tk.W, pady=(4, 0))
+            row=WP_ROW0 + len(wp_rows), column=0, columnspan=4, sticky=tk.W, pady=(4, 0))
 
         # ══════════════════════════════════════════════════════════════
         # TUGMALAR
@@ -22758,7 +23954,20 @@ Sana: {_sana_fmt}"""
                 "ong_panel": ong_var.get(),
                 "qr_link_template": qr_link_var.get().strip(),
                 "blanka_ruscha": bool(ruscha_var.get()),
+                "pdf_muhr": bool(muhr_on_var.get()),
+                "pdf_muhr_path": muhr_path_var.get().strip(),
             }
+            try:
+                new_config["pdf_muhr_size"] = max(2.0, min(float(
+                    muhr_size_var.get().replace(',', '.')), 6.0))
+            except Exception:
+                new_config["pdf_muhr_size"] = 3.8
+            new_config["oldingi_natija_guruhlar"] = [g for g, v in old_vars.items() if v.get()]
+            try:
+                new_config["oldingi_natija_max_kun"] = max(1, min(int(old_kun_var.get().strip()), 3650))
+            except Exception:
+                new_config["oldingi_natija_max_kun"] = 365
+            new_config["oldingi_natija_takroriy_bemor"] = bool(old_takror_var.get())
             for key, var in kl_fields.items():
                 new_config[key] = var.get().strip()
             for key, var in color_vars.items():
@@ -22767,9 +23976,21 @@ Sana: {_sana_fmt}"""
             # Saqlash yo'llari (Word / PDF) — bo'sh = standart yo'l
             for key, var in wp_fields.items():
                 new_config[key] = var.get().strip()
+            _eski_bulut = config.get('bulut_provayder') or 'onedrive'
+            new_config["bulut_provayder"] = bulut_var.get()
 
             try:
                 save_blanka_config(new_config)
+                if _eski_bulut != new_config["bulut_provayder"]:
+                    # Bulut almashdi — ko'rsatkich va nazorat darhol yangi bulutga
+                    try:
+                        if getattr(self, "onedrive_btn", None):
+                            self.onedrive_btn.config(text=f"☁ {self._bulut_qisqa_nomi()} …")
+                        if getattr(self, "onedrive_watcher", None):
+                            threading.Thread(target=self.onedrive_watcher.check_now,
+                                             kwargs={"notify": False}, daemon=True).start()
+                    except Exception as e:
+                        print(f"[Bulut] Nazoratni yangilashda xato: {e}")
                 messagebox.showinfo("Muvaffaqiyat", "Blanka sozlamalari saqlandi!")
                 _on_dialog_destroy()
             except Exception as e:
@@ -22795,139 +24016,82 @@ Sana: {_sana_fmt}"""
         if not self._confirm_unsaved_before_blank("Blanka yaratish"):
             return
 
-        # blanka_generator.py dan to'g'ridan-to'g'ri foydalanish (hech qanday pre-state kerak emas)
-        try:
-            
-            # Progress dialog
-            progress_win = tk.Toplevel(self.root)
-            progress_win.title("Blankalar yaratilmoqda...")
-            progress_win.geometry("450x180")
-            progress_win.transient(self.root)
-            progress_win.grab_set()
-            
-            ttk.Label(progress_win, text="Blankalar yaratilmoqda...", font=("Arial", 12, "bold")).pack(pady=20)
-            progress_var = tk.StringVar(value="Tayyorlanmoqda...")
-            progress_label = ttk.Label(progress_win, textvariable=progress_var, font=("Arial", 10))
-            progress_label.pack(pady=10)
-            
-            # Progress bar (oddiy)
-            progress_bar = ttk.Progressbar(progress_win, mode='indeterminate', length=300)
-            progress_bar.pack(pady=10)
-            progress_bar.start()
-            
-            progress_win.update()
-            
-            # Blankalar yaratish (bitta chaqiruvda barcha ishlar bajariladi)
+        # ── FON OQIMIDA YARATISH + YASHIL XABAR (19.10.2026) ──────────────
+        # Ilgari har blankada 3 ta modal oyna chiqardi: progress, «Blanka
+        # mavjud — Yangilaymi?» va «Ochishni xohlaysizmi?». Kuniga o'nlab
+        # bemorda Да/Нет bosish ishni sekinlashtirardi. Endi blanka fon
+        # oqimida yaratiladi (oyna qotmaydi), mavjud blanka so'ramasdan
+        # yangilanadi (eski nusxa _blanka_zaxiralash bilan saqlanadi), blanka
+        # avtomatik ochiladi va pastda yashil xabar (oyna_xabar.toast) chiqadi.
+        # Xatolar va Word'da ochiq (qulflangan) blanka — MODAL bo'lib qoladi.
+        order_id = self.current_order_id
+        band = getattr(self, '_blanka_band_orderlar', None)
+        if band is None:
+            band = self._blanka_band_orderlar = set()
+        if order_id in band:
+            self.status_var.set("[KUTING] Bu bemorning blankasi hali yaratilmoqda...")
+            return
+        band.add(order_id)
+
+        # Fon oqimiga faqat NUSXALAR beriladi: laborant shu orada boshqa
+        # bemorni ochsa ham blanka to'g'ri bemorga yaratiladi.
+        test_results = dict(self.test_results or {})
+        sana_vaqt = (self.current_bemor_data or {}).get('sana_vaqt')
+        tahlil_soni = len(self.current_tests or [])
+        holat = {'band_fayl': None, 'yangilandi': False}
+
+        def file_exists_callback(file_path):
+            """Mavjud blanka — so'ramasdan yangilanadi. Faqat Word'da ochiq
+            (qulflangan) bo'lsa tegilmaydi: laborant buni bilishi shart."""
             try:
-                # Fayl mavjud bo'lsa, dialog ochish uchun callback funksiya
-                def file_exists_callback(file_path):
-                    """Fayl mavjud bo'lsa, yangilashni so'rash"""
-                    import os
-                    response = messagebox.askyesno(
-                        "Blanka mavjud",
-                        f"Blanka allaqachon mavjud:\n{os.path.basename(file_path)}\n\n"
-                        "Yangilaymi?",
-                        icon="question"
-                    )
-                    return response
-                
+                with open(file_path, 'r+b'):
+                    pass
+            except PermissionError:
+                holat['band_fayl'] = file_path
+                return False
+            except OSError:
+                pass
+            holat['yangilandi'] = True
+            return True
+
+        def ishchi():
+            created, xato = None, None
+            try:
                 created = create_blanks_for_order(
-                    self.current_order_id, 
-                    self.test_results,
-                    file_exists_callback=file_exists_callback
-                )
+                    order_id, test_results,
+                    file_exists_callback=file_exists_callback)
             except Exception as e:
-                progress_win.destroy()
-                error_msg = f"Blanka yaratishda xato:\n{str(e)}"
-                # Batafsil xatolik ma'lumotlari
                 import traceback
-                error_details = traceback.format_exc()
-                print(f"[XATO] Blanka yaratishda batafsil xato:\n{error_details}")
-                messagebox.showerror("Xatolik", error_msg)
+                print(f"[XATO] Blanka yaratishda batafsil xato:\n{traceback.format_exc()}")
+                xato = e
+            # Tkinter'ga faqat asosiy oqimdan (after → _after_oqimga_xavfsiz navbati)
+            self.root.after(0, tugadi, created, xato)
+
+        def tugadi(created, xato):
+            band.discard(order_id)
+            if xato is not None:
+                self.status_var.set("[XATO] Blanka yaratilmadi")
+                messagebox.showerror("Xatolik", f"Blanka yaratishda xato:\n{xato}")
                 return
-            
-            progress_win.destroy()
-            
-            # created - bu list yoki bitta string bo'lishi mumkin
-            if created:
-                # Agar list bo'lsa
-                if isinstance(created, list) and len(created) > 0:
-                    files_list = "\n".join([f"  • {os.path.basename(f)}" for f in created[:10]])
-                    if len(created) > 10:
-                        files_list += f"\n  ... va yana {len(created) - 10} ta"
-                    
-                    result = messagebox.askyesno(
-                        "Muvaffaqiyat", 
-                        f"[OK] {len(created)} ta blanka yaratildi!\n\n{files_list}\n\n"
-                        "Blankalarni ochishni xohlaysizmi?"
-                    )
-                    
-                    if result:
-                        # Blankalarni ochish
-                        for file_path in created[:5]:  # Faqat birinchi 5 tasini ochish
-                            try:
-                                os.startfile(file_path)
-                            except:
-                                pass
+            if isinstance(created, str):
+                created = [created]
 
-                    self.status_var.set(f"[OK] {len(created)} ta blanka yaratildi")
-                    # PDF nusxasini OneDrive ga saqlash (Word ochilgandan keyin, fon threadda)
-                    try:
-                        import threading
-                        _ord_date = None
-                        _sv = (self.current_bemor_data or {}).get('sana_vaqt')
-                        if _sv:
-                            try:
-                                import datetime as _dt
-                                _d = str(_sv)[:10]  # "2026-03-16"
-                                _ord_date = _dt.datetime.strptime(_d, "%Y-%m-%d").strftime("%d.%m.%Y")
-                            except Exception:
-                                pass
-                        for _fp in created[:5]:
-                            threading.Thread(target=save_pdf_to_onedrive, args=(_fp, _ord_date), daemon=True).start()
-                    except Exception:
-                        pass
-                # Agar bitta fayl (string) bo'lsa
-                elif isinstance(created, str):
-                    result = messagebox.askyesno(
-                        "Muvaffaqiyat",
-                        f"[OK] Blanka yaratildi!\n\n{os.path.basename(created)}\n\n"
-                        "Blankani ochishni xohlaysizmi?"
-                    )
+            if holat['band_fayl']:
+                self.status_var.set("[TO'XTATILDI] Blanka Word'da ochiq — yopib qayta bosing")
+                messagebox.showwarning(
+                    "Blanka Word'da ochiq",
+                    f"Blanka YANGILANMADI — u hozir Word'da ochiq:\n"
+                    f"{os.path.basename(holat['band_fayl'])}\n\n"
+                    "Word'dagi blankani yoping va «Blanka Yaratish» ni qayta bosing.")
+                return
 
-                    if result:
-                        try:
-                            os.startfile(created)
-                        except:
-                            pass
-
-                    self.status_var.set(f"[OK] Blanka yaratildi")
-                    # PDF nusxasini OneDrive ga saqlash
-                    try:
-                        import threading
-                        _ord_date2 = None
-                        _sv2 = (self.current_bemor_data or {}).get('sana_vaqt')
-                        if _sv2:
-                            try:
-                                import datetime as _dt
-                                _d2 = str(_sv2)[:10]
-                                _ord_date2 = _dt.datetime.strptime(_d2, "%Y-%m-%d").strftime("%d.%m.%Y")
-                            except Exception:
-                                pass
-                        threading.Thread(target=save_pdf_to_onedrive, args=(created, _ord_date2), daemon=True).start()
-                    except Exception:
-                        pass
-            else:
+            if not created:
                 # Batafsil xatolik xabari - shablonlar holatini tekshirish
                 error_details = []
-                if not self.current_order_id:
-                    error_details.append("• Buyurtma ID topilmadi")
-                if not self.current_tests:
+                if not tahlil_soni:
                     error_details.append("• Tahlillar topilmadi")
                 else:
-                    error_details.append(f"• {len(self.current_tests)} ta tahlil mavjud, lekin blankalar yaratilmadi")
-                    
-                    # Shablonlar holatini tekshirish
+                    error_details.append(f"• {tahlil_soni} ta tahlil mavjud, lekin blankalar yaratilmadi")
                     templates_dir = os.path.join(os.path.dirname(__file__), "templates")
                     if os.path.exists(templates_dir):
                         template_files = os.listdir(templates_dir)
@@ -22937,20 +24101,59 @@ Sana: {_sana_fmt}"""
                             error_details.append("• Templates papkasi bo'sh")
                     else:
                         error_details.append("• Templates papkasi topilmadi")
-                    
                     error_details.append("• Standart blankalar yaratilishi kerak edi")
-                
-                error_msg = "Blanka yaratilmadi.\n\n" + "\n".join(error_details)
-                messagebox.showwarning("Diqqat", error_msg)
                 self.status_var.set("[OGOHLANTIRISH] Blanka yaratilmadi")
-        
-        except ImportError as e:
-            messagebox.showerror("Xatolik", f"Modul topilmadi: {e}\n\nblanka_generator.py faylini tekshiring.")
+                messagebox.showwarning("Diqqat", "Blanka yaratilmadi.\n\n" + "\n".join(error_details))
+                return
+
+            soz = "yangilandi" if holat['yangilandi'] else "yaratildi"
+            self.status_var.set(f"[OK] {len(created)} ta blanka {soz} - "
+                                f"{datetime.now().strftime('%H:%M:%S')}")
+            nomlar = "\n".join(f"• {os.path.basename(f)}" for f in created[:3])
+            if len(created) > 3:
+                nomlar += f"\n... va yana {len(created) - 3} ta"
+            matn = f"✅ Blanka {soz} va ochildi\n{nomlar}"
+            if holat['yangilandi']:
+                matn += "\n(eski nusxa zaxiraga olindi)"
+
+            def _ochish(fayllar=tuple(created[:5])):
+                for fp in fayllar:
+                    try:
+                        os.startfile(fp)
+                    except Exception as e:
+                        messagebox.showerror("Xatolik", f"Blanka ochilmadi:\n{fp}\n\n{e}")
+
+            # Blanka avtomatik ochiladi (egasi talabi, 19.10.2026) — tugmani
+            # bosish shart emas. «Qayta ochish» — Word yopib yuborilsa.
+            # (F2 / print_results bu yerdan o'tmaydi — u oynasiz chop etadi.)
+            _ochish()
+            try:
+                from oyna_xabar import toast
+                toast(self.root, matn, davomiylik_ms=6000,
+                      tugmalar=[("📂 Qayta ochish", _ochish)])
+            except Exception as e:
+                print(f"[OGOHLANTIRISH] Yashil xabar ko'rsatilmadi: {e}")
+
+            # PDF nusxasini OneDrive ga saqlash (fon threadda)
+            try:
+                _ord_date = None
+                if sana_vaqt:
+                    try:
+                        _ord_date = datetime.strptime(str(sana_vaqt)[:10], "%Y-%m-%d").strftime("%d.%m.%Y")
+                    except Exception:
+                        pass
+                for _fp in created[:5]:
+                    threading.Thread(target=save_pdf_to_onedrive, args=(_fp, _ord_date), daemon=True).start()
+            except Exception:
+                pass
+
+        self.status_var.set("[...] Blanka yaratilmoqda — ishlashda davom etavering")
+        try:
+            threading.Thread(target=ishchi, daemon=True, name="blanka_yaratish").start()
         except Exception as e:
+            band.discard(order_id)
             messagebox.showerror("Xatolik", f"Blanka yaratishda xato: {e}")
-            import traceback
-            traceback.print_exc()
-    
+
     # ── BLANKA OLDIDAN: SAQLANMAGAN NATIJA TEKSHIRUVI ─────────────────────
     # MUAMMO (2026-09-29): ogohlantirish oynasida hamshiralar «Tuzataman
     # (saqlanmasin)» ni bosib, keyin «Blanka Yaratish» bilan qog'oz

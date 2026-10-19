@@ -40,6 +40,7 @@ TARJIMA = {
     # ── Jadval sarlavhalari ────────────────────────────────────────────────
     "Tahlil nomi": "Наименование анализа",
     "Natija": "Результат",
+    "Oldingi natija": "Предыдущий результат",
     "Norma": "Норма",
     "Me'yor": "Норма",
     "O'lchov birligi": "Ед. измерения",
