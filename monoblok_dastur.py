@@ -7094,11 +7094,25 @@ def _get_onedrive_natijalar(date_str=None):
     # 0-usul: Blanka Sozlamalarida qo'lda ko'rsatilgan PDF papkasi (eng ustun).
     # Ko'rsatilgan bo'lsa — o'sha papka ostida DD.MM.YYYY yaratiladi.
     try:
-        _custom_pdf = (load_blanka_config().get('pdf_save_dir', '') or '').strip()
+        _bcfg = load_blanka_config()
     except Exception:
-        _custom_pdf = ''
+        _bcfg = {}
+    _custom_pdf = (_bcfg.get('pdf_save_dir', '') or '').strip()
     if _custom_pdf:
         return os.path.join(_custom_pdf, date_str)
+    # Tanlangan bulut (OneDrive / Google Drive) — bulut_papka.py
+    try:
+        import bulut_papka
+        _root = bulut_papka.get_natijalar_root(_bcfg)
+        if _root:
+            return os.path.join(_root, date_str)
+        if bulut_papka.get_provider(_bcfg) == bulut_papka.GDRIVE:
+            # Google Drive diski ulanmagan (GoogleDriveFS to'xtagan) — PDF
+            # yo'qolmasin, mahalliy papkaga tushadi; nazorat signal beradi.
+            print("[PDF] Google Drive topilmadi — PDF mahalliy papkaga saqlanadi")
+            return os.path.join(os.path.expanduser('~'), 'Natijalar_PDF', 'Natijalar', date_str)
+    except Exception as e:
+        print(f"[PDF] Bulut papkasini aniqlashda xato: {e}")
     # 1-usul: OneDrive muhit o'zgaruvchisi (eng ishonchli)
     onedrive_root = os.environ.get('OneDrive') or os.environ.get('OneDriveConsumer')
     # 2-usul: home papkadan topish
@@ -11539,6 +11553,18 @@ class MonoblokApp:
             print(f"[XATO] OneDrive nazoratini yoqishda xato: {e}")
             return False
 
+    def _bulut_nomi(self):
+        """Blanka Sozlamalarida tanlangan bulut: 'OneDrive' / 'Google Drive'."""
+        try:
+            import bulut_papka
+            return bulut_papka.provider_nomi()
+        except Exception:
+            return "OneDrive"
+
+    def _bulut_qisqa_nomi(self):
+        """Toolbar tugmasi uchun qisqa nom (tugma eni 14 belgi)."""
+        return "GDrive" if self._bulut_nomi() == "Google Drive" else "OneDrive"
+
     def _onedrive_status_update(self, res):
         """Har tekshiruvdan keyin tugma rangi/matnini yangilash (UI oqimi)."""
         try:
@@ -11547,14 +11573,15 @@ class MonoblokApp:
             if not btn:
                 return
             level = res.get("level", "ok")
+            nom = self._bulut_qisqa_nomi()
             if level == "ok":
-                btn.config(text="☁ OneDrive ✓", bg="#DFF5DF", activebackground="#DFF5DF",
+                btn.config(text=f"☁ {nom} ✓", bg="#DFF5DF", activebackground="#DFF5DF",
                            fg="#005500")
             elif level == "warn":
-                btn.config(text="☁ OneDrive !", bg="#FFF3CD", activebackground="#FFF3CD",
+                btn.config(text=f"☁ {nom} !", bg="#FFF3CD", activebackground="#FFF3CD",
                            fg="#8A6D00")
             else:
-                btn.config(text="☁ OneDrive ✗", bg="#F8B4B4", activebackground="#F8B4B4",
+                btn.config(text=f"☁ {nom} ✗", bg="#F8B4B4", activebackground="#F8B4B4",
                            fg="#8B0000")
         except Exception as e:
             print(f"[OneDrive] Holat tugmasini yangilashda xato: {e}")
@@ -11573,18 +11600,19 @@ class MonoblokApp:
                         winsound.MessageBeep(-1)
                     except Exception:
                         pass
-            self.status_var.set("[OGOHLANTIRISH] " + res.get("summary", "OneDrive muammosi"))
+            nom = self._bulut_nomi()
+            self.status_var.set("[OGOHLANTIRISH] " + res.get("summary", f"{nom} muammosi"))
             if not cfg.get("popup", True):
                 return
 
             body = (onedrive_monitor.format_report(res) + "\n\n"
                     "Natijalar bulutga chiqmasa, nargi kompyuter ularni ko'rmaydi\n"
                     "va bemorga SMS ketmaydi.\n\n"
-                    "OneDrive ni hozir qayta ishga tushiraymi?")
-            if messagebox.askyesno("⚠ ONEDRIVE — NATIJA BULUTGA CHIQMAYAPTI",
+                    f"{nom} ni hozir qayta ishga tushiraymi?")
+            if messagebox.askyesno(f"⚠ {nom.upper()} — NATIJA BULUTGA CHIQMAYAPTI",
                                    body, parent=self.root, icon="warning"):
                 ok, msg = onedrive_monitor.restart_onedrive()
-                messagebox.showinfo("OneDrive", msg, parent=self.root)
+                messagebox.showinfo(nom, msg, parent=self.root)
                 if ok:
                     # 3 daqiqadan keyin qayta tekshiramiz
                     self.root.after(180000, lambda: threading.Thread(
@@ -11598,8 +11626,9 @@ class MonoblokApp:
             messagebox.showwarning("OneDrive", "onedrive_monitor.py topilmadi.", parent=self.root)
             return
 
+        nom = self._bulut_nomi()
         win = tk.Toplevel(self.root)
-        win.title("☁ OneDrive — natija sinxronizatsiyasi")
+        win.title(f"☁ {nom} — natija sinxronizatsiyasi")
         win.geometry("760x560")
         win.transient(self.root)
 
@@ -11636,7 +11665,7 @@ class MonoblokApp:
 
         def _restart():
             ok, msg = onedrive_monitor.restart_onedrive()
-            messagebox.showinfo("OneDrive", msg, parent=win)
+            messagebox.showinfo(nom, msg, parent=win)
             if ok:
                 win.after(20000, _refresh)
 
@@ -11645,10 +11674,10 @@ class MonoblokApp:
             if path and os.path.isdir(path):
                 os.startfile(path)
             else:
-                messagebox.showwarning("OneDrive", "Papka topilmadi.", parent=win)
+                messagebox.showwarning(nom, "Papka topilmadi.", parent=win)
 
         ttk.Button(btns, text="🔄 Qayta tekshirish", command=_refresh, width=20).pack(side=tk.LEFT, padx=3)
-        ttk.Button(btns, text="♻ OneDrive ni qayta yoqish", command=_restart, width=26).pack(side=tk.LEFT, padx=3)
+        ttk.Button(btns, text=f"♻ {nom} ni qayta yoqish", command=_restart, width=28).pack(side=tk.LEFT, padx=3)
         ttk.Button(btns, text="📁 Natijalar papkasi", command=_open_folder, width=20).pack(side=tk.LEFT, padx=3)
         ttk.Button(btns, text="Yopish", command=win.destroy, width=10).pack(side=tk.RIGHT, padx=3)
 
@@ -11999,7 +12028,7 @@ class MonoblokApp:
         # (ttk emas, tk.Button — chunki rangni o'zgartirish kerak: yashil/sariq/qizil)
         self.onedrive_btn = tk.Button(
             left_buttons,
-            text="☁ OneDrive …",
+            text=f"☁ {self._bulut_qisqa_nomi()} …",
             command=self.open_onedrive_status,
             width=14,
             relief=tk.RAISED,
@@ -23810,19 +23839,28 @@ Sana: {_sana_fmt}"""
         ttk.Entry(muhr_lf, textvariable=muhr_size_var, width=6).grid(row=2, column=1, sticky=tk.W, pady=3)
         ttk.Label(muhr_lf,
                   text="• Qog'oz blankaga muhr odatdagidek QO'LDA bosiladi — Word fayl o'zgarmaydi.\n"
-                       "• Muhr faqat OneDrive/botga ketadigan PDF ga, «Laborant vrach» qatoriga qo'yiladi.",
+                       "• Muhr faqat bulut/botga ketadigan PDF ga, «Laborant vrach» qatoriga qo'yiladi.",
                   foreground="#555", justify=tk.LEFT).grid(row=3, column=0, columnspan=4, sticky=tk.W, pady=(4, 0))
 
         save_lf = ttk.LabelFrame(main_frame, text="📁 Saqlash yo'llari (Word / PDF)", padding="8")
         save_lf.pack(fill=tk.X, pady=(0, 8))
         save_lf.columnconfigure(1, weight=1)
 
+        # Natija PDF lari qaysi bulutga chiqadi (bulut_papka.py)
+        bulut_var = tk.StringVar(value=(config.get('bulut_provayder') or 'onedrive'))
+        ttk.Label(save_lf, text="Natija buluti:").grid(row=0, column=0, sticky=tk.W, pady=3, padx=(0, 5))
+        bulut_fr = ttk.Frame(save_lf)
+        bulut_fr.grid(row=0, column=1, columnspan=3, sticky=tk.W, pady=3)
+        bulut_info = ttk.Label(save_lf, text="", foreground="#336699", wraplength=560, justify=tk.LEFT)
+        bulut_info.grid(row=1, column=1, columnspan=3, sticky=tk.W, pady=(0, 4))
+
         wp_fields = {}
         wp_rows = [
             ("word_save_dir", "Word (.docx) papkasi:"),
             ("pdf_save_dir",  "PDF nusxa papkasi:"),
         ]
-        for i, (key, label) in enumerate(wp_rows):
+        WP_ROW0 = 2  # 0-1 qatorlar — bulut tanlovi
+        for i, (key, label) in enumerate(wp_rows, start=WP_ROW0):
             ttk.Label(save_lf, text=label).grid(row=i, column=0, sticky=tk.W, pady=3, padx=(0, 5))
             var = tk.StringVar(value=config.get(key, ''))
             wp_fields[key] = var
@@ -23838,14 +23876,52 @@ Sana: {_sana_fmt}"""
             ttk.Button(save_lf, text="Tozalash",
                        command=lambda v=var: v.set("")).grid(row=i, column=3, pady=3)
 
+        def _bulut_yangila(almashdi=False):
+            """Tanlangan bulut bo'yicha natija papkasini ko'rsatadi. Bulut
+            almashtirilganda eski bulut ichidagi qo'lda PDF yo'li tozalanadi —
+            aks holda u ustun bo'lib, tanlov ishlamay qoladi."""
+            try:
+                import bulut_papka as _bp
+                prov = bulut_var.get()
+                pdf_v = wp_fields["pdf_save_dir"]
+                if almashdi and pdf_v.get().strip():
+                    for boshqa in _bp.PROVAYDERLAR:
+                        if boshqa != prov and _bp.is_inside_cloud(pdf_v.get().strip(), boshqa):
+                            pdf_v.set("")
+                            break
+                if pdf_v.get().strip():
+                    bulut_info.config(text="→ PDF qo'lda ko'rsatilgan papkaga saqlanadi (pastda). "
+                                           "Bulut tanlovi ishlashi uchun «Tozalash» bosing.",
+                                      foreground="#8A6D00")
+                    return
+                root = _bp.get_cloud_root(prov, {"gdrive_root": config.get("gdrive_root", "")})
+                nom = _bp.provider_nomi(prov)
+                if root:
+                    bulut_info.config(text=f"→ PDF: {os.path.join(root, 'Natijalar')}\\DD.MM.YYYY",
+                                      foreground="#005500")
+                else:
+                    bulut_info.config(text=f"⚠ {nom} papkasi topilmadi — {nom} dasturi o'rnatilib, "
+                                           f"akkauntga kirilganini tekshiring.",
+                                      foreground="#8B0000")
+            except Exception as e:
+                bulut_info.config(text=f"Bulutni aniqlashda xato: {e}", foreground="#8B0000")
+
+        ttk.Radiobutton(bulut_fr, text="OneDrive", variable=bulut_var, value="onedrive",
+                        command=lambda: _bulut_yangila(True)).pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Radiobutton(bulut_fr, text="Google Drive", variable=bulut_var, value="gdrive",
+                        command=lambda: _bulut_yangila(True)).pack(side=tk.LEFT)
+        wp_fields["pdf_save_dir"].trace_add("write", lambda *_: _bulut_yangila())
+        _bulut_yangila()
+
         ttk.Label(
             save_lf,
             text="• Bo'sh qoldirilsa — standart yo'l ishlatiladi "
-                 "(Word: G:\\Қилинган анализлар, PDF: OneDrive\\Natijalar).\n"
+                 "(Word: G:\\Қилинган анализлар, PDF: <tanlangan bulut>\\Natijalar).\n"
                  "• Har papka ostida avtomatik «DD.MM.YYYY» (sana) papkasi yaratiladi.\n"
+                 "• Nargi kompyuter (SMS/bot) ham XUDDI SHU bulutga ulangan bo'lishi kerak.\n"
                  "• Boshqa kompyuterda yo'l boshqacha bo'lsa — shu yerda ko'rsating.",
             foreground="#555", justify=tk.LEFT, wraplength=560).grid(
-            row=len(wp_rows), column=0, columnspan=4, sticky=tk.W, pady=(4, 0))
+            row=WP_ROW0 + len(wp_rows), column=0, columnspan=4, sticky=tk.W, pady=(4, 0))
 
         # ══════════════════════════════════════════════════════════════
         # TUGMALAR
@@ -23900,9 +23976,21 @@ Sana: {_sana_fmt}"""
             # Saqlash yo'llari (Word / PDF) — bo'sh = standart yo'l
             for key, var in wp_fields.items():
                 new_config[key] = var.get().strip()
+            _eski_bulut = config.get('bulut_provayder') or 'onedrive'
+            new_config["bulut_provayder"] = bulut_var.get()
 
             try:
                 save_blanka_config(new_config)
+                if _eski_bulut != new_config["bulut_provayder"]:
+                    # Bulut almashdi — ko'rsatkich va nazorat darhol yangi bulutga
+                    try:
+                        if getattr(self, "onedrive_btn", None):
+                            self.onedrive_btn.config(text=f"☁ {self._bulut_qisqa_nomi()} …")
+                        if getattr(self, "onedrive_watcher", None):
+                            threading.Thread(target=self.onedrive_watcher.check_now,
+                                             kwargs={"notify": False}, daemon=True).start()
+                    except Exception as e:
+                        print(f"[Bulut] Nazoratni yangilashda xato: {e}")
                 messagebox.showinfo("Muvaffaqiyat", "Blanka sozlamalari saqlandi!")
                 _on_dialog_destroy()
             except Exception as e:
