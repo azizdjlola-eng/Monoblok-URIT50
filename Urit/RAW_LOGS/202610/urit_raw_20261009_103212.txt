@@ -1,0 +1,25 @@
+  
+ID:261 09 19448
+NO.000011 2000-01-01
+            03:09:31
+
+*LEU +2    125 CELL/uL
+ KET -        0 mmol/L
+ NIT -   
+ URO            Normal
+*BIL +1     8.6 umol/L
+ GLU -        0 mmol/L
+*PRO +-       0.15 g/L
+ SG         1.030     
+ pH         5.5       
+*BLD +1     25 CELL/uL
+*Vc  +3     5.6 mmol/L
+*MA            80 mg/L
+*Ca       <=1.0 mmol/L
+*CR       >=26.4mmol/L
+ ACR       <3.4mg/mmol
+ 
+
+
+
+
