@@ -163,8 +163,14 @@ _cfg_live = dict(_bio_eff)
 # qayta yuboramiz. Haqiqiy qayta ishlash <= ~2.2 s (1 s Thread.Join + baza), shuning
 # uchun 2.5 s dan keyin qayta yuborish ikki marta qayta ishlashga olib kelmaydi.
 _qlock = threading.Lock()     # QCK→pauza→DSR ketma-ketligi bo'linmasin (javob ↔ qayta yuborish)
-_resend = None                # {"sid","qck","dsr","send","sock","tries","due"}
+_resend = None                # {"sid","payload"|"parts","send","sock","tries","due"}
 _resend_thread = None
+_last_dsr = None              # (barkod, yuborilgan vaqt) — "muddatidan oldin ACK" nazorati
+
+
+def _combine_ok() -> bool:
+    model = str(_cfg_live.get("model", _bp.DEFAULT_MODEL) or "")
+    return bool(_bp._tune("qck_dsr_combine", model.startswith("biobase")))
 
 
 def _resend_cfg():
@@ -208,9 +214,12 @@ def _resend_worker():
                 continue
             rec["tries"] += 1
             try:
-                rec["send"](rec["qck"])
-                time.sleep(float(_bp._tune("dsr_delay", 0.6)))
-                rec["send"](rec["dsr"])
+                if rec["payload"] is not None:
+                    rec["send"](rec["payload"])
+                else:
+                    rec["send"](rec["parts"][0])
+                    time.sleep(float(_bp._tune("dsr_delay", 0.6)))
+                    rec["send"](rec["parts"][1])
                 _log(f"  [QAYTA YUBORISH] {rec['sid']}: ACK kelmadi → QCK+DSR qayta yuborildi "
                      f"({rec['tries']}/{max_tries})")
             except Exception as e:
@@ -300,18 +309,14 @@ def _handle_query_hl7_qry_locked(message: str, send):
 
     qck = _bp.build_qck(q, bool(od))
     qck_b = _bp.wrap_mllp(qck, ENCODING)
-    send(qck_b)
-    save_query_raw("out_qck", qck)
     if not od:
+        send(qck_b)
+        save_query_raw("out_qck", qck)
         _log("  -> bemor topilmadi: QCK NF")
         return
-    # QCK va DSR orasidagi pauza. Analizator ikkala xabarni BITTA o'qishda
-    # olsa, ularning yig'indisi 1024 baytlik buferiga sig'maydi. Pauza
-    # uzunroq bo'lsa u QCK ni o'qib, buferni bo'shatib ulguradi.
-    time.sleep(float(_bp._tune("dsr_delay", 0.6)))
     # Qayta o'lchov navbati: shu barkod uchun laborant RAW oynada tanlagan tahlillar
     # bo'lsa — FAQAT ular yuboriladi (analizatorda yangi namuna ochilgan bo'ladi).
-    global _pending_retest_sid
+    global _pending_retest_sid, _last_dsr
     only = None
     try:
         only = _bp.retest_queue_get(sid)
@@ -329,15 +334,36 @@ def _handle_query_hl7_qry_locked(message: str, send):
         _pending_retest_sid = None
     dsr = _bp.build_dsr(q, od, model, only_codes=only)
     dsr_b = _bp.wrap_mllp(dsr, ENCODING)
-    send(dsr_b)
+    # QCK + DSR — BITTA bo'lak (22.10.2026). Analizator (Listrans) kalit so'zli HAR bo'lak
+    # uchun 1 s dan keyin ishlovchini chaqiradi, lekin ishlovchiga o'sha bo'lakni emas,
+    # nusxadagi ENG OXIRGI matnni beradi. Alohida QCK va DSR = 2 chaqiruv: 1-si DSR ni
+    # to'g'ri qayta ishlaydi, 2-si (to'plamli LIS da) o'sha DSR ni ro'yxatdagi KEYINGI
+    # namunaga yozardi — 261022121202 ga 199 ning ismi tushgan. Bitta bo'lak = bitta
+    # chaqiruv. Bufer ~1024 bayt: sig'masa eski usul (QCK, pauza, DSR).
+    combined = qck_b + dsr_b
+    t_first = time.time()          # birinchi bo'lak vaqti (alohida rejimda QCK)
+    if _combine_ok() and len(combined) <= int(_bp._tune("combine_max_bytes", 1000)):
+        send(combined)
+        parts = None
+    else:
+        send(qck_b)
+        time.sleep(float(_bp._tune("dsr_delay", 0.6)))
+        send(dsr_b)
+        parts = (qck_b, dsr_b)
+        if _combine_ok():
+            _log(f"  [DIQQAT] QCK+DSR {len(combined)} bayt — bitta bo'lakka sig'madi, alohida "
+                 f"yuborildi. To'plamli LIS da bu namunadan keyingisining ismini tekshiring")
+    save_query_raw("out_qck", qck)
     save_query_raw("out_dsr", dsr)
+    _last_dsr = (sid, t_first)
     after, _tries = _resend_cfg()
     if after > 0:
-        _resend = {"sid": sid, "qck": qck_b, "dsr": dsr_b, "send": send,
-                   "sock": getattr(getattr(send, "__self__", None), "_sock", None),
+        _resend = {"sid": sid, "payload": combined if parts is None else None, "parts": parts,
+                   "send": send, "sock": getattr(getattr(send, "__self__", None), "_sock", None),
                    "tries": 0, "due": time.time() + max(after, 1.5)}
+    how = " (QCK bilan bitta bo'lak)" if parts is None else ""
     _log(f"  -> DSR^Q03: {od['patient'].get('fish')} | tahlillar: {[a for a, *_ in items]} "
-         f"| {len(dsr)} bayt")
+         f"| {len(dsr)} bayt{how}")
     if len(dsr) > 1000:
         _log(f"  [OGOHLANTIRISH] Javob {len(dsr)} bayt — analizator buferi ~1024 bayt. "
              f"Katta ro'yxat qabul qilinmasligi mumkin (ACK kelmasa shu sabab).")
@@ -397,6 +423,18 @@ def _handle_message(message: str, send):
             if rec and rec["tries"]:
                 _log(f"  [QAYTA YUBORISH] {rec['sid']}: {rec['tries']}-qayta yuborishdan keyin qabul qilindi")
             _cancel_resend()
+            # Analizator DSR ni bo'lak kelganidan kamida 1 s keyin qayta ishlaydi
+            # (Thread.Join(1000)). Undan tezroq kelgan ACK = u bizning oxirgi DSR ni
+            # emas, ESKI matnni qayta ishlagan: bu namunaga boshqa bemor ismi/tahlillari
+            # yozilgan bo'lishi mumkin (22.10.2026: 202 ← 199, 205 ← 203).
+            global _last_dsr
+            if _last_dsr and "ACK^Q03" in message:
+                dt = time.time() - _last_dsr[1]
+                if dt < float(_bp._tune("early_ack_sec", 0.9)):
+                    _log(f"  [DIQQAT!] {_last_dsr[0]}: analizator javobni {dt:.2f} s da tasdiqladi "
+                         f"(<1 s — imkonsiz). Analizatorda shu namunaning ISMI va TAHLILLARINI "
+                         f"barkod bilan solishtiring — boshqa bemorniki yozilgan bo'lishi mumkin")
+                _last_dsr = None
         _log(f"◄ ACK (analizator tasdiqladi) {msa[:80]}")
         # Qayta o'lchov DSR i qabul qilindi — navbatdan olib tashlaymiz (bir martalik)
         global _pending_retest_sid

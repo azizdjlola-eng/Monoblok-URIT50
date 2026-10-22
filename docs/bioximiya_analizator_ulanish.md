@@ -72,6 +72,18 @@ dastur ularni ketma-ket so'raydi (`frmSampleInput` ro'yxati). Bitta DSR yo'qolsa
 qayta yuborish bilan davom etadi. ⚠ Analizator DSR dagi barkodni TEKSHIRMAYDI (ro'yxatdagi navbatdagi
 namunaga yozadi): to'plamli rejimni avval 3–5 namunada sinab, ekrandagi ismlarni barkod bilan solishtiring.
 
+### To'plamli LIS da ism "surilishi" (22.10.2026, 2 holat: 202 ← 199 ismi, 205 ← 203 ismi)
+Bizning DSR to'g'ri edi (log: 202 → Iskandarov Sherbek). Analizator (`Listrans.ᜀ(String)`) kalit so'zli
+har bo'lak uchun nusxa maydoniga matnni yozadi, 1 s uxlaydi, keyin ishlovchini **maydondagi ENG OXIRGI
+matn** bilan chaqiradi. Alohida QCK va DSR = 2 chaqiruv: QCK chaqiruvi DSR_N ni to'g'ri qayta ishlaydi →
+ACK → keyingi QRY; DSR chaqiruvi esa (keyingi javobimiz hali kelmagan bo'lsa) o'sha DSR_N ni ro'yxatdagi
+**keyingi namunaga** yozadi. Isbot: QRY_203 bizning DSR_202 dan 3 ms keyin kelgan (haqiqiy ishlov ≥1 s).
+**Yechim:** QCK+DSR **bitta bo'lak** (`qck_dsr_combine`, biobase da standart; ≤ `combine_max_bytes`=1000,
+sig'masa eski usul + logda DIQQAT) → har so'rovga bitta chaqiruv. Natija ACK'i `ack_style: byte` (0x06) —
+HL7 `ACK^R01` ham kalit so'z bo'lib, xuddi shu poygani keltirib chiqarishi mumkin edi.
+**Nazorat:** ACK^Q03 birinchi bo'lakdan < 0.9 s da kelsa logda `[DIQQAT!] <barkod>` — o'sha namunaning
+ismi/tahlillarini analizatorda tekshiring.
+
 ## Kod xaritasi (Tahlil kodlari oynasi)
 
 Bioximiya tabida **🧬 Tahlil kodlari** tugmasi. Jadval: analizator kodi | nomi | LIMS tahlili.
