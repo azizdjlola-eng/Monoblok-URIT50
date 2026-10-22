@@ -48,6 +48,30 @@ yuborardi — BK-280 bu raqamlarni bilmaydi (uning kodlari 272, 236 ...) va pane
 **Tekshirish:** analizatorda barcode skanerlang → ism va tahlillar chiqishi kerak; `logs/bio_YYYYMMDD.log` da
 `◄ QRY^Q02 (shtrix-kod): 2609...` va `-> DSR^Q03: <ism> | tahlillar: [...]` qatorlari.
 
+### BK-280: LIS javobi "sekin" / 1-urinishda kelmasligi (22.10.2026)
+
+Statistika (24.09–22.10, 601 so'rov): **22% birinchi so'rovga ACK^Q03 kelmagan**, laborant 5–10 s
+kutib LIS ni qayta bosgan. Bizning javob har doim <1 s da ketadi (RAW `QUERY/*_out_dsr.txt`).
+Sabab analizator dasturida (CRYSTAL `Listrans`, Conductor.exe IL dan aniqlangan):
+- socket **statik va bitta** (natija ham, LIS so'rovi ham 8087 dagi bitta ulanishda);
+- har `sendHex` (natija yuborish, QRY, ACK^Q03) **yangi `BeginReceive` zanjiri** ochadi, eskilari yopilmaydi;
+- kelgan bo'lak navbatdagi eng eski zanjirga tushadi va **o'sha `Listrans` nusxasining** hodisasiga beriladi.
+  Natija yuboruvchi nusxa (`frmAll`) zanjiriga tushgan DSR LIS oynasiga (`frmSampleInput`) yetmaydi;
+- dispatch faqat bo'lakda `DSC` / `QCK^Q02` / `ACK^R01` bo'lsa, oldin `Thread.Join(1000)` (1 s uxlash).
+Shuning uchun natijalar to'plamidan keyingi 1-so'rov ko'pincha yo'qoladi; analizator qayta ulangach o'tadi.
+Analizatorning o'zida LIS timeout/qayta urinish **yo'q** (`checktime` — kun almashishi uchun).
+
+**Yechim (`bk280_listener`):** DSR dan keyin `dsr_resend_after` (standart 2.5 s, faqat `biobase*` modelda)
+ichida ACK kelmasa QCK+DSR qayta yuboriladi, `dsr_resend_max` (3) martagacha. ACK yoki yangi QRY kelishi bilan
+bekor qilinadi; ketma-ketlik `_qlock` bilan bo'linmaydi. Haqiqiy qayta ishlash ≤ ~2.2 s (o'lchangan) — ikki
+marta qayta ishlanmaydi. O'chirish: `analizator_config.json → bioximiya.dsr_resend_after = 0`.
+Logda: `[QAYTA YUBORISH] <barkod>: ...`.
+
+**Tezkor ish usuli:** analizatorda bir nechta namunani belgilab (Ctrl/Shift) **bitta** "LIS" bosish mumkin —
+dastur ularni ketma-ket so'raydi (`frmSampleInput` ro'yxati). Bitta DSR yo'qolsa zanjir to'xtardi; endi
+qayta yuborish bilan davom etadi. ⚠ Analizator DSR dagi barkodni TEKSHIRMAYDI (ro'yxatdagi navbatdagi
+namunaga yozadi): to'plamli rejimni avval 3–5 namunada sinab, ekrandagi ismlarni barkod bilan solishtiring.
+
 ## Kod xaritasi (Tahlil kodlari oynasi)
 
 Bioximiya tabida **🧬 Tahlil kodlari** tugmasi. Jadval: analizator kodi | nomi | LIMS tahlili.

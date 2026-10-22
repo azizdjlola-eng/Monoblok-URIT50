@@ -154,6 +154,71 @@ _last_result_time = None
 _pending_retest_sid = None   # qayta o'lchov DSR i yuborilgan barkod (ACK kutilmoqda)
 _cfg_live = dict(_bio_eff)
 
+# ── DSR ni avtomatik qayta yuborish (22.10.2026) ──
+# BK-280 (CRYSTAL Listrans) har Send dan keyin YANGI BeginReceive zanjirini ochadi; natija
+# yuborgan Listrans nusxasining zanjirlari ham o'sha bitta socketda qoladi. Bizning QCK/DSR
+# bo'lagi navbatdagi eng eski zanjirga tushadi — u natija yuboruvchi nusxaniki bo'lsa, DSR
+# LIS oynasiga yetmaydi (ACK^Q03 kelmaydi). Natijalar to'plamidan keyingi 1-so'rov ~22%
+# shu sabab yiqilardi va laborant 5-10 s kutib qayta bosardi. Endi ACK kelmasa o'zimiz
+# qayta yuboramiz. Haqiqiy qayta ishlash <= ~2.2 s (1 s Thread.Join + baza), shuning
+# uchun 2.5 s dan keyin qayta yuborish ikki marta qayta ishlashga olib kelmaydi.
+_qlock = threading.Lock()     # QCK→pauza→DSR ketma-ketligi bo'linmasin (javob ↔ qayta yuborish)
+_resend = None                # {"sid","qck","dsr","send","sock","tries","due"}
+_resend_thread = None
+
+
+def _resend_cfg():
+    model = str(_cfg_live.get("model", _bp.DEFAULT_MODEL) or "")
+    default_after = 2.5 if model.startswith("biobase") else 0
+    try:
+        after = float(_bp._tune("dsr_resend_after", default_after))
+        tries = int(_bp._tune("dsr_resend_max", 3))
+    except (TypeError, ValueError):
+        after, tries = default_after, 3
+    return after, tries
+
+
+def _cancel_resend(reason: str = ""):
+    """_qlock ichida chaqiriladi."""
+    global _resend
+    if _resend and reason:
+        _log(f"  [QAYTA YUBORISH] {_resend['sid']}: bekor — {reason}")
+    _resend = None
+
+
+def _resend_worker():
+    global _resend
+    while _running:
+        time.sleep(0.2)
+        rec = _resend
+        if not rec or time.time() < rec["due"]:
+            continue
+        with _qlock:
+            if _resend is not rec:          # shu orada ACK yoki yangi so'rov keldi
+                continue
+            tr = getattr(rec["send"], "__self__", None)
+            if tr is not None and getattr(tr, "_sock", None) is not rec["sock"]:
+                _cancel_resend("ulanish almashdi")
+                continue
+            _after, max_tries = _resend_cfg()
+            if rec["tries"] >= max_tries:
+                _log(f"  [QAYTA YUBORISH] {rec['sid']}: {max_tries} marta yuborildi, ACK kelmadi — "
+                     f"analizatorda LIS ni qayta bosing")
+                _resend = None
+                continue
+            rec["tries"] += 1
+            try:
+                rec["send"](rec["qck"])
+                time.sleep(float(_bp._tune("dsr_delay", 0.6)))
+                rec["send"](rec["dsr"])
+                _log(f"  [QAYTA YUBORISH] {rec['sid']}: ACK kelmadi → QCK+DSR qayta yuborildi "
+                     f"({rec['tries']}/{max_tries})")
+            except Exception as e:
+                _log(f"  [QAYTA YUBORISH] {rec['sid']}: yuborilmadi ({e})")
+                _resend = None
+                continue
+            rec["due"] = time.time() + max(_after, 1.5)
+
 
 def _ack_bytes(kind_msh: dict, kind="R01") -> list:
     style = _cfg_live.get("ack_style", "hl7")
@@ -209,6 +274,13 @@ def save_query_raw(direction: str, text: str):
 
 
 def _handle_query_hl7_qry(message: str, send):
+    with _qlock:
+        _cancel_resend("yangi so'rov keldi")
+        _handle_query_hl7_qry_locked(message, send)
+
+
+def _handle_query_hl7_qry_locked(message: str, send):
+    global _resend
     q = _bp.parse_qry(message)
     sid = q.get("sample_id", "")
     model = _cfg_live.get("model", _bp.DEFAULT_MODEL)
@@ -227,7 +299,8 @@ def _handle_query_hl7_qry(message: str, send):
         return
 
     qck = _bp.build_qck(q, bool(od))
-    send(_bp.wrap_mllp(qck, ENCODING))
+    qck_b = _bp.wrap_mllp(qck, ENCODING)
+    send(qck_b)
     save_query_raw("out_qck", qck)
     if not od:
         _log("  -> bemor topilmadi: QCK NF")
@@ -255,8 +328,14 @@ def _handle_query_hl7_qry(message: str, send):
     else:
         _pending_retest_sid = None
     dsr = _bp.build_dsr(q, od, model, only_codes=only)
-    send(_bp.wrap_mllp(dsr, ENCODING))
+    dsr_b = _bp.wrap_mllp(dsr, ENCODING)
+    send(dsr_b)
     save_query_raw("out_dsr", dsr)
+    after, _tries = _resend_cfg()
+    if after > 0:
+        _resend = {"sid": sid, "qck": qck_b, "dsr": dsr_b, "send": send,
+                   "sock": getattr(getattr(send, "__self__", None), "_sock", None),
+                   "tries": 0, "due": time.time() + max(after, 1.5)}
     _log(f"  -> DSR^Q03: {od['patient'].get('fish')} | tahlillar: {[a for a, *_ in items]} "
          f"| {len(dsr)} bayt")
     if len(dsr) > 1000:
@@ -313,6 +392,11 @@ def _handle_message(message: str, send):
         # (28.09.2026 — ~50% holatda ACK umuman kelmadi) analizator AE/AR bilan
         # rad etdimi yoki umuman javob bermadimi — shundan ajratiladi.
         msa = next((ln.strip() for ln in re.split(r"[\r\n]+", message) if ln.strip().startswith("MSA|")), "")
+        with _qlock:
+            rec = _resend
+            if rec and rec["tries"]:
+                _log(f"  [QAYTA YUBORISH] {rec['sid']}: {rec['tries']}-qayta yuborishdan keyin qabul qilindi")
+            _cancel_resend()
         _log(f"◄ ACK (analizator tasdiqladi) {msa[:80]}")
         # Qayta o'lchov DSR i qabul qilindi — navbatdan olib tashlaymiz (bir martalik)
         global _pending_retest_sid
@@ -384,6 +468,11 @@ def start_bk280_listener(host=None, port=None, order_update_callback=None, cfg=N
     t = threading.Thread(target=_run_transport, args=(eff, "natija"), daemon=True, name="bio-listener")
     t.start()
     _threads.append(t)
+
+    global _resend_thread
+    if _resend_thread is None or not _resend_thread.is_alive():
+        _resend_thread = threading.Thread(target=_resend_worker, daemon=True, name="bio-dsr-resend")
+        _resend_thread.start()
 
     lis_port = int(eff.get("lis_port") or 0)
     if eff.get("connection_type") == "tcp_server" and lis_port and lis_port != int(eff.get("port", 0)):
