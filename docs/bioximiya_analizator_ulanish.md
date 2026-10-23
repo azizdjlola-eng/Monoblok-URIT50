@@ -83,6 +83,9 @@ sig'masa eski usul + logda DIQQAT) → har so'rovga bitta chaqiruv. Natija ACK'i
 HL7 `ACK^R01` ham kalit so'z bo'lib, xuddi shu poygani keltirib chiqarishi mumkin edi.
 **Nazorat:** ACK^Q03 birinchi bo'lakdan < 0.9 s da kelsa logda `[DIQQAT!] <barkod>` — o'sha namunaning
 ismi/tahlillarini analizatorda tekshiring.
+Istisno (23.10.2026): shu barkodga DSR ACK kelmasdan oldin ham ketgan bo'lsa (qayta yuborish yoki LIS
+qayta bosilgan), tez ACK o'sha bir xil nusxaniki — DIQQAT chiqmaydi, logda `ACK ... oldingi DSR nusxasiga
+(bir xil bemor, xavfsiz)`. Vaqt shu barkodga 1-DSR dan ham o'lchanadi (`_last_dsr[2]`).
 
 ## LIS fon xizmati va ulanish nazorati (23.10.2026)
 

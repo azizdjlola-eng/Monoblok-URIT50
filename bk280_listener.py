@@ -193,7 +193,7 @@ _cfg_live = dict(_bio_eff)
 _qlock = threading.Lock()     # QCK→pauza→DSR ketma-ketligi bo'linmasin (javob ↔ qayta yuborish)
 _resend = None                # {"sid","payload"|"parts","send","sock","tries","due"}
 _resend_thread = None
-_last_dsr = None              # (barkod, yuborilgan vaqt) — "muddatidan oldin ACK" nazorati
+_last_dsr = None              # (barkod, yuborilgan vaqt, shu barkodga 1-DSR vaqti) — "muddatidan oldin ACK" nazorati
 
 
 def _combine_ok() -> bool:
@@ -387,7 +387,10 @@ def _handle_query_hl7_qry_locked(message: str, send):
                  f"yuborildi. To'plamli LIS da bu namunadan keyingisining ismini tekshiring")
     save_query_raw("out_qck", qck)
     save_query_raw("out_dsr", dsr)
-    _last_dsr = (sid, t_first)
+    # Shu barkodga DSR ACK kelmasdan qayta so'ralsa — 1-DSR vaqti saqlanadi: tez kelgan
+    # ACK oldingi (bir xil) nusxaniki bo'lishi mumkin, boshqa bemorniki emas.
+    t_sid = _last_dsr[2] if _last_dsr and _last_dsr[0] == sid else t_first
+    _last_dsr = (sid, t_first, t_sid)
     after, _tries = _resend_cfg()
     if after > 0:
         _resend = {"sid": sid, "payload": combined if parts is None else None, "parts": parts,
@@ -460,9 +463,17 @@ def _handle_message(message: str, send):
             # emas, ESKI matnni qayta ishlagan: bu namunaga boshqa bemor ismi/tahlillari
             # yozilgan bo'lishi mumkin (22.10.2026: 202 ← 199, 205 ← 203).
             global _last_dsr
+            # Shu barkodga DSR oldin ham ketgan (qayta yuborish / LIS qayta bosilgan) bo'lsa,
+            # tez ACK o'sha bir xil nusxaniki — ism to'g'ri, ogohlantirish shart emas
+            # (23.10.2026: 261023121390 da noto'g'ri DIQQAT chiqqan, natija to'g'ri ism bilan kelgan).
             if _last_dsr and "ACK^Q03" in message:
-                dt = time.time() - _last_dsr[1]
-                if dt < float(_bp._tune("early_ack_sec", 0.9)):
+                now = time.time()
+                dt = now - _last_dsr[1]
+                early = float(_bp._tune("early_ack_sec", 0.9))
+                if dt < early and now - _last_dsr[2] >= early:
+                    _log(f"  {_last_dsr[0]}: ACK {dt:.2f} s da — shu barkodning oldingi DSR nusxasiga "
+                         f"(bir xil bemor, xavfsiz)")
+                elif dt < early:
                     _log(f"  [DIQQAT!] {_last_dsr[0]}: analizator javobni {dt:.2f} s da tasdiqladi "
                          f"(<1 s — imkonsiz). Analizatorda shu namunaning ISMI va TAHLILLARINI "
                          f"barkod bilan solishtiring — boshqa bemorniki yozilgan bo'lishi mumkin")
