@@ -10512,7 +10512,19 @@ class MonoblokApp:
         self.onedrive_watcher = None  # OneDrive sinxronizatsiya nazoratchisi
         self._onedrive_last = None    # oxirgi tekshiruv natijasi
         self.bk280_lis_thread = None  # BK-280 LIS query server thread
-        
+        # Bioximiya LIS holati (23.10.2026): listener endi alohida FON XIZMATIDA (bio_xizmat) —
+        # monoblok yopilsa/qayta ochilsa ham analizator ulanishi uzilmaydi. "● Bioximiya"
+        # tugmasi haqiqiy holatni ko'rsatadi: yashil — ulangan, to'q sariq — analizator
+        # ulanmagan, kulrang — LIS server ishlamayapti.
+        self._bio_rejim = None            # "xizmat" | "ichki" (shu dastur ichida, zaxira)
+        self._bio_holat = None
+        self._bio_holat_turi = None       # "ulangan" | "ulanmagan" | "ochiq"
+        self._bio_event_seq = None
+        self._bio_qayta_ochildi = 0.0
+        self._bio_eslatildi = False
+        self._bio_poll_boshlandi = time.time()
+        self.root.after(8000, self._bio_holat_poll)
+
         # Blanka generation uses blanka_generator.py directly (no pre-initialization needed)
         
         # BARCHA dasturlarni avtomatik ishga tushirish (XAMPP, URIT-50, BK-280, va boshqalar)
@@ -11256,10 +11268,29 @@ class MonoblokApp:
                 return False
             bio_host = bio_cfg.get("ip", "0.0.0.0")
             bio_port = int(bio_cfg.get("port", 8087))
+            self._on_bk280_result = on_bk280_result   # xizmat rejimida _bio_holat_poll chaqiradi
+
+            # 23.10.2026: FON XIZMATI. Listener dastur ICHIDA bo'lsa, dastur har yopilganda
+            # analizator ulanishi uziladi va BK-280 o'zi qayta ulanmaydi ("LIS server yo'q"
+            # oynasi, laborant "Ulanish" ni bosmaguncha LIS ishlamaydi). Xizmat dastur
+            # yopilganda to'xtamaydi. Ishga tushmasa — eski usulda (shu dastur ichida).
+            if bio_cfg.get("xizmat_rejimi", True) and bio_cfg.get("connection_type", "tcp_server") == "tcp_server":
+                try:
+                    import bio_xizmat as _bx
+                    ok, msg = _bx.taminla(kutish=12)
+                    print(f"[BIO] {msg}")
+                    if ok:
+                        self._bio_rejim = "xizmat"
+                        self.root.after(0, lambda m=msg: self.status_var.set(f"[OK] {m}"))
+                        return True
+                    print("[OGOHLANTIRISH] Bioximiya fon xizmati ishga tushmadi — dastur ichida ochiladi")
+                except Exception as e:
+                    print(f"[OGOHLANTIRISH] Bioximiya fon xizmati: {e}")
 
             # To'liq sozlama (model, ulanish turi, protokol, LIS porti) — universal listener
             self.bk280_listener_thread = start_bk280_listener(order_update_callback=on_bk280_result, cfg=bio_cfg)
             if self.bk280_listener_thread:
+                self._bio_rejim = "ichki"
                 self.status_var.set(f"[OK] Bioximiya listener ishga tushdi ({bio_cfg.get('model', 'biobase_bk')})")
                 print(f"[OK] Bioximiya listener ishga tushdi: {bio_cfg.get('model', 'biobase_bk')} "
                       f"{bio_cfg.get('connection_type', 'tcp_server')} {bio_host}:{bio_port} "
@@ -11277,6 +11308,11 @@ class MonoblokApp:
     def start_bk280_lis_server(self):
         """Shtrix-kod so'rovi (QRY/ORM/ASTM Q) endi universal bioximiya listener ichida
         (bk280_listener → lis_port). Alohida server kerak emas — moslik uchun qoldirilgan."""
+        if getattr(self, "_bio_rejim", None):
+            # Fon xizmati yoki ichki listener lis_port ni allaqachon tinglaydi. Eski
+            # asus_lis_server bu yerda ochilsa o'sha portni ikkinchi marta egallardi.
+            print("[OK] Shtrix-kod so'rovi: bioximiya listener ichida (lis_port)")
+            return True
         try:
             from bk280_listener import is_running as _bio_running
             if _bio_running():
@@ -11305,6 +11341,194 @@ class MonoblokApp:
             import traceback
             traceback.print_exc()
             return False
+
+    # ───────────────── Bioximiya LIS holati (fon xizmati nazorati) ─────────────────
+    _BIO_TUGMA = {"ulangan": ("#388E3C", "● Bioximiya"),
+                  "ulanmagan": ("#EF6C00", "⚠ Bioximiya"),
+                  "ochiq": ("#616161", "✖ Bioximiya")}
+
+    def _bio_holat_poll(self):
+        """Har 5 s: LIS holati → "● Bioximiya" tugmasi; xizmat javob bermasa qayta ochish;
+        xizmatdan kelgan natija hodisasi → ochiq bemorni yangilash."""
+        try:
+            if not self._bio_rejim:
+                # Listener umuman ochilmagan (23.10.2026 ertalabgidek) — tugma yashil turib
+                # qolmasin: kulrang + ogohlantirish va har 60 s qayta urinish.
+                if time.time() - self._bio_poll_boshlandi > 40 and BK280_AVAILABLE:
+                    try:
+                        yoqilgan = get_analyzer("bioximiya").get("enabled", True)
+                    except Exception:
+                        yoqilgan = True
+                    if yoqilgan:
+                        self._bio_tugma_yangila("ochiq")
+                        if self._bio_holat_turi != "ochiq":
+                            self._bio_holat_turi = "ochiq"
+                            try:
+                                from oyna_xabar import toast, SARIQ
+                                toast(self.root, "⚠ Bioximiya LIS server ishga tushmadi — qayta "
+                                      "urinilmoqda. Analizator LIS ga ulana olmaydi.",
+                                      davomiylik_ms=12000, fon=SARIQ)
+                            except Exception:
+                                pass
+                        if time.time() - self._bio_qayta_ochildi >= 60:
+                            self._bio_qayta_ochildi = time.time()
+                            print("[BIO] Listener ochilmagan — qayta urinilmoqda")
+                            threading.Thread(target=self.start_bk280_listener, daemon=True).start()
+                return
+            if self._bio_rejim == "xizmat":
+                import bio_xizmat as _bx
+                h = _bx.holat_oqi()
+                if h is not None and (h.get("mode") != "xizmat" or h["_yosh"] >= _bx.HOLAT_ESKIRISH_S):
+                    h = None
+            else:
+                from bk280_listener import get_status as _bio_gs
+                h = _bio_gs()
+            self._bio_holat = h
+            if h is None or not h.get("listening"):
+                tur = "ochiq"
+            elif h.get("connected"):
+                tur = "ulangan"
+            else:
+                tur = "ulanmagan"
+            self._bio_tugma_yangila(tur)
+            self._bio_hodisalar(h)
+            if self._bio_rejim == "xizmat":
+                self._bio_xizmat_nazorat(tur, h)
+            self._bio_ogohlantir(tur)
+        except Exception as e:
+            print(f"[OGOHLANTIRISH] bioximiya holati: {e}")
+        finally:
+            try:
+                self.root.after(5000, self._bio_holat_poll)
+            except Exception:
+                pass
+
+    def _bio_tugma_yangila(self, tur):
+        btn = getattr(self, "biochemistry_btn", None)
+        if btn is None:
+            return
+        bg, matn = self._BIO_TUGMA[tur]
+        try:
+            if btn.cget("bg") != bg:
+                btn.config(bg=bg, activebackground=bg)
+            if btn.cget("text") != matn:
+                btn.config(text=matn)
+        except Exception:
+            pass
+
+    def _bio_tooltip_ulash(self, btn):
+        """Tugma ustiga kelganda LIS holati (ulangan IP, vaqt, oxirgi natija/so'rov)."""
+        tip = {"w": None}
+
+        def chiq(_e=None):
+            if tip["w"] is not None:
+                try:
+                    tip["w"].destroy()
+                except Exception:
+                    pass
+                tip["w"] = None
+
+        def kir(_e=None):
+            chiq()
+            try:
+                import bio_xizmat as _bx
+                matn = _bx.holat_matni(self._bio_holat) if self._bio_rejim else "Bioximiya LIS hali ishga tushmadi"
+                w = tk.Toplevel(btn)
+                w.overrideredirect(True)
+                try:
+                    w.attributes("-topmost", True)
+                except Exception:
+                    pass
+                tk.Label(w, text=matn, bg="#FFFDE7", fg="#212121", justify="left",
+                         font=("Segoe UI", 9), relief="solid", bd=1, padx=8, pady=5).pack()
+                w.update_idletasks()
+                x = btn.winfo_rootx() + btn.winfo_width() - w.winfo_reqwidth()
+                y = btn.winfo_rooty() + btn.winfo_height() + 4
+                w.geometry(f"+{max(0, x)}+{y}")
+                tip["w"] = w
+            except Exception:
+                pass
+
+        btn.bind("<Enter>", kir, add="+")
+        btn.bind("<Leave>", chiq, add="+")
+        btn.bind("<ButtonPress>", chiq, add="+")
+
+    def _bio_hodisalar(self, h):
+        """Xizmat rejimida callback yo'q — natija hodisalari holat faylidan o'qiladi."""
+        if not h:
+            return
+        evs = h.get("events") or []
+        kalit = h.get("pid")
+        oxirgi = max((int(e.get("seq", 0)) for e in evs), default=0)
+        if self._bio_event_seq is None or self._bio_event_seq[0] != kalit:
+            self._bio_event_seq = (kalit, oxirgi)      # birinchi o'qish: eski hodisalar qayta ishlanmaydi
+            return
+        yangi = [e for e in evs if int(e.get("seq", 0)) > self._bio_event_seq[1]]
+        self._bio_event_seq = (kalit, oxirgi)
+        if self._bio_rejim != "xizmat":
+            return                                     # ichki rejimda callback o'zi chaqiriladi
+        cb = getattr(self, "_on_bk280_result", None)
+        for oid in dict.fromkeys(e.get("order_id") for e in yangi if e.get("order_id")):
+            try:
+                cb and cb(oid)
+            except Exception:
+                pass
+
+    def _bio_xizmat_nazorat(self, tur, h):
+        """Xizmat yo'q / osilib qolgan → qayta ochish. Kod yangilangan va analizator
+        ulanmagan bo'lsa → yangi kod bilan qayta ochish (ulanish yo'q — yo'qotadigan narsa yo'q)."""
+        import bio_xizmat as _bx
+        if time.time() - self._bio_qayta_ochildi < 60:
+            return
+        if tur == "ochiq":
+            sabab = "LIS xizmati javob bermayapti"
+        elif tur == "ulanmagan" and _bx.kod_eskirganmi(h):
+            sabab = "LIS xizmati kodi yangilangan"
+        else:
+            return
+        self._bio_qayta_ochildi = time.time()
+
+        def ish():
+            try:
+                if tur == "ulanmagan" or _bx.ishlayaptimi():
+                    ok, msg = _bx.qayta_ishga_tushir()
+                else:
+                    ok, msg = _bx.taminla()
+            except Exception as e:
+                ok, msg = False, str(e)
+            print(f"[BIO] nazorat: {sabab} → {msg}")
+            self.root.after(0, lambda: self.status_var.set(
+                f"{'[OK]' if ok else '[XATO]'} Bioximiya: {sabab} → {msg}"))
+        threading.Thread(target=ish, daemon=True).start()
+
+    def _bio_ogohlantir(self, tur):
+        """Holat o'zgarishida bloklamaydigan xabar. Uzilish — laborant analizatorda
+        "Ulanish" ni bosishi kerak (BK-280 o'zi qayta ulanmaydi)."""
+        oldingi, self._bio_holat_turi = self._bio_holat_turi, tur
+        try:
+            from oyna_xabar import toast, SARIQ
+        except Exception:
+            return
+        uzildi = ("⚠ Bioximiya analizatori LIS ga ulanmagan.\n"
+                  "Analizator kompyuterida: LIS sozlamasi → «Подключить» (Ulanish) ni bosing.\n"
+                  "Ulanmaguncha shtrix-kod (LIS) va natija yuborish ishlamaydi.")
+        if oldingi == tur:
+            if (tur == "ulanmagan" and not self._bio_eslatildi
+                    and time.time() - self._bio_poll_boshlandi > 90):
+                self._bio_eslatildi = True
+                toast(self.root, uzildi, davomiylik_ms=15000, fon=SARIQ)
+            return
+        if oldingi is None:
+            return
+        if tur == "ulangan":
+            self._bio_eslatildi = False
+            toast(self.root, "✓ Bioximiya analizatori LIS ga ulandi", davomiylik_ms=3500)
+        elif tur == "ulanmagan":
+            self._bio_eslatildi = True
+            toast(self.root, uzildi, davomiylik_ms=15000, fon=SARIQ)
+        else:
+            toast(self.root, "⚠ Bioximiya LIS xizmati ishlamayapti — qayta ishga tushirilmoqda...",
+                  davomiylik_ms=8000, fon=SARIQ)
 
     def start_bc20s_listener(self) -> bool:
         """BC-20S Gematologiya analizatoriga TCP CLIENT sifatida ulanish"""
@@ -11765,7 +11989,10 @@ class MonoblokApp:
                 padx=12, pady=3, relief=tk.RAISED, bd=2, cursor="hand2"
             )
             biochemistry_btn.pack(side=tk.RIGHT, padx=3)
-            
+            # Rangi/matni LIS holatiga qarab yangilanadi (_bio_holat_poll), ustiga kelganda izoh
+            self.biochemistry_btn = biochemistry_btn
+            self._bio_tooltip_ulash(biochemistry_btn)
+
             # 2. Gemotologiya (BC-20S) - alohida ajralib tursin
             hematology_btn = tk.Button(
                 top_bar, text="● Gemotologiya",
@@ -22761,9 +22988,20 @@ Sana: {_sana_fmt}"""
                     s.connect((ip, port)); s.close()
                     messagebox.showinfo("Bioximiya", f"[OK] {ip}:{port} ga ulanildi!", parent=dialog)
                 else:
-                    res = s.connect_ex(("127.0.0.1", port)); s.close()
-                    if res == 0:
-                        messagebox.showinfo("Bioximiya", f"[OK] Port {port} tinglanyapti (server ishlayapti).", parent=dialog)
+                    # Portga O'ZIMIZ ulanmaymiz: server shu IP dan kelgan yangi ulanishni
+                    # "analizator qayta ulandi" deb qabul qiladi. Holat xizmat faylidan o'qiladi.
+                    s.close()
+                    import bio_xizmat as _bx
+                    if getattr(self, "_bio_rejim", None) == "ichki":
+                        from bk280_listener import get_status as _bio_gs
+                        h = _bio_gs()
+                    else:
+                        h = _bx.holat_oqi()
+                        if h and h["_yosh"] >= _bx.HOLAT_ESKIRISH_S:
+                            h = None
+                    if h and h.get("listening"):
+                        messagebox.showinfo("Bioximiya", f"[OK] LIS server tinglanyapti (port {port}).\n\n"
+                                            + _bx.holat_matni(h), parent=dialog)
                     else:
                         messagebox.showwarning("Bioximiya", f"[INFO] Port {port} hozir tinglanmayapti.\n"
                                                "Sozlamani saqlab, dasturni qayta ishga tushiring.", parent=dialog)
@@ -23021,6 +23259,10 @@ Sana: {_sana_fmt}"""
                                     "Buyurtma shtrix-kodi (sample_id):", parent=dialog)
             if not barcode:
                 return
+            if getattr(self, "_bio_rejim", None) == "xizmat":
+                messagebox.showinfo("Push sinovi", "Listener fon xizmatida ishlayapti — bu sinov faqat "
+                                    "dastur ichidagi rejimda mavjud.", parent=dialog)
+                return
             style = "dsr" if messagebox.askyesno(
                 "Xabar turi", "DSR^Q03 (Mindray/Biobase uslubi) yuborilsinmi?\n\n"
                 "HA — DSR^Q03\nYO'Q — ORM^O01 (yangi buyurtma)", parent=dialog) else "orm"
@@ -23031,10 +23273,34 @@ Sana: {_sana_fmt}"""
                 ok, msg = False, str(e)
             (messagebox.showinfo if ok else messagebox.showwarning)("Push sinovi", msg, parent=dialog)
 
+        def restart_bio_xizmat():
+            """Fon xizmatini qayta ochish (sozlama yoki kod yangilangandan keyin)."""
+            if getattr(self, "_bio_rejim", None) == "ichki":
+                messagebox.showinfo("LIS xizmati", "Listener hozir dastur ichida ishlayapti (fon xizmati "
+                                    "ochilmagan edi). Dasturni qayta ishga tushiring.", parent=dialog)
+                return
+            if not messagebox.askyesno(
+                    "LIS xizmati",
+                    "Bioximiya LIS xizmati qayta ishga tushirilsinmi?\n\n"
+                    "Analizator ulanishi uziladi — BK-280 kompyuterida LIS sozlamasi → "
+                    "«Подключить» (Ulanish) ni qayta bosish kerak bo'ladi.", parent=dialog):
+                return
+            import bio_xizmat as _bx
+
+            def ish():
+                ok, msg = _bx.qayta_ishga_tushir()
+                if ok:
+                    self._bio_rejim = "xizmat"
+                dialog.after(0, lambda: (messagebox.showinfo if ok else messagebox.showwarning)(
+                    "LIS xizmati", msg, parent=dialog))
+            threading.Thread(target=ish, daemon=True).start()
+
         _b_btns = ttk.Frame(tab_b)
         _b_btns.grid(row=9, column=0, columnspan=2, pady=8)
         ttk.Button(_b_btns, text="📤 Analizatorga yuborish (sinov)", command=push_bio_worklist).pack(side=tk.LEFT, padx=6)
         ttk.Button(_b_btns, text="Ulanishni tekshirish", command=test_bio).pack(side=tk.LEFT, padx=6)
+        ttk.Button(_b_btns, text="♻ LIS xizmatini qayta ishga tushirish",
+                   command=restart_bio_xizmat).pack(side=tk.LEFT, padx=6)
         ttk.Button(_b_btns, text="🧬 Tahlil kodlari", command=open_bio_code_map).pack(side=tk.LEFT, padx=6)
         ttk.Button(_b_btns, text="☑ Worklist tahlillari", command=open_bio_worklist_channels).pack(side=tk.LEFT, padx=6)
         ttk.Button(_b_btns, text="🧪 Shtrix-kod so'rovini sinash", command=test_bio_query).pack(side=tk.LEFT, padx=6)

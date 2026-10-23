@@ -84,6 +84,54 @@ HL7 `ACK^R01` ham kalit so'z bo'lib, xuddi shu poygani keltirib chiqarishi mumki
 **Nazorat:** ACK^Q03 birinchi bo'lakdan < 0.9 s da kelsa logda `[DIQQAT!] <barkod>` — o'sha namunaning
 ismi/tahlillarini analizatorda tekshiring.
 
+## LIS fon xizmati va ulanish nazorati (23.10.2026)
+
+**Hodisa:** 23.10 ertalab dastur 08:26 da ochilgan, lekin bioximiya listener logga BIRORTA qator yozmagan —
+port 09:25 gacha ochilmagan (BC-20S ishlagan). Analizator LIS ga ulana olmagan: CRYSTAL saqlash/LIS da qotgan.
+09:25 da dastur qayta ochilgach analizator ulanib, to'plangan natijalarni ketma-ket yuborgan (natijalar YO'QOLMAYDI).
+
+**CRYSTAL ning ulanish xulqi (IL dan):**
+- O'zi QAYTA ULANMAYDI. `Listrans.open` faqat LIS oynasi yuklanganda (`frmAll` Load) va «Подключить»
+  tugmasida chaqiriladi.
+- Real vaqtli natija (`frmSwatchTest::ᜉ`): LIS ochiq bo'lmasa `tcpisonline=false`, `tcp_ac=false` va
+  **"Lis_noserve" MessageBox** chiqaradi. Keyingi natijalar yuborilmaydi — laborant «Подключить» ni
+  bosmaguncha shunday qoladi.
+- «Подключить» ESKI socket'ni YOPMAYDI (`Connect` → `new Socket`).
+- Loglar: listener har qayta ochilgandan keyin analizator **o'zi** emas, laborant bosganda ulanadi (1 s dan
+  77 daqiqagacha). Kun davomida monoblok 2–5 marta qayta ochiladi → har safar LIS uziladi.
+
+**Yechim:**
+1. **Fon xizmati:** `pythonw bk280_listener.py --xizmat` — monoblokdan MUSTAQIL jarayon. Monoblok uni
+   ochadi (`bio_xizmat.taminla`), lekin yopilganda TO'XTATMAYDI → analizator ulanishi saqlanadi.
+   - Bitta nusxa: nomli mutex `Local\AzizMedLine_BioLIS_xizmat`. Port egasi: `Local\AzizMedLine_BioLIS_port`
+     (Windows `SO_REUSEADDR` ikki jarayonga bitta portni berib qo'yadi — endi faqat bittasi ochadi).
+   - Holat: `%ProgramData%\AzizMedLine\BK280\xizmat_holat.json` (har 2 s: listening, connected, peer,
+     oxirgi natija/so'rov, natija hodisalari, kod versiyasi). Buyruq: `xizmat_buyruq.txt` ← `stop`/`restart`.
+   - Ulanish sozlamasi (ip/port/model...) o'zgarsa xizmat 10 s ichida o'zi qayta ochiladi. `ack_style` va
+     qayta yuborish kabi sozlamalar jonli o'qiladi.
+   - EXE (PyInstaller) o'rnatmada xizmat yo'q → eski usul (dastur ichida). O'chirish: `bioximiya.xizmat_rejimi = false`.
+2. **«● Bioximiya» tugmasi** (har 5 s): yashil — ulangan; to'q sariq «⚠» — analizator ulanmagan
+   («Подключить» ni bosing); kulrang «✖» — LIS server ishlamayapti. Ustiga kelganda: IP, ulanish vaqti,
+   oxirgi natija/so'rov. Holat o'zgarganda toast (bloklamaydi).
+3. **Nazorat (watchdog):** xizmat 15 s holat yozmasa/o'lsa → qayta ochiladi (60 s da ko'pi bilan 1 marta).
+   Kod yangilangan + analizator ulanmagan → yangi kod bilan qayta ochiladi (ulanish yo'q — yo'qotish yo'q).
+   Listener umuman ochilmasa → kulrang + toast + har 60 s qayta urinish.
+4. **Transport (`gemo_protokol`):** server bir vaqtda bitta ulanishga xizmat qiladi. Endi O'SHA IP dan yangi
+   ulanish kelsa (laborant «Подключить» ni bosdi) eskisi yopilib yangisiga o'tiladi — ilgari yangisi
+   backlogda qolib, analizator "ulandim" deb o'ylardi. Boshqa IP rad etiladi. Keepalive 30 s / 5 s.
+5. **Log:** `_log` avval faylga yozadi, konsol — alohida oqimda (print bloklansa listener to'xtamasin).
+6. Sozlamalar → Bioximiya: «Ulanishni tekshirish» xizmat holatini ko'rsatadi (portga o'zi ulanmaydi);
+   «♻ LIS xizmatini qayta ishga tushirish» (analizatorda «Подключить» ni qayta bosish kerak).
+
+**Statistika (ulanishdan beri yuborilgan natijalar soniga qarab LIS javobi qabul qilinishi):**
+<5 → 89%, 5–30 → 58%, 30+ → 48% (alohida ham, bitta bo'lak ham bir xil). Sabab — natija yuboruvchi
+`Listrans` nusxasining receive zanjirlari to'planib DSR ni "o'g'irlaydi". Qayta ulanish ularni tozalaydi;
+qayta yuborish (2.5 s, 3 marta) yo'qotishni yumshatadi.
+
+**Sinov (jonli portga tegmasdan):** muhit o'zgaruvchilari `BIO_DATA_DIR`, `BIO_LOG_DIR`,
+`BIO_XIZMAT_SUFFIX` (mutex nomi), `BIO_XIZMAT_CFG` (test sozlama JSON, masalan 127.0.0.1:18187).
+`BIO_XIZMAT_SUFFIX` bo'lsa `hl7_inbox` ga yozilmaydi.
+
 ## Kod xaritasi (Tahlil kodlari oynasi)
 
 Bioximiya tabida **🧬 Tahlil kodlari** tugmasi. Jadval: analizator kodi | nomi | LIMS tahlili.
@@ -101,7 +149,10 @@ Kanonik kodlar (272, 236 ...) hamma joyda bir xil, shuning uchun `on_biochemistr
 305/245/322 revmo, 313/323/310 buyrak, 254/308 lipid) boshqa brend natijalari uchun ham ishlaydi.
 
 ## Diagnostika
-- `logs/bio_YYYYMMDD.log` — `<Model> [natija] — tcp_server 0.0.0.0:8087 [auto]`, `[shtrix-kod] ... :8088`.
+- `logs/bio_YYYYMMDD.log` — `<Model> [natija] — tcp_server 0.0.0.0:8087 [auto]`, `[shtrix-kod] ... :8088`;
+  `[XIZMAT] ... ishga tushdi (pid N)`, `Analizator qayta ulandi (...) — eski ulanish yopildi`.
+- `%ProgramData%\AzizMedLine\BK280\xizmat_holat.json` — xizmatning joriy holati (pid, listening, connected).
+- Logda listener qatorlari umuman bo'lmasa — listener ochilmagan; «● Bioximiya» kulrang bo'ladi.
 - `bio_nomalum_kodlar.json` — kelgan, tanilmagan kodlar (count, oxirgi vaqt).
 - Sozlamalar → "Ulanishni tekshirish": port tinglanayotganini / serial port ochilishini ko'rsatadi.
 - Sinov: `python bio_protokol.py` (BK/BS/ASTM parse, worklist, DSR/ORR/ASTM javoblar).
