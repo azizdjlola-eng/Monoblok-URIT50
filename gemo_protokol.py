@@ -33,6 +33,7 @@ O'rganilgan manbalar (2026-09-18):
 """
 
 import re
+import select
 import socket
 import threading
 import time
@@ -678,6 +679,9 @@ class Transport:
         self.cfg = effective_config(cfg)
         self.log = log
         self.connected = False
+        self.listening = False      # tcp_server: port bog'langan va tinglanmoqda
+        self.peer = None            # joriy ulanish (ip, port)
+        self.conn_since = None      # joriy ulanish qachondan beri
         self.last_rx = None
         self._sock = None
         self._srv = None
@@ -715,6 +719,8 @@ class Transport:
                         pass
                     setattr(self, attr, None)
             self.connected = False
+            self.listening = False
+            self.peer = None
 
     # ── asosiy sikl ──
     def run(self, handler, is_running):
@@ -792,27 +798,93 @@ class Transport:
         self._pump(self._sock_recv(s), handler, is_running)
         self.log("Analizator ulanishni yopdi")
 
+    @staticmethod
+    def _keepalive(sock):
+        """O'lik ulanishni (analizator PC o'chdi, kabel/USB-adapter uzildi) ~1 daqiqada
+        aniqlash. Windows standarti 2 soat — shu vaqt ichida server eski "ulanish"ga
+        yopishib, analizatorning yangi ulanishini qabul qilmay turardi."""
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            if hasattr(socket, "SIO_KEEPALIVE_VALS"):
+                sock.ioctl(socket.SIO_KEEPALIVE_VALS, (1, 30000, 5000))
+        except Exception:
+            pass
+
+    def _poll_new_conn(self, cur_addr):
+        """Joriy ulanishga xizmat qilayotganda navbatda (backlog) yangi ulanish bormi?
+
+        23.10.2026: BK-280 (CRYSTAL) da "Ulanish" qayta bosilsa u ESKI socket'ini YOPMAYDI
+        (Listrans.Connect → new Socket), shuning uchun eski ulanish bizda ochiq qoladi va
+        server faqat bitta ulanishga xizmat qilgani uchun yangisi backlogda qolib ketardi —
+        analizator "ulandim" deb o'ylaydi, xabarlari esa o'qilmaydi. Endi: o'sha IP dan yangi
+        ulanish = analizator qayta ulandi → eskisi yopilib yangisiga o'tiladi. Boshqa IP dan
+        kelgan ulanish rad etiladi (analizatorni tashqi ulanish siqib chiqarmasin; o'lik
+        ulanishni keepalive o'zi yopadi, keyin navbatdagisi qabul qilinadi)."""
+        try:
+            r, _, _ = select.select([self._srv], [], [], 0)
+            if not r:
+                return None
+            conn, addr = self._srv.accept()
+        except Exception:
+            return None
+        if cur_addr and addr[0] == cur_addr[0]:
+            return conn, addr
+        self.log(f"[OGOHLANTIRISH] {addr[0]}:{addr[1]} dan ulanish rad etildi — "
+                 f"{cur_addr[0] if cur_addr else '?'} ulangan")
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return None
+
     def _run_tcp_server(self, handler, is_running):
         ip, port = self.cfg["ip"], int(self.cfg["port"])
         if self._srv is None:
             srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             srv.bind((ip, port))
-            srv.listen(2)
+            srv.listen(5)
             srv.settimeout(1.0)
             self._srv = srv
+            self.listening = True
             self.log(f"LIS server tinglayapti: {ip}:{port} (analizator ulanishini kutyapman)")
+        pending = None
         while is_running():
-            try:
-                conn, addr = self._srv.accept()
-            except socket.timeout:
-                continue
+            if pending is not None:
+                conn, addr = pending
+                pending = None
+            else:
+                try:
+                    conn, addr = self._srv.accept()
+                except socket.timeout:
+                    continue
             conn.settimeout(1.0)
+            self._keepalive(conn)
             with self._lock:
                 self._sock = conn
                 self.connected = True
+                self.peer = addr
+                self.conn_since = datetime.now()
             self.log(f"Analizator ulandi: {addr[0]}:{addr[1]}")
-            self._pump(self._sock_recv(conn), handler, is_running)
+            box = {"rx": None, "next": None}
+
+            def recv(conn=conn, addr=addr, box=box):
+                try:
+                    d = conn.recv(8192)
+                    if d == b"":
+                        return None
+                    box["rx"] = time.time()
+                    return d
+                except socket.timeout:
+                    nxt = self._poll_new_conn(addr)
+                    if nxt:
+                        box["next"] = nxt
+                        return None
+                    return b""
+                except Exception:
+                    return None
+
+            self._pump(recv, handler, is_running)
             with self._lock:
                 try:
                     conn.close()
@@ -820,7 +892,13 @@ class Transport:
                     pass
                 self._sock = None
                 self.connected = False
-            self.log("Analizator ulanishni yopdi — yangi ulanish kutilmoqda")
+                self.peer = None
+            if box["next"] is not None:
+                pending = box["next"]
+                self.log(f"Analizator qayta ulandi ({pending[1][0]}:{pending[1][1]}) — "
+                         f"eski ulanish yopildi")
+            else:
+                self.log("Analizator ulanishni yopdi — yangi ulanish kutilmoqda")
 
     def _run_serial(self, handler, is_running):
         if serial is None:
