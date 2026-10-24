@@ -26863,6 +26863,11 @@ def main():
         try:
             root = tk.Tk()
             _after_oqimga_xavfsiz(root)
+            try:
+                import xizmat_jurnali       # oyna ichidagi xatolar ham jurnalga
+                xizmat_jurnali.tk_ulash(root)
+            except Exception:
+                pass
             print("[OK] Tkinter oynasi yaratildi")
         except Exception as e:
             print(f"[XATO] Tkinter oynasi yaratishda xato: {e}")
@@ -26883,6 +26888,8 @@ def main():
             print("[OK] MonoblokApp yaratildi")
         except Exception as e:
             print(f"[XATO] MonoblokApp yaratishda xato: {e}")
+            import logging as _lg
+            _lg.getLogger("jurnal").exception("Natija oynasi ochilmadi (MonoblokApp)")
             import traceback
             traceback.print_exc()
             # Oddiy oyna ko'rsatish
@@ -26929,6 +26936,14 @@ def main():
 
 if __name__ == "__main__":
     import sys as _sys
+    # Muammolar jurnali — %ProgramData%\AzizMedLine\jurnal\Natija.log (URIT xizmati
+    # alohida jarayon → NatijaURIT.log: bir faylga ikki jarayon yozmasin).
+    # xizmat_jurnali.py ni build_panel D: dan shu papkaga ko'chiradi.
+    try:
+        import xizmat_jurnali
+        xizmat_jurnali.sozla("NatijaURIT" if "--urit-service" in _sys.argv else "Natija")
+    except Exception:
+        xizmat_jurnali = None
     # URIT-50 (siydik) xizmati — alohida jarayon (frozen EXE'da o'zini --urit-service bilan qayta ishga tushiradi)
     if "--urit-service" in _sys.argv:
         try:
@@ -26936,6 +26951,8 @@ if __name__ == "__main__":
             urit50_service.main()
         except Exception as _e:
             print(f"[URIT] xato: {_e}")
+            if xizmat_jurnali:
+                xizmat_jurnali.logger().exception("URIT-50 xizmati yiqildi")
         _sys.exit(0)
     # Litsenziya darvozasi (fail-closed: modul o'chirilgan/buzilgan bo'lsa EXE ishlamaydi)
     _FROZEN = getattr(_sys, "frozen", False)
