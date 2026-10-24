@@ -1,6 +1,6 @@
 {
   "database": {
-    "host": "192.168.0.40",
+    "host": "127.0.0.1",
     "user": "lims",
     "password": "azizmed2026",
     "database": "lab_tizim",
@@ -62,5 +62,31 @@
   },
   "printer": {
     "blanka_printer": "EPSON L8050 Series"
+  },
+  "koagulogramma": {
+    "avto_hisob": true,
+    "isi": 1.14,
+    "mnpt": 13.0,
+    "kalibrlash": [
+      [
+        100.0,
+        13.0
+      ],
+      [
+        50.0,
+        18.5
+      ],
+      [
+        33.0,
+        24.1
+      ],
+      [
+        25.0,
+        29.5
+      ]
+    ]
+  },
+  "papkalar": {
+    "natija_fayllari": ""
   }
 }
