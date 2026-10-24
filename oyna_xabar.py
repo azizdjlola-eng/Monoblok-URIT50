@@ -22,14 +22,11 @@ YASHIL = "#1b5e20"
 SARIQ = "#e65100"
 
 
-def toast(parent, matn: str, davomiylik_ms: int = 3500, fon: str = YASHIL,
-          tugmalar=None):
+def toast(parent, matn: str, davomiylik_ms: int = 3500, fon: str = YASHIL):
     """Bloklamaydigan xabar. Ustiga bosilsa darhol yopiladi.
 
     parent — Tk oynasi (Toplevel yoki root). Bo'lmasa/xato bo'lsa jimgina
     hech narsa qilmaydi: bildirishnoma tufayli asosiy ish buzilmasin.
-    tugmalar — ixtiyoriy [(matn, funksiya), ...]: xabar ichida tugma
-    (masalan «📂 Ochish»). Bosilsa funksiya bajariladi va xabar yopiladi.
     """
     try:
         win = tk.Toplevel(parent)
@@ -46,22 +43,6 @@ def toast(parent, matn: str, davomiylik_ms: int = 3500, fon: str = YASHIL,
         tk.Label(ramka, text=matn, bg=fon, fg="white",
                  font=("Segoe UI", 11, "bold"), justify="left",
                  padx=18, pady=12, wraplength=420).pack()
-
-        tugma_qatori = None
-        if tugmalar:
-            tugma_qatori = tk.Frame(ramka, bg=fon)
-            tugma_qatori.pack(anchor="e", padx=12, pady=(0, 10))
-            for t_matn, t_funk in tugmalar:
-                def _bos(f=t_funk):
-                    _yop(win)
-                    try:
-                        f()
-                    except Exception:
-                        pass
-                tk.Button(tugma_qatori, text=t_matn, command=_bos,
-                          bg="white", fg=fon, activebackground="#c8e6c9",
-                          font=("Segoe UI", 10, "bold"), relief="flat",
-                          cursor="hand2", padx=12, pady=2).pack(side="left", padx=(6, 0))
 
         win.update_idletasks()
         # Egasi oynasining PASTKI-O'NG burchagi

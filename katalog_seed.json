@@ -20,7 +20,7 @@
  {
   "id": 29,
   "nomi": "Eritrotsitlar cho'kish tezligi (ECHT)",
-  "narxi": 20000,
+  "narxi": 30000,
   "sample": "GEM",
   "turi": "test",
   "soha": "lab",
@@ -47,7 +47,7 @@
  {
   "id": 32,
   "nomi": "Siydikning umumiy tahlili",
-  "narxi": 30000,
+  "narxi": 35000,
   "sample": "URINE",
   "turi": "test",
   "soha": "lab",
@@ -56,7 +56,7 @@
  {
   "id": 33,
   "nomi": "Siydikning Nicheporenko tahlili",
-  "narxi": 30000,
+  "narxi": 35000,
   "sample": "URINE",
   "turi": "test",
   "soha": "lab",
@@ -65,7 +65,7 @@
  {
   "id": 34,
   "nomi": "Siydikning Zimnitskiy tahlili",
-  "narxi": 30000,
+  "narxi": 35000,
   "sample": "URINE",
   "turi": "test",
   "soha": "lab",
@@ -74,7 +74,7 @@
  {
   "id": 35,
   "nomi": "Albumin",
-  "narxi": 20000,
+  "narxi": 30000,
   "sample": "BIO",
   "turi": "test",
   "soha": "lab",
@@ -83,7 +83,7 @@
  {
   "id": 36,
   "nomi": "Umumiy oqsil",
-  "narxi": 20000,
+  "narxi": 30000,
   "sample": "BIO",
   "turi": "test",
   "soha": "lab",
@@ -110,7 +110,7 @@
  {
   "id": 39,
   "nomi": "Alanin aminotransferaza (ALT)",
-  "narxi": 20000,
+  "narxi": 30000,
   "sample": "BIO",
   "turi": "test",
   "soha": "lab",
@@ -119,7 +119,7 @@
  {
   "id": 40,
   "nomi": "Aspartat aminotransferaza (AST)",
-  "narxi": 20000,
+  "narxi": 30000,
   "sample": "BIO",
   "turi": "test",
   "soha": "lab",
@@ -128,7 +128,7 @@
  {
   "id": 41,
   "nomi": "Kreatinin",
-  "narxi": 20000,
+  "narxi": 30000,
   "sample": "BIO",
   "turi": "test",
   "soha": "lab",
@@ -137,7 +137,7 @@
  {
   "id": 42,
   "nomi": "Mochevina",
-  "narxi": 20000,
+  "narxi": 30000,
   "sample": "BIO",
   "turi": "test",
   "soha": "lab",
@@ -146,7 +146,7 @@
  {
   "id": 43,
   "nomi": "Umumiy xolesterin (TC)",
-  "narxi": 20000,
+  "narxi": 30000,
   "sample": "BIO",
   "turi": "test",
   "soha": "lab",
@@ -155,7 +155,7 @@
  {
   "id": 44,
   "nomi": "Trigliserid-TG",
-  "narxi": 20000,
+  "narxi": 30000,
   "sample": "BIO",
   "turi": "test",
   "soha": "lab",
@@ -164,7 +164,7 @@
  {
   "id": 45,
   "nomi": "Laktatdegidrogrenaza (LDG)",
-  "narxi": 25000,
+  "narxi": 30000,
   "sample": "BIO",
   "turi": "test",
   "soha": "lab",
@@ -173,7 +173,7 @@
  {
   "id": 46,
   "nomi": "Gamma-glutamil transferaza (GGT)",
-  "narxi": 25000,
+  "narxi": 35000,
   "sample": "BIO",
   "turi": "test",
   "soha": "lab",
@@ -182,7 +182,7 @@
  {
   "id": 47,
   "nomi": "Kalsiy Ca",
-  "narxi": 25000,
+  "narxi": 30000,
   "sample": "BIO",
   "turi": "test",
   "soha": "lab",
@@ -191,7 +191,7 @@
  {
   "id": 48,
   "nomi": "Kaliy K",
-  "narxi": 25000,
+  "narxi": 30000,
   "sample": "BIO",
   "turi": "test",
   "soha": "lab",
@@ -200,7 +200,7 @@
  {
   "id": 49,
   "nomi": "Temir  Fe",
-  "narxi": 25000,
+  "narxi": 30000,
   "sample": "BIO",
   "turi": "test",
   "soha": "lab",
@@ -218,7 +218,7 @@
  {
   "id": 51,
   "nomi": "Magniy Mg",
-  "narxi": 25000,
+  "narxi": 30000,
   "sample": "BIO",
   "turi": "test",
   "soha": "lab",
@@ -227,7 +227,7 @@
  {
   "id": 52,
   "nomi": "Natriy Na",
-  "narxi": 25000,
+  "narxi": 30000,
   "sample": "BIO",
   "turi": "test",
   "soha": "lab",
@@ -236,7 +236,7 @@
  {
   "id": 53,
   "nomi": "Ishqoriy fosfataza (IF)",
-  "narxi": 25000,
+  "narxi": 30000,
   "sample": "BIO",
   "turi": "test",
   "soha": "lab",
@@ -245,7 +245,7 @@
  {
   "id": 54,
   "nomi": "Timol proba",
-  "narxi": 25000,
+  "narxi": 30000,
   "sample": "BIO",
   "turi": "test",
   "soha": "lab",
@@ -254,7 +254,7 @@
  {
   "id": 55,
   "nomi": "Bilirubin",
-  "narxi": 30000,
+  "narxi": 40000,
   "sample": "BIO",
   "turi": "test",
   "soha": "lab",
@@ -398,7 +398,7 @@
  {
   "id": 75,
   "nomi": "Fibrinogen",
-  "narxi": 20000,
+  "narxi": 30000,
   "sample": "COAG",
   "turi": "test",
   "soha": "lab",
@@ -407,7 +407,7 @@
  {
   "id": 76,
   "nomi": "ACHTV",
-  "narxi": 20000,
+  "narxi": 30000,
   "sample": "COAG",
   "turi": "test",
   "soha": "lab",
@@ -416,7 +416,7 @@
  {
   "id": 77,
   "nomi": "Trombinovoe vremya (TT)",
-  "narxi": 20000,
+  "narxi": 30000,
   "sample": "COAG",
   "turi": "test",
   "soha": "lab",
@@ -461,7 +461,7 @@
  {
   "id": 82,
   "nomi": "Gepatit B (HBsAg, IFA ИФА)",
-  "narxi": 40000,
+  "narxi": 50000,
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
@@ -479,7 +479,7 @@
  {
   "id": 84,
   "nomi": "Gepatit C (Anti-HCV, IFA ИФА)",
-  "narxi": 40000,
+  "narxi": 50000,
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
@@ -488,7 +488,7 @@
  {
   "id": 85,
   "nomi": "Gepatit D (D-antitela, IFA ИФА)",
-  "narxi": 40000,
+  "narxi": 50000,
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
@@ -497,7 +497,7 @@
  {
   "id": 86,
   "nomi": "Gepatit A (IgG, IFA) ИФА",
-  "narxi": 40000,
+  "narxi": 50000,
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
@@ -506,7 +506,7 @@
  {
   "id": 87,
   "nomi": "Brutselyoz (Reaktsiya Xedelson +  Rayta)",
-  "narxi": 60000,
+  "narxi": 70000,
   "sample": "TEST",
   "turi": "test",
   "soha": "lab",
@@ -551,7 +551,7 @@
  {
   "id": 94,
   "nomi": "Ginekologik surtma",
-  "narxi": 50000,
+  "narxi": 60000,
   "sample": "TEST",
   "turi": "test",
   "soha": "lab",
@@ -560,7 +560,7 @@
  {
   "id": 96,
   "nomi": "Spermogramma",
-  "narxi": 50000,
+  "narxi": 100000,
   "sample": "TEST",
   "turi": "test",
   "soha": "lab",
@@ -569,7 +569,7 @@
  {
   "id": 97,
   "nomi": "Mujskoy mazok (Erkaklar surtmasi)",
-  "narxi": 50000,
+  "narxi": 100000,
   "sample": "TEST",
   "turi": "test",
   "soha": "lab",
@@ -587,7 +587,7 @@
  {
   "id": 99,
   "nomi": "Askarida IgG IFA ИФА",
-  "narxi": 40000,
+  "narxi": 50000,
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
@@ -596,7 +596,7 @@
  {
   "id": 100,
   "nomi": "Lyambliya-antitela IFA ИФА",
-  "narxi": 40000,
+  "narxi": 50000,
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
@@ -605,7 +605,7 @@
  {
   "id": 102,
   "nomi": "Najas tahlili (Gijja uchun)",
-  "narxi": 30000,
+  "narxi": 35000,
   "sample": "TEST",
   "turi": "test",
   "soha": "lab",
@@ -785,7 +785,7 @@
  {
   "id": 123,
   "nomi": "LDL-Past zichlikli lipoprotein",
-  "narxi": 40000,
+  "narxi": 50000,
   "sample": "BIO",
   "turi": "test",
   "soha": "lab",
@@ -794,7 +794,7 @@
  {
   "id": 124,
   "nomi": "HDL-Yuqori zichlikli lipoprotein",
-  "narxi": 30000,
+  "narxi": 40000,
   "sample": "BIO",
   "turi": "test",
   "soha": "lab",
@@ -803,7 +803,7 @@
  {
   "id": 126,
   "nomi": "LIPID SPEKTRI",
-  "narxi": 110000,
+  "narxi": 150000,
   "sample": "BIO",
   "turi": "test",
   "soha": "lab",
@@ -812,7 +812,7 @@
  {
   "id": 127,
   "nomi": "BUYRAK PANELI",
-  "narxi": 115000,
+  "narxi": 150000,
   "sample": "BIO",
   "turi": "test",
   "soha": "lab",
@@ -830,7 +830,7 @@
  {
   "id": 129,
   "nomi": "Anti HBsAg (Antitelo) immunitet  IFA  ИФА",
-  "narxi": 40000,
+  "narxi": 50000,
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
@@ -1114,5 +1114,14 @@
   "turi": "test",
   "soha": "lab",
   "aktiv": 0
+ },
+ {
+  "id": 165,
+  "nomi": "Gepatit A (IgM va IgG, ekspress)",
+  "narxi": 40000,
+  "sample": "TEST",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
  }
 ]
