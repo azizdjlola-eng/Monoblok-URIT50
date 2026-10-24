@@ -468,6 +468,19 @@
   "max_val_f": null
  },
  {
+  "guruh": "TEST",
+  "tahlil_nomi": "Gepatit A (IgM va IgG, ekspress)",
+  "norma": "Manfiy (-)",
+  "birlik": "",
+  "type": "numeric",
+  "min_val": null,
+  "max_val": null,
+  "min_val_m": null,
+  "max_val_m": null,
+  "min_val_f": null,
+  "max_val_f": null
+ },
+ {
   "guruh": "IFA",
   "tahlil_nomi": "Gepatit B (HBsAg, IFA ИФА)",
   "norma": "0-1.0 Manfiy (-), >1.0 Musbat (+)",
