@@ -477,15 +477,6 @@
   "aktiv": 1
  },
  {
-  "id": 165,
-  "nomi": "Gepatit A (IgM va IgG, ekspress)",
-  "narxi": 40000,
-  "sample": "TEST",
-  "turi": "test",
-  "soha": "lab",
-  "aktiv": 1
- },
- {
   "id": 84,
   "nomi": "Gepatit C (Anti-HCV, IFA ИФА)",
   "narxi": 50000,
