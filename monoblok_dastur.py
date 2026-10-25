@@ -4818,6 +4818,62 @@ def _is_bilirubin_test(test_name: str) -> bool:
     tn = (test_name or '').lower()
     return 'bilirubin' in tn or '\u0431\u0438\u043b\u0438\u0440\u0443\u0431\u0438\u043d' in tn
 
+# ── GEPATIT A (IgM va IgG, ekspress) — bitta kassetada ikki natija ────────
+# Natija JSON: {"igm": "Manfiy (-)", "igg": "Musbat (+)"}. Oynada, ro'yxatda
+# va blankada IgM / IgG alohida qator; blankada qo'shimcha "Xulosa" qatori.
+HAV_KOMPONENTLAR = [
+    ("igm", "Anti-HAV IgM"),
+    ("igg", "Anti-HAV IgG"),
+]
+HAV_JAVOBLAR = ['Manfiy (-)', 'Musbat (+)']
+
+
+def _is_hav_combo_test(test_name: str) -> bool:
+    """'Gepatit A (IgM va IgG, ekspress)' — IFA dagi 'Gepatit A (IgG, IFA)' EMAS."""
+    tn = (test_name or '').lower()
+    return ('gepatit a' in tn and 'igm' in tn and 'igg' in tn
+            and 'ifa' not in tn and 'ифа' not in tn)
+
+
+def _hav_result_template(db_template=None) -> dict:
+    """Natija oynasi shabloni: bazadagi (norma tahrirlangan bo'lsa) yoki standart.
+    Javob tanlanmagan holda ochiladi — laborant ikkala chiziqni ham o'zi belgilaydi."""
+    by_key = {}
+    if isinstance(db_template, dict):
+        by_key = {c.get('key'): c for c in db_template.get('components', [])}
+    comps = []
+    for key, nom in HAV_KOMPONENTLAR:
+        c = dict(by_key.get(key) or {})
+        c.setdefault('name', nom)
+        c['key'] = key
+        c.setdefault('unit', '')
+        c.setdefault('norma', 'Manfiy (-)')
+        c['options'] = c.get('options') or HAV_JAVOBLAR
+        c['default'] = ''
+        c['readonly'] = False
+        comps.append(c)
+    return {"type": "multi_component", "components": comps}
+
+
+def _hav_xulosa(igm, igg) -> str:
+    """IgM/IgG natijasidan qisqa xulosa. Ikkalasi kiritilmagan bo'lsa — bo'sh."""
+    def _musbat(v):
+        s = str(v or '').strip().lower()
+        if not s:
+            return None
+        return 'musbat' in s or '+' in s.replace('(-)', '')
+    m, g = _musbat(igm), _musbat(igg)
+    if m is None or g is None:
+        return ''
+    if m and not g:
+        return "O'tkir (yangi) gepatit A infeksiyasi belgisi"
+    if m and g:
+        return "O'tkir yoki yaqinda o'tkazilgan gepatit A infeksiyasi"
+    if g:
+        return "Ilgari o'tkazilgan infeksiya yoki emlash (immunitet bor)"
+    return "Gepatit A ga antitelalar aniqlanmadi"
+
+
 def _is_lipid_spektri_test(test_name: str) -> bool:
     tn = (test_name or '').lower()
     return ('lipid spektri' in tn or 'lipid paneli' in tn
@@ -6177,6 +6233,59 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
                     except Exception:
                         pass
             if pt_expanded:
+                continue
+
+            # GEPATIT A (IgM va IgG, ekspress) — sarlavha + IgM + IgG + Xulosa
+            if _is_hav_combo_test(test_name):
+                hd = {}
+                if raw_val and isinstance(raw_val, str) and raw_val.strip().startswith('{'):
+                    try:
+                        hd = json.loads(raw_val)
+                    except Exception:
+                        hd = {}
+                if not isinstance(hd, dict):
+                    hd = {}
+                _hr = table.add_row()
+                _keep_row_together(_hr)
+                _hm = _hr.cells[0].merge(_hr.cells[_ncol - 1])
+                _set_cell_shading(_hm, TABLE_HEADER_HEX)
+                _hph = _hm.paragraphs[0]
+                _hph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                _set_para_spacing(_hph, 0, 0, line_spacing=1)
+                _add_run_tnr(_hph, test_name, 11, bold=True)
+                for _hk, _hn in HAV_KOMPONENTLAR:
+                    _hv = str(hd.get(_hk, '') or '').strip()
+                    _kr = table.add_row()
+                    _keep_row_together(_kr)
+                    _kc = _kr.cells
+                    if _prev:
+                        _oldingi_katak_yoz(_kc[2], None, _prev_sana)
+                    _kp0 = _kc[0].paragraphs[0]
+                    _kp0.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                    _set_para_spacing(_kp0, 0, 0, line_spacing=1)
+                    _add_run_tnr(_kp0, _hn, 11, bold=True)
+                    _kp1 = _kc[1].paragraphs[0]
+                    _kp1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    _set_para_spacing(_kp1, 0, 0, line_spacing=1)
+                    _add_run_tnr(_kp1, _hv, 11, bold=True,
+                                 color_rgb=RGBColor(0xCC, 0x00, 0x00) if 'musbat' in _hv.lower() else None)
+                    _kp2 = _kc[_cN].paragraphs[0]
+                    _kp2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    _set_para_spacing(_kp2, 0, 0, line_spacing=1)
+                    _add_multiline_norma(_kp2, "Manfiy (-)", 11)
+                _hx = _hav_xulosa(hd.get('igm'), hd.get('igg'))
+                if _hx:
+                    _xr = table.add_row()
+                    _keep_row_together(_xr)
+                    _xp0 = _xr.cells[0].paragraphs[0]
+                    _xp0.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                    _set_para_spacing(_xp0, 0, 0, line_spacing=1)
+                    _add_run_tnr(_xp0, "Xulosa", 11, bold=True)
+                    _xm = _xr.cells[1].merge(_xr.cells[_ncol - 1])
+                    _xp1 = _xm.paragraphs[0]
+                    _xp1.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                    _set_para_spacing(_xp1, 0, 0, line_spacing=1)
+                    _add_run_tnr(_xp1, _hx, 11, bold=True)
                 continue
 
             # Oddiy qator
@@ -15513,6 +15622,7 @@ Sana: {_sana_fmt}"""
                 is_gtt           = _is_gtt_test(test_name)
                 is_lipid_spektri = _is_lipid_spektri_test(test_name)
                 is_buyrak_paneli = _is_buyrak_paneli_test(test_name)
+                is_hav           = _is_hav_combo_test(test_name)
 
                 def _parse_json_result(tid):
                     raw = self.test_results.get(tid, "")
@@ -15600,6 +15710,13 @@ Sana: {_sana_fmt}"""
                     _insert_sub_row(f"CRP (S-reaktivniy belok){sfx}",  "crp",  str(rd.get('crp', '')),  nt)
                     _insert_sub_row(f"RF (Revmatoidniy faktor){sfx}",  "rf",   str(rd.get('rf', '')),   nt)
                     _insert_sub_row(f"ASLO (Antistreptolizin-O){sfx}", "aslo", str(rd.get('aslo', '')), nt)
+
+                elif is_hav:
+                    # Gepatit A ekspress: IgM va IgG — alohida sub-qatorlar
+                    rd = _parse_json_result(test_id)
+                    for _hk, _hn in HAV_KOMPONENTLAR:
+                        _insert_sub_row(f"Gepatit A — {_hn} (ekspress)", _hk,
+                                        str(rd.get(_hk, '')), "Manfiy (-)")
 
                 elif is_koagulogramma:
                     # 6 ta sub-qator: PT sek, PT Kviku, MNO, TT, ACHTV, Fibrinogen
@@ -16641,7 +16758,9 @@ Sana: {_sana_fmt}"""
         # 2l. REVMOPROBA — 3 komponentli (CRP/RF/ASLO). response_options
         # bo'lgani uchun quyidagi 4-qadamga tushib, bitta dropdown ochilib
         # ketmasin: to'liq dialog show_result_input_dialog da.
-        if 'revmoproba' in test_name_lower or ('revmo' in test_name_lower and 'proba' in test_name_lower):
+        # Gepatit A (IgM va IgG) ham — 'gepatit'/'ekspress' bo'lgani uchun 3-qadamga tushmasin
+        if ('revmoproba' in test_name_lower or ('revmo' in test_name_lower and 'proba' in test_name_lower)
+                or _is_hav_combo_test(test_name)):
             self.show_result_input_dialog(test_id)
             return
 
@@ -18528,6 +18647,8 @@ Sana: {_sana_fmt}"""
         # 1) Ro'yxatdan tanlanadigan: qon guruhi / ekspress / response_options
         if type_from_norma == 'blood_group' or any(k in tn for k in ('qon guruhi', 'rezus')):
             return self.NATIJA_HINT_SELECT
+        if _is_hav_combo_test(tn):
+            return self.NATIJA_HINT_FORM
         _is_ifa = 'ifa' in tn or 'ифа' in tn
         _norma_has_number = any(ch.isdigit() for ch in (td.get('norma') or ''))
         _name_is_express = (not _norma_has_number and
@@ -18857,8 +18978,9 @@ Sana: {_sana_fmt}"""
         if any(k in tname_lower for k in ['ginekolog', 'surtma', 'mazok']):
             self.show_ginekologik_form(test_id, test_name, test_data)
             return
-        # 2l. REVMOPROBA — 3 komponentli, bitta dropdown ochilmasin
-        if 'revmoproba' in tname_lower or ('revmo' in tname_lower and 'proba' in tname_lower):
+        # 2l. REVMOPROBA — 3 komponentli, Gepatit A (IgM va IgG) — 2 komponentli: bitta dropdown ochilmasin
+        if ('revmoproba' in tname_lower or ('revmo' in tname_lower and 'proba' in tname_lower)
+                or _is_hav_combo_test(tname_lower)):
             self.show_result_input_dialog(test_id)
             return
 
@@ -19021,6 +19143,13 @@ Sana: {_sana_fmt}"""
                     if 'options' not in _comp:
                         _comp['options'] = _javob_variantlari
             self.show_template_based_dialog(test_id, test_name, test_data, result_template)
+            return
+
+        # GEPATIT A (IgM va IgG, ekspress) — 2 ta Manfiy/Musbat qatori
+        # (bazada shablon bo'lmasa ham — boshqa o'rnatishlarda norma seed'siz)
+        if _is_hav_combo_test(test_name):
+            self.show_template_based_dialog(test_id, test_name, test_data,
+                                            _hav_result_template(result_template))
             return
 
         # Bilirubin kabi bir nechta komponentli tahlillar uchun maxsus UI
@@ -21947,6 +22076,10 @@ Sana: {_sana_fmt}"""
 
     def show_template_based_dialog(self, test_id, test_name, test_data, template):
         """Template asosida natija kiritish dialogi (bilirubin kabi bir nechta komponentli tahlillar uchun)"""
+        _is_hav = _is_hav_combo_test(test_name)
+        if _is_hav:
+            # Enter-yo'li bazadagi shablonni to'g'ridan beradi — standart kalitlar/javoblar kafolati
+            template = _hav_result_template(template)
         dialog = tk.Toplevel(self.root)
         dialog.title(f"Natija Kiriting: {test_name}")
         # Komponentlar soniga qarab balandlikni dinamik hisoblash
@@ -22010,8 +22143,10 @@ Sana: {_sana_fmt}"""
                                         values=comp_options, state="readonly",
                                         font=("Arial", 11))
                     entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-                    if not var.get() and comp_options:
-                        var.set(comp_options[0])  # Standart: birinchi variant
+                    # Standart: birinchi variant ("default": "" — tanlanmagan holda ochiladi)
+                    _def_opt = component.get("default", comp_options[0])
+                    if not var.get() and _def_opt:
+                        var.set(_def_opt)
                 else:
                     entry = ttk.Entry(entry_frame, textvariable=var, font=("Arial", 11),
                                       state="readonly" if is_readonly else "normal")
@@ -22159,6 +22294,20 @@ Sana: {_sana_fmt}"""
         # Birinchi marta hisoblash
         calculate_values()
 
+        # GEPATIT A: IgM/IgG tanlangan sari xulosa (blankadagi "Xulosa" qatori bilan bir xil)
+        if _is_hav and 'igm' in component_vars and 'igg' in component_vars:
+            _hav_lbl = ttk.Label(main_container, text="", font=("Arial", 10, "bold"),
+                                 foreground="#1565C0", wraplength=520, justify=tk.LEFT)
+            _hav_lbl.pack(anchor=tk.W, padx=12, pady=(8, 0))
+
+            def _hav_yangila(*_a):
+                _x = _hav_xulosa(component_vars['igm'].get(), component_vars['igg'].get())
+                _hav_lbl.config(text=f"Xulosa: {_x}" if _x else
+                                "Xulosa: IgM va IgG ikkalasini ham tanlang")
+            component_vars['igm'].trace_add("write", _hav_yangila)
+            component_vars['igg'].trace_add("write", _hav_yangila)
+            _hav_yangila()
+
         # ── PT (sek) <-> Kviku (%) <-> MNO/INR avtomatik hisob ─────────────
         # Qo'lda kiritishda: PT sek yozilsa -> Kviku va INR; Kviku % yozilsa
         # -> PT sek va INR. Koeffitsientlar reagent pasportidan
@@ -22244,6 +22393,12 @@ Sana: {_sana_fmt}"""
             ):
                 messagebox.showwarning("Diqqat", "Kamida bitta maydonni to'ldiring!")
                 return
+            # GEPATIT A: bitta kassetaning ikki chizig'i — ikkalasi ham belgilanishi shart
+            if _is_hav and not all(component_vars[k].get().strip() for k, _n in HAV_KOMPONENTLAR
+                                   if k in component_vars):
+                messagebox.showwarning("Diqqat", "IgM va IgG natijasining ikkalasini ham tanlang!",
+                                       parent=dialog)
+                return
 
             # Natijani JSON formatida saqlash
             result_data = {}
@@ -22286,6 +22441,8 @@ Sana: {_sana_fmt}"""
                         elif 'bilirubin' in _tn_lower:
                             _test_type = 'multi_component'
                         elif 'koagulogramma' in _tn_lower or 'koagul' in _tn_lower:
+                            _test_type = 'multi_component'
+                        elif _is_hav:
                             _test_type = 'multi_component'
                     self.save_test_result(self.current_order_id, test_name, result_data, _test_type)
                     self.is_saved = False  # qayta "Bazaga saqlash" imkonini berish
@@ -24931,6 +25088,11 @@ Sana: {_sana_fmt}"""
 
             if not komp or len(bosh) == len(komp):
                 incomplete.append((nomi, "natija kiritilmagan"))
+            elif _is_hav_combo_test(nomi):
+                # Oyna bo'sh maydonni JSON ga yozmaydi — yo'q kalitni ham tekshiramiz
+                qolgan = [hn for hk, hn in HAV_KOMPONENTLAR if not str(komp.get(hk, '')).strip()]
+                if qolgan:
+                    incomplete.append((nomi, "chala to'ldirilgan: " + ", ".join(qolgan)))
             elif any(kw in nomi.lower() for kw in self._TOLIQ_KUTILADIGAN_TESTLAR):
                 # Avtomatik hisoblanadiganlarni ro'yxatga kiritmaymiz
                 qolgan = [self._KOMPONENT_NOMLARI.get(k, k) for k in bosh

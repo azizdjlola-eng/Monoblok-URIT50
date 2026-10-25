@@ -135,6 +135,32 @@ qayta yuborish (2.5 s, 3 marta) yo'qotishni yumshatadi.
 `BIO_XIZMAT_SUFFIX` (mutex nomi), `BIO_XIZMAT_CFG` (test sozlama JSON, masalan 127.0.0.1:18187).
 `BIO_XIZMAT_SUFFIX` bo'lsa `hl7_inbox` ga yozilmaydi.
 
+## CRYSTAL "Input string was not in a correct format" — o'lchash to'xtaydi (24.10.2026)
+
+**Belgisi:** o'lchash paytida CRYSTAL oynasida ⚠ "Input string was not in a correct format." chiqadi
+va o'lchash to'xtaydi. CRYSTAL yoki kompyuter qayta ishga tushirilsa ham, o'sha namunaga kelganda
+xato yana chiqadi. 24.10 da 11:25, 11:43 va 11:52 da chiqqan ("Тестирование: Образец27 проект ALT").
+
+**Isbot:** CRYSTAL logi `Log\YYYYMM.log`:
+`FormatException ... Convert.ToInt32(String) at CRYSTAL.sample.frmSwatchTest.ᜀ() ... Timer.OnTick`.
+IL dagi `frmSwatchTest.ᜀ()` o'lchash taymeri namunani tayyorlaydi. Unda `Isdilute` (suyultirish belgisi)
+True bo'lsa `DiluteSQuan`, `DiluteQuan` (va Rise/Reduce variantlari) `Convert.ToInt32(row[..].ToString())`
+bilan o'qiladi. Kunlik bazada (`DataBase\YYYYMMDD.mdb`, `sampleProgram`) bu INTEGER maydonlar NULL bo'lsa,
+`""` hosil bo'ladi va FormatException chiqadi.
+24.10 bazasida 10:41 LIS to'plamidagi (namuna 19–24) qatorlarda Dilute* maydonlari NULL bo'lgan,
+boshqa barcha qatorlarda 20/80/0/0. Nima uchun NULL yozilgani aniqlanmadi: bizning DSR tuzilishi
+ertalabki to'plamlar bilan bayt-ma-bayt bir xil, demak bu CRYSTAL ichidagi holat
+(10:34 da qayta ochilgan sessiya). Xato chiqishi uchun NULL maydon + suyultirish belgisi birga
+bo'lishi kerak. Belgisiz NULL qatorlar (19–24) muammosiz o'lchangan.
+
+**Yechim (laborant):** xato chiqqanda OK → sarlavhadagi namuna raqamini yozib oling → shu namunani
+(yoki tahlilini) o'chirib qayta qo'shing (LIS yoki qo'lda) va suyultirish belgisini qo'ymang.
+24.10 da 11:54 da 25–30 qayta qo'shilgach to'xtash takrorlanmadi. CRYSTAL yoki kompyuterni qayta
+ishga tushirish YORDAM BERMAYDI, chunki buzuq qator bazada qoladi. Bizning LIS tomonda o'zgartirish
+kerak emas. Biobase ga stack trace bilan xabar berish kerak.
+Tekshirish: nusxa olingan kunlik `.mdb` da `SELECT ... FROM sampleProgram WHERE DiluteSQuan IS NULL`
+(32-bit ODBC "Microsoft Access Driver (*.mdb)").
+
 ## Kod xaritasi (Tahlil kodlari oynasi)
 
 Bioximiya tabida **🧬 Tahlil kodlari** tugmasi. Jadval: analizator kodi | nomi | LIMS tahlili.
