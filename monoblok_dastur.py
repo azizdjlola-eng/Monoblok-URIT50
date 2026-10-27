@@ -11507,6 +11507,7 @@ class MonoblokApp:
             if eskirgan:
                 self._bio_qayta_ulash_eslat(h)
             self._bio_hodisalar(h)
+            self._bio_ism_ogohlantir()
             if self._bio_rejim == "xizmat":
                 self._bio_xizmat_nazorat(tur, h)
             self._bio_ogohlantir(tur)
@@ -11615,6 +11616,20 @@ class MonoblokApp:
             self.root.after(0, lambda: self.status_var.set(
                 f"{'[OK]' if ok else '[XATO]'} Bioximiya: {sabab} → {msg}"))
         threading.Thread(target=ish, daemon=True).start()
+
+    def _bio_ism_ogohlantir(self):
+        """Analizatordagi ism barkod egasiga mos emas (CRYSTAL to'plamli LIS da qo'shni namuna
+        ismini yozgan) — ovoz + qizil oyna. Listener faylga yozadi, bu yerda bir marta ko'rsatiladi."""
+        import bio_xizmat as _bx
+        yangi = _bx.yangi_ism_ogohlar()
+        if not yangi:
+            return
+        _bx.ism_ogoh_korildi(yangi)
+        try:
+            import critical_alert as _ca
+            _ca.ism_ogohlantir(self.root, yangi)
+        except Exception as e:
+            print(f"[OGOHLANTIRISH] ism ogohlantirishi: {e}")
 
     def _bio_qayta_ulash_eslat(self, h):
         """Har ulanishda bir marta: natijalar ko'paydi / LIS javobi yo'qoldi — to'plamli LIS dan

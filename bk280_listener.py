@@ -193,7 +193,7 @@ _cfg_live = dict(_bio_eff)
 _qlock = threading.Lock()     # QCK→pauza→DSR ketma-ketligi bo'linmasin (javob ↔ qayta yuborish)
 _resend = None                # {"sid","payload"|"parts","send","sock","tries","due"}
 _resend_thread = None
-_last_dsr = None              # (barkod, yuborilgan vaqt, shu barkodga 1-DSR vaqti) — "muddatidan oldin ACK" nazorati
+_last_dsr = None              # (barkod, yuborilgan vaqt, shu barkodga 1-DSR vaqti, F.I.SH) — "muddatidan oldin ACK" nazorati
 
 # ── Ulanishdan beri hisob (27.10.2026) ──
 # CRYSTAL har xabarida yangi qabul zanjiri ochadi va yopmaydi: natijalar ko'paygan sari LIS
@@ -306,6 +306,8 @@ def _handle_result(message: str, send, fmt: str):
         _log(f"  Noma'lum kodlar (Tahlil kodlari oynasida bog'lang): {res['unknown']}")
     save_raw(message)
     _save_inbox(message)
+    if res.get("sample_id") and res.get("name"):
+        threading.Thread(target=_ism_tekshir, args=(res,), daemon=True).start()
     # Callback — faqat barcode bazadagi buyurtmaga mos kelsa. Xizmat rejimida callback yo'q:
     # hodisa holat fayliga yoziladi, monoblok uni o'qib ochiq bemorni yangilaydi.
     sid = res.get("sample_id", "")
@@ -318,6 +320,58 @@ def _handle_result(message: str, send, fmt: str):
                     _callback(order_id)
         except Exception as e:
             _log(f"[OGOHLANTIRISH] callback: {e}")
+
+
+# ── Barkod ↔ ism nazorati (27.10.2026) ──
+# CRYSTAL to'plamli LIS da ba'zan javobni qo'shni namunaga yozadi: barkod X, ism (va tahlillar)
+# Y bemorniki (22–26.10 da 492 natijadan 5 tasi). Natijada barkod ham, analizatordagi ism ham
+# keladi — bazadagi bemor bilan solishtiramiz. Hodisa faylga yoziladi: monoblok xizmat
+# jarayonidan alohida, uni o'qib ovozli ogohlantirish chiqaradi.
+OGOH_FAYL = os.path.join(_BK_DATA, "ism_ogohlantirish.json")
+_ogoh_lock = threading.Lock()
+
+
+def _ogoh_yoz(ev: dict) -> bool:
+    """True — yangi hodisa (bir namuna har tahlili uchun alohida xabar keladi — takrorlanmaydi)."""
+    bugun = datetime.now().strftime("%Y%m%d")
+    with _ogoh_lock:
+        try:
+            with open(OGOH_FAYL, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            if d.get("sana") != bugun:
+                d = None
+        except Exception:
+            d = None
+        d = d or {"sana": bugun, "items": []}
+        if any(e.get("id") == ev["id"] for e in d["items"]):
+            return False
+        d["items"].append(dict(ev, vaqt=datetime.now().isoformat(timespec="seconds")))
+        try:
+            os.makedirs(_BK_DATA, exist_ok=True)
+            tmp = f"{OGOH_FAYL}.{os.getpid()}.tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(d, f, ensure_ascii=False, indent=1)
+            os.replace(tmp, OGOH_FAYL)
+        except Exception as e:
+            _log(f"[OGOHLANTIRISH] ism ogohlantirishi yozilmadi: {e}")
+        return True
+
+
+def _ism_tekshir(res: dict):
+    sid, nm = res.get("sample_id", ""), res.get("name", "")
+    try:
+        od = _bp.lookup_order(sid)
+    except Exception:
+        return                                  # baza yotgan — RAW oynada qayta tekshiriladi
+    fish = ((od or {}).get("patient") or {}).get("fish") or ""
+    holat = _bp.ism_solishtir(nm, fish)
+    if holat == "boshqa" and _ogoh_yoz({"id": f"natija|{sid}|{nm}", "tur": "natija", "sid": sid,
+                                         "no": res.get("sample_no") or "", "analizator_ism": nm,
+                                         "baza_ism": fish}):
+        _log(f"  [ISM MOS EMAS!] {sid} (№{res.get('sample_no') or '-'}): analizatorda «{nm}», "
+             f"bazada «{fish}» — CRYSTAL boshqa bemor ismini yozgan bo'lishi mumkin")
+    elif holat == "imlo":
+        _log(f"  [ism] {sid}: analizatorda «{nm}», bazada «{fish}» — imlo farqi (bir bemor)")
 
 
 def save_query_raw(direction: str, text: str):
@@ -424,7 +478,7 @@ def _handle_query_hl7_qry_locked(message: str, send):
     # Shu barkodga DSR ACK kelmasdan qayta so'ralsa — 1-DSR vaqti saqlanadi: tez kelgan
     # ACK oldingi (bir xil) nusxaniki bo'lishi mumkin, boshqa bemorniki emas.
     t_sid = _last_dsr[2] if _last_dsr and _last_dsr[0] == sid else t_first
-    _last_dsr = (sid, t_first, t_sid)
+    _last_dsr = (sid, t_first, t_sid, od['patient'].get('fish') or '')
     after, _tries = _resend_cfg()
     if after > 0:
         _resend = {"sid": sid, "payload": payload if parts is None else None, "parts": parts,
@@ -510,6 +564,8 @@ def _handle_message(message: str, send):
                     _log(f"  [DIQQAT!] {_last_dsr[0]}: analizator javobni {dt:.2f} s da tasdiqladi "
                          f"(<1 s — imkonsiz). Analizatorda shu namunaning ISMI va TAHLILLARINI "
                          f"barkod bilan solishtiring — boshqa bemorniki yozilgan bo'lishi mumkin")
+                    _ogoh_yoz({"id": f"lis|{_last_dsr[0]}|{int(now)}", "tur": "lis",
+                               "sid": _last_dsr[0], "baza_ism": _last_dsr[3]})
                 _last_dsr = None
         _log(f"◄ ACK (analizator tasdiqladi) {msa[:80]}")
         # Qayta o'lchov DSR i qabul qilindi — navbatdan olib tashlaymiz (bir martalik)

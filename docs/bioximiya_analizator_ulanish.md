@@ -219,6 +219,42 @@ yangilang (LIS oynasini yopib-ochish yoki «Подключить»). Toza ulanis
   **Jonli sinov kerak:** 13+ tahlilli buyurtmada analizator ekranida ism va hamma tahlillar chiqishini
   tekshiring. Chiqmasa `bioximiya.dsr_only_if_large = false` qilib eski usulga qaytaring.
 
+## Barkod ↔ ism nazorati (27.10.2026)
+
+**Nima uchun:** CRYSTAL to'plamli LIS da ba'zan javobni qo'shni namunaga yozadi: barkod X ostida
+Y bemorning ismi (va tahlillari). Natija shu ism bilan keladi. 22–27.10 dagi 492 natijada
+analizator ismini barkod egasi bilan solishtirganda 5 ta haqiqiy surilish topildi
+(22.10: 121202, 121205, 121240; 26.10: 122009, 122055). Yana 3 tasi qo'lda yozilgan imlo xatosi edi
+("Xiola" ↔ "Xilola").
+
+**LIS bosqichidagi belgilar aniq emas:** javob tasdiqlanmagan paytda keyingi so'rov kelishi 24 marta
+bo'lgan, shulardan faqat 3 tasida surilish bo'lgan. `[DIQQAT!]` (tez ACK) 9 marta chiqqan, 2 tasi haqiqiy.
+14:07:53 dagi surilish (122055) da DIQQAT umuman chiqmagan. Shuning uchun asosiy signal natija
+kelgandagi ism solishtiruvi.
+
+**Kodda:**
+- `bio_protokol.ism_solishtir(analizator_ism, baza_fish)` → `mos` / `imlo` / `boshqa` / `''`.
+  Har so'z alohida solishtiriladi: aka-uka (familiya bir, ism boshqa) `boshqa` bo'ladi.
+  Analizator ismni 20 belgida qisqartiradi, shuning uchun oxirgi so'z prefiks bo'lsa ham mos.
+  So'z o'xshashligi ≥ 0.75 bo'lsa `imlo`. Haqiqiy 492 natijada: 5 `boshqa`, 3 `imlo`, yolg'on signal 0.
+- Listener natija kelganda (alohida oqimda) barkod bo'yicha bazadagi ism bilan solishtiradi.
+  `boshqa` bo'lsa logga `[ISM MOS EMAS!]` yozadi va hodisani
+  `%ProgramData%\AzizMedLine\BK280\ism_ogohlantirish.json` ga qo'shadi (har namuna bir marta).
+  `[DIQQAT!]` ham shu faylga `tur: lis` bilan yoziladi.
+- Monoblok har 5 s da yangi hodisalarni o'qiydi (`bio_xizmat.yangi_ism_ogohlar`). Ovoz chaladi
+  (kritik natija ovozi, sozlamada o'chirilgan bo'lsa ham) va eng ustida qizil oyna ochadi.
+  Ko'rsatilganlari `ism_ogohlantirish_korildi.json` ga yoziladi, monoblok qayta ochilsa takrorlanmaydi.
+- RAW bioximiya oynasi: bunday namuna ro'yxatda qizil fonda `⛔ analizator ismi ≠ bazadagi ism`.
+- «Natijani qo'shish» va bazaga saqlash oldidan qizil tasdiqlash oynasi chiqadi
+  (`critical_alert.confirm_ism`). Standart tugma (Enter/Esc) "Tekshiraman (saqlanmasin)".
+  Ommaviy saqlash (`silent`) bunday natijani o'tkazib yuboradi.
+- Ism shunchaki xato yozilgan bo'lsa, RAW oynada «Taxrirlash» bilan tuzatiladi. Shundan keyin ism mos
+  bo'ladi va tasdiqlash oynasi qayta chiqmaydi.
+
+**BK-280 vaqti:** CRYSTAL OBR/MSH vaqtini daqiqa o'rnida OY bilan yuboradi (`yyyyMMddHHMMss` xatosi):
+oktyabrda hamma natija HH:10, sentyabrda HH:09. RAW oynada daqiqa = oy bo'lsa natija kelgan vaqt
+(fayl nomi) ko'rsatiladi.
+
 ## Kod xaritasi (Tahlil kodlari oynasi)
 
 Bioximiya tabida **🧬 Tahlil kodlari** tugmasi. Jadval: analizator kodi | nomi | LIMS tahlili.

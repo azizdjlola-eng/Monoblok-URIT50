@@ -181,6 +181,43 @@ def qayta_ulash_kerak(h) -> bool:
     return bool(h and h.get("connected") and h.get("qayta_ulash_tavsiya"))
 
 
+# Barkod ↔ ism ogohlantirishlari (listener yozadi — bk280_listener.OGOH_FAYL). Ko'rilganlari
+# alohida faylda: monoblok qayta ochilsa ham ko'rsatilmagani chiqadi, ko'rsatilgani takrorlanmaydi.
+OGOH_FAYL = os.path.join(_BK_DATA, "ism_ogohlantirish.json")
+KORILDI_FAYL = os.path.join(_BK_DATA, "ism_ogohlantirish_korildi.json")
+
+
+def _json_oqi(yol):
+    try:
+        with open(yol, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def yangi_ism_ogohlar() -> list:
+    """Bugungi, hali ko'rsatilmagan ogohlantirishlar."""
+    d = _json_oqi(OGOH_FAYL)
+    if not d or d.get("sana") != time.strftime("%Y%m%d"):
+        return []
+    k = _json_oqi(KORILDI_FAYL) or {}
+    korildi = set(k.get("ids", [])) if k.get("sana") == d["sana"] else set()
+    return [e for e in d.get("items", []) if e.get("id") not in korildi]
+
+
+def ism_ogoh_korildi(items):
+    sana = time.strftime("%Y%m%d")
+    k = _json_oqi(KORILDI_FAYL) or {}
+    ids = k.get("ids", []) if k.get("sana") == sana else []
+    ids += [e["id"] for e in items if e.get("id") not in ids]
+    try:
+        os.makedirs(_BK_DATA, exist_ok=True)
+        with open(KORILDI_FAYL, "w", encoding="utf-8") as f:
+            json.dump({"sana": sana, "ids": ids}, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
 def holat_matni(h) -> str:
     """Tugma ustidagi izoh uchun qisqa matn."""
     if not h:

@@ -481,24 +481,37 @@ def confirm_save(parent, patient_name, alerts, cfg=None):
     if not cfg.get("enabled", True) or not has_critical(alerts):
         return True
     play_alert_sound(cfg)
+    return xavfli_tasdiq(
+        parent, f"⚠ KRITIK NATIJA — {patient_name}", format_alerts(alerts),
+        "Bu natijalarda xatolik shubhasi bor. Namunani/natijani tekshiring.",
+        oyna_nomi="⚠ KRITIK NATIJA",
+        oddiy_savol=f"Bemor: {patient_name}\n\n{format_alerts(alerts)}\n\n"
+                    "Bu natijalarda xatolik shubhasi bor.\nBaribir saqlansinmi?")
+
+
+def xavfli_tasdiq(parent, sarlavha, matn, izoh, oyna_nomi, oddiy_savol,
+                  xavfsiz_tugma="✎  Tekshiraman (saqlanmasin)",
+                  ok_tugma="Natija to'g'ri — baribir saqlansin"):
+    """Qizil tasdiqlash oynasi. True = davom etsin.
+    Standart (Enter/Esc/yopish, kursor) — xavfsiz tugma."""
     try:
         import tkinter as tk
         res = {"ok": False}
         dlg = tk.Toplevel(parent)
-        dlg.title("⚠ KRITIK NATIJA")
+        dlg.title(oyna_nomi)
         dlg.configure(bg="#FFF4F4")
         try:
             dlg.transient(parent)
         except Exception:
             pass
-        tk.Label(dlg, text=f"⚠ KRITIK NATIJA — {patient_name}", bg="#C62828", fg="white",
+        tk.Label(dlg, text=sarlavha, bg="#C62828", fg="white",
                  font=("Arial", 13, "bold"), padx=14, pady=10, anchor="w"
                  ).pack(fill=tk.X)
-        tk.Label(dlg, text=format_alerts(alerts), bg="#FFF4F4", fg="#7F1D1D",
+        tk.Label(dlg, text=matn, bg="#FFF4F4", fg="#7F1D1D",
                  font=("Arial", 11, "bold"), justify=tk.LEFT, wraplength=620,
                  padx=16, pady=10).pack(anchor="w")
-        tk.Label(dlg, text="Bu natijalarda xatolik shubhasi bor. Namunani/natijani tekshiring.",
-                 bg="#FFF4F4", font=("Arial", 10), padx=16).pack(anchor="w")
+        tk.Label(dlg, text=izoh, bg="#FFF4F4", font=("Arial", 10), justify=tk.LEFT,
+                 wraplength=620, padx=16).pack(anchor="w")
         bf = tk.Frame(dlg, bg="#FFF4F4")
         bf.pack(fill=tk.X, padx=14, pady=12)
 
@@ -509,11 +522,11 @@ def confirm_save(parent, patient_name, alerts, cfg=None):
         def _ha():
             res["ok"] = True
             dlg.destroy()
-        safe = tk.Button(bf, text="✎  Tekshiraman (saqlanmasin)", command=_yoq,
+        safe = tk.Button(bf, text=xavfsiz_tugma, command=_yoq,
                          bg="#2E7D32", fg="white", font=("Arial", 11, "bold"),
                          padx=14, pady=6, cursor="hand2")
         safe.pack(side=tk.LEFT)
-        tk.Button(bf, text="Natija to'g'ri — baribir saqlansin", command=_ha,
+        tk.Button(bf, text=ok_tugma, command=_ha,
                   bg="#E0E0E0", font=("Arial", 9), padx=10, pady=4).pack(side=tk.RIGHT)
         dlg.bind("<Return>", _yoq)
         dlg.bind("<Escape>", _yoq)
@@ -533,10 +546,89 @@ def confirm_save(parent, patient_name, alerts, cfg=None):
     except Exception:
         pass
     from tkinter import messagebox
-    body = f"Bemor: {patient_name}\n\n{format_alerts(alerts)}\n\n" \
-           "Bu natijalarda xatolik shubhasi bor.\nBaribir saqlansinmi?"
     try:
-        return messagebox.askyesno("⚠ KRITIK NATIJA", body, parent=parent, icon="warning",
+        return messagebox.askyesno(oyna_nomi, oddiy_savol, parent=parent, icon="warning",
                                    default="no")
     except Exception:
-        return messagebox.askyesno("⚠ KRITIK NATIJA", body)
+        return messagebox.askyesno(oyna_nomi, oddiy_savol)
+
+
+# ── Barkod ↔ ism mos emas (bioximiya, 27.10.2026) ─────────────────────────
+# CRYSTAL to'plamli LIS da ba'zan javobni qo'shni namunaga yozadi: barkod X ostida Y bemorning
+# ismi (va tahlillari). Natija shu ism bilan keladi. Bemor xavfsizligi masalasi — ovoz
+# kritik natija sozlamasi (enabled) o'chirilgan bo'lsa ham chalinadi.
+
+def ism_matni(sid, analizator_ism, baza_ism, no=""):
+    return (f"Barkod: {sid}" + (f"   (analizator №{no})" if no else "") + "\n"
+            f"   Analizatorda:  {analizator_ism}\n"
+            f"   Bazada (shu barkod):  {baza_ism}")
+
+
+def confirm_ism(parent, sid, analizator_ism, baza_ism, cfg=None):
+    """Ism mos bo'lmagan natijani import/saqlash oldidan tasdiqlash. True = davom etsin."""
+    play_alert_sound(cfg or load_config())
+    return xavfli_tasdiq(
+        parent, "⛔ BARKOD VA ISM MOS EMAS",
+        ism_matni(sid, analizator_ism, baza_ism),
+        "Analizator bu barkodga BOSHQA bemorning ismini (va tahlillarini) yozgan bo'lishi mumkin.\n"
+        "Probirkadagi barkod va bemorni tekshiring. Ism shunchaki xato yozilgan bo'lsa —\n"
+        "RAW oynada «Taxrirlash» bilan tuzating, shunda bu oyna qayta chiqmaydi.",
+        oyna_nomi="⛔ ISM MOS EMAS",
+        oddiy_savol=ism_matni(sid, analizator_ism, baza_ism) +
+                    "\n\nBoshqa bemorning natijasi bo'lishi mumkin. Baribir saqlansinmi?",
+        ok_tugma="Tekshirdim — natija shu bemorniki")
+
+
+def ism_ogohlantir(parent, items, cfg=None, ovoz=True):
+    """Natija kelganda: bloklamaydigan, eng ustidagi qizil oyna + ovoz.
+    items: [{'tur': 'natija'|'lis', 'sid', 'no', 'analizator_ism', 'baza_ism'}]."""
+    if not items:
+        return
+    if ovoz:
+        play_alert_sound(cfg or load_config())
+    qator = []
+    for e in items:
+        if e.get("tur") == "lis":
+            qator.append(f"Barkod: {e.get('sid')}\n   Bo'lishi kerak:  {e.get('baza_ism', '')}\n"
+                         "   Analizator javobni juda tez tasdiqladi — bu namunaga boshqa bemorning\n"
+                         "   ismi yozilgan bo'lishi mumkin. O'LCHASHDAN OLDIN analizatorda ismini tekshiring.")
+        else:
+            qator.append(ism_matni(e.get("sid"), e.get("analizator_ism", ""), e.get("baza_ism", ""),
+                                   e.get("no", "")))
+    natija = any(e.get("tur") != "lis" for e in items)
+    try:
+        import tkinter as tk
+        w = tk.Toplevel(parent)
+        w.title("⛔ Bioximiya: barkod va ism")
+        w.configure(bg="#FFF4F4")
+        try:
+            w.attributes("-topmost", True)
+        except Exception:
+            pass
+        tk.Label(w, text="⛔ BIOXIMIYA: BARKOD VA ISM MOS EMAS" if natija
+                 else "⚠ BIOXIMIYA: NAMUNA ISMINI TEKSHIRING",
+                 bg="#C62828" if natija else "#E65100", fg="white",
+                 font=("Arial", 13, "bold"), padx=14, pady=10, anchor="w").pack(fill=tk.X)
+        tk.Label(w, text="\n\n".join(qator), bg="#FFF4F4", fg="#7F1D1D",
+                 font=("Arial", 11, "bold"), justify=tk.LEFT, padx=16, pady=10).pack(anchor="w")
+        if natija:
+            tk.Label(w, text="Analizator bu barkodga boshqa bemorning ismini yozgan bo'lishi mumkin.\n"
+                             "Probirka va analizatordagi namunani tekshiring. Natija bemorga\n"
+                             "qo'shilishidan oldin yana so'raladi.",
+                     bg="#FFF4F4", font=("Arial", 10), justify=tk.LEFT, padx=16).pack(anchor="w")
+        b = tk.Button(w, text="Tushunarli", command=w.destroy, bg="#2E7D32", fg="white",
+                      font=("Arial", 11, "bold"), padx=16, pady=4, cursor="hand2")
+        b.pack(pady=12)
+        w.bind("<Return>", lambda e: w.destroy())
+        w.bind("<Escape>", lambda e: w.destroy())
+        w.update_idletasks()
+        try:
+            px = parent.winfo_rootx() + (parent.winfo_width() - w.winfo_reqwidth()) // 2
+            py = parent.winfo_rooty() + (parent.winfo_height() - w.winfo_reqheight()) // 3
+            w.geometry(f"+{max(0, px)}+{max(0, py)}")
+        except Exception:
+            pass
+        w.lift()
+        b.focus_set()
+    except Exception:
+        pass

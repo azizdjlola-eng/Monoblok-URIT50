@@ -606,6 +606,9 @@ def open_window(parent=None, on_import_callback=None):
     ptree.tag_configure("crit_patient_low", background="#cce0ff", foreground="#0033aa")
     # Ismi analizatorda emas, barkod orqali LIS bazasidan topilgan bemor
     ptree.tag_configure("name_from_db", foreground="#0055aa")
+    # Analizatordagi ism barkod egasiga mos emas — boshqa bemorning natijasi bo'lishi mumkin
+    ptree.tag_configure("ism_mos_emas", background="#C62828", foreground="white",
+                        font=("Arial", 9, "bold"))
     _alerted_sids = set()   # allaqachon ovoz berilgan bemorlar (takror bermaslik)
     rs = ttk.Scrollbar(rp, orient=tk.VERTICAL, command=rtree.yview)
     rtree.configure(yscrollcommand=rs.set)
@@ -801,6 +804,13 @@ def open_window(parent=None, on_import_callback=None):
         for lis_code, new_val in edits.items():
             if lis_code in pinfo['tests']:
                 pinfo['tests'][lis_code]['value'] = new_val
+
+        # ── Analizatordagi ism barkod egasiga mos emas — boshqa bemor natijasi bo'lishi mumkin ──
+        if pinfo.get('ism_holat') == 'boshqa' and critical_alert is not None:
+            if not critical_alert.confirm_ism(window, pinfo.get('sample_id') or sid,
+                                              pinfo.get('name', ''), pinfo.get('baza_ism', '')):
+                status_var.set(f"Natija qo'shilmadi: {sid} — ism barkodga mos emas")
+                return
 
         # ── Kritik natija bo'lsa import oldidan tasdiqlash ──
         if critical_alert is not None:
@@ -1013,7 +1023,8 @@ def open_window(parent=None, on_import_callback=None):
                 alerts, dirs = [], {}
             if alerts:
                 faqat_past = dirs and all(d == "low" for d in dirs.values())
-                ptree.item(item, tags=("crit_patient_low" if faqat_past else "crit_patient",))
+                if pdata.get('ism_holat') != 'boshqa':      # ism mos emas belgisi ustun
+                    ptree.item(item, tags=("crit_patient_low" if faqat_past else "crit_patient",))
                 if sid not in _alerted_sids:
                     _alerted_sids.add(sid)
                     new_crit.append((pdata.get('name', sid), alerts))
@@ -1380,6 +1391,11 @@ def parse_hl7_file(file_path):
     name = parsed.get('name', '') or ''
     # Analizator vaqti (sana.oy.yil soat:daqiqa) — bo'lmasa fayl vaqti
     test_time = parsed.get('time') or fallback_time
+    # CRYSTAL (BK-280) vaqtni daqiqa o'rniga OY bilan yuboradi ("yyyyMMddHHMMss" xatosi):
+    # oktyabrda hammasi HH:10, sentyabrda HH:09. Shunda natija kelgan vaqt (fayl nomi) olinadi.
+    mt = re.match(r"\d\d\.(\d\d)\.\d{4} \d\d:(\d\d)$", test_time)
+    if m and mt and mt.group(1) == mt.group(2):
+        test_time = fallback_time
     normalized_name = name.replace('^', ' ').strip().upper() if name else 'NONAME'
     key = sample_id if sample_id else f"{test_date}|{normalized_name}"
     result[key] = {
@@ -1484,6 +1500,21 @@ def refresh_patient_list(ptree, rtree, status_var,
             p['name_src'] = 'db'          # ism analizatordan emas, LIS bazasidan
             p['order_id'] = info['order_id']
 
+    # Analizatordagi ism shu barkod egasiga mosmi (27.10.2026: CRYSTAL to'plamli LIS da
+    # qo'shni namuna ismini yozishi mumkin — barkod X, ism Y bemorniki)
+    n_ism = 0
+    for sid in sorted_sids:
+        p = patients_data[sid]
+        p.pop('ism_holat', None)
+        if p.get('name_src') == 'db' or not p.get('name', '').strip():
+            continue
+        info = lookup_patient_by_sample_id(p.get('sample_id') or '')
+        if info and info['fish']:
+            holat = _bp.ism_solishtir(p['name'], info['fish'])
+            if holat in ('boshqa', 'imlo'):
+                p['ism_holat'], p['baza_ism'] = holat, info['fish']
+                n_ism += holat == 'boshqa'
+
     # Eng yangi yuqorida bo'lishi uchun position=0 ga qo'shamiz (stack usuli)
     n_pending = 0
     try:
@@ -1505,12 +1536,17 @@ def refresh_patient_list(ptree, rtree, status_var,
             tags = ("pending_patient",)
         if (p.get('sample_id') or sid) in _retest_q:
             nm = f"{nm}  \U0001f501"          # qayta o'lchov navbatida (LIS yangi namuna kutmoqda)
+        if p.get('ism_holat') == 'boshqa':
+            nm = f"⛔ {nm} ≠ {p['baza_ism']}"
+            tags = ("ism_mos_emas",)
         ptree.insert("", 0, values=(
             p['time'], sid, nm,
             p['_display_num']
         ), tags=tags)
 
     msg = f"Yuklandi: {len(patients_data)} ta bemor ({len(files)} ta fayl)"
+    if n_ism:
+        msg += f"  |  ⛔ {n_ism} ta namunada ism barkodga mos emas"
     if n_pending:
         msg += f"  |  ⏳ {n_pending} ta bemorda natija hali to'liq emas"
     status_var.set(msg)
@@ -1705,6 +1741,14 @@ def _do_save(patient_info, status_var, silent=False):
 
         order_id = row['order_id']
         db_name  = row.get('fish', name)
+
+        if name and _bp.ism_solishtir(name, db_name) == 'boshqa':
+            ok = False
+            if not silent and critical_alert is not None:
+                ok = critical_alert.confirm_ism(None, sid, name, db_name)
+            if not ok:
+                cur.close(); conn.close()
+                return 'cancelled'
 
         if not silent:
             if not messagebox.askyesno("Tasdiqlash",

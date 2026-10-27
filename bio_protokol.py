@@ -806,6 +806,43 @@ def analyzer_text(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9 .\-]", "", to_ascii(s)).strip()
 
 
+def _ism_sozlari(s: str) -> list:
+    s = (s or "").replace("^", " ").replace("-", " ")      # HL7 PID-5: Familiya^Ism
+    return [w for w in re.sub(r"[^A-Z ]", "", analyzer_text(s).upper()).split() if w]
+
+
+def ism_solishtir(analizator_ism: str, baza_fish: str) -> str:
+    """Analizatordagi ism bazadagi bemorga (barkod bo'yicha) mosmi.
+
+    'mos'    — bir xil (analizator 20 belgida QISQARTIRADI — prefiks ham mos);
+    'imlo'   — har so'z o'xshash: laborant qo'lda xato yozgan ("Xiola" ↔ "Xilola");
+    'boshqa' — boshqa bemor: CRYSTAL to'plamli LIS da ismni qo'shni namunaga yozgan
+               (22–26.10.2026 da 5 marta, masalan 261026122055 ga 053 ning ismi);
+    ''       — tekshirib bo'lmaydi (ism yoki baza bo'sh).
+    Aka-uka (familiya bir, ism boshqa) — 'boshqa': har so'z alohida solishtiriladi."""
+    from difflib import SequenceMatcher
+    a, b = _ism_sozlari(analizator_ism), _ism_sozlari(baza_fish)
+    if not a or not b or len("".join(a)) < 4:
+        return ""
+    ja, jb = "".join(a), "".join(b)
+    if ja == jb or jb.startswith(ja) or sorted(a) == sorted(b):
+        return "mos"
+
+    def _soz_mos(x, y, oxirgi):
+        if x == y or (oxirgi and len(x) >= 2 and y.startswith(x)):
+            return "mos"
+        if oxirgi and len(x) > 3 and len(y) > len(x):
+            y = y[:len(x) + 1]                  # qisqartirilgan oxirgi so'z
+        return "imlo" if SequenceMatcher(None, x, y).ratio() >= 0.75 else "boshqa"
+
+    for aa, bb in ((a, b), (a, b[::-1])):       # familiya/ism o'rni almashgan bo'lishi mumkin
+        n = min(len(aa), len(bb))
+        holat = [_soz_mos(aa[i], bb[i], i == len(aa) - 1) for i in range(n)]
+        if "boshqa" not in holat:
+            return "imlo" if "imlo" in holat else "mos"
+    return "boshqa"
+
+
 def _patient_fields(p: dict):
     fish = analyzer_text(p.get("fish") or "")
     dob = _hl7_ts(p.get("tugilgan_sana"))[:8]
