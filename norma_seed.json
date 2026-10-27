@@ -231,7 +231,8 @@
   "min_val_m": null,
   "max_val_m": null,
   "min_val_f": null,
-  "max_val_f": null
+  "max_val_f": null,
+  "result_template": "{\"type\": \"multi_component\", \"components\": [{\"name\": \"Umumiy bilirubin\", \"key\": \"umumiy\", \"unit\": \"mkmol/l\", \"norma\": \"3.4-20.5\", \"readonly\": false}, {\"name\": \"Bog'langan bilirubin\", \"key\": \"bog_langan\", \"unit\": \"mkmol/l\", \"norma\": \"0.86-5.3\", \"readonly\": false}, {\"name\": \"Erkin bilirubin\", \"key\": \"erkin\", \"unit\": \"mkmol/l\", \"norma\": \"\", \"readonly\": true, \"formula\": \"umumiy - bog_langan\"}]}"
  },
  {
   "guruh": "TEST",
@@ -257,7 +258,8 @@
   "min_val_m": null,
   "max_val_m": null,
   "min_val_f": null,
-  "max_val_f": null
+  "max_val_f": null,
+  "result_template": "{\"type\": \"multi_component\", \"components\": [{\"name\": \"Mochevina\", \"key\": \"mochevina\", \"unit\": \"mmol/L\", \"norma\": \"2.5 - 8.3\", \"readonly\": false}, {\"name\": \"Kreatinin\", \"key\": \"kreatinin\", \"unit\": \"mkmol/L\", \"norma\": \"Erkak: 62-115 | Ayol: 53-97\", \"readonly\": false}, {\"name\": \"Siydik kislotasi\", \"key\": \"siydik_kislota\", \"unit\": \"mkmol/L\", \"norma\": \"Erkak: 210-420 | Ayol: 150-350\", \"readonly\": false}, {\"name\": \"Albumin\", \"key\": \"albumin\", \"unit\": \"g/L\", \"norma\": \"35 - 52\", \"readonly\": false}, {\"name\": \"Mochevina azoti (BUN)\", \"key\": \"bun\", \"unit\": \"mmol/L\", \"norma\": \"1.1 - 3.9\", \"readonly\": true, \"formula\": \"mochevina * 0.467\"}, {\"name\": \"BUN / Kreatinin nisbati\", \"key\": \"bun_cr\", \"unit\": \"\", \"norma\": \"10 - 20\", \"readonly\": true, \"formula\": \"(mochevina * 0.467) / (kreatinin / 88.4)\"}, {\"name\": \"GFR (taxminiy)\", \"key\": \"gfr\", \"unit\": \"ml/min\", \"norma\": \"> 60\", \"readonly\": true, \"formula\": \"gfr_cockcroft\"}]}"
  },
  {
   "guruh": "",
@@ -465,7 +467,8 @@
   "min_val_m": null,
   "max_val_m": null,
   "min_val_f": null,
-  "max_val_f": null
+  "max_val_f": null,
+  "result_template": "{\"type\": \"multi_component\", \"components\": [{\"name\": \"Anti-HAV IgM\", \"key\": \"igm\", \"unit\": \"\", \"norma\": \"Manfiy (-)\", \"options\": [\"Manfiy (-)\", \"Musbat (+)\"], \"readonly\": false}, {\"name\": \"Anti-HAV IgG\", \"key\": \"igg\", \"unit\": \"\", \"norma\": \"Manfiy (-)\", \"options\": [\"Manfiy (-)\", \"Musbat (+)\"], \"readonly\": false}]}"
  },
  {
   "guruh": "TEST",
@@ -894,7 +897,8 @@
   "min_val_m": null,
   "max_val_m": null,
   "min_val_f": null,
-  "max_val_f": null
+  "max_val_f": null,
+  "result_template": "{\"type\": \"multi_component\", \"components\": [{\"name\": \"PT sekundalarda\", \"key\": \"pt_sek\", \"unit\": \"sek\", \"norma\": \"13-15\", \"readonly\": false, \"group\": \"PT\"}, {\"name\": \"PT bo'yicha Kviku\", \"key\": \"pt_kviku\", \"unit\": \"%\", \"norma\": \"70.0-100.0\", \"readonly\": false, \"group\": \"PT\"}, {\"name\": \"MNO/INR\", \"key\": \"pt_mno\", \"unit\": \"INR\", \"norma\": \"0.90-1.15\", \"readonly\": false, \"group\": \"PT\"}, {\"name\": \"TT (Tromboplastin vaqti)\", \"key\": \"tt\", \"unit\": \"sek\", \"norma\": \"10.3-30.0\", \"readonly\": false}, {\"name\": \"ACHTV\", \"key\": \"achtv\", \"unit\": \"sek\", \"norma\": \"25.4-36.9\", \"readonly\": false}, {\"name\": \"Fibrinogen\", \"key\": \"fibrinogen\", \"unit\": \"g/l\", \"norma\": \"2.00-4.00\", \"readonly\": false}]}"
  },
  {
   "guruh": "IFA",
@@ -1024,7 +1028,8 @@
   "min_val_m": null,
   "max_val_m": null,
   "min_val_f": null,
-  "max_val_f": null
+  "max_val_f": null,
+  "result_template": "{\"type\": \"multi_component\", \"components\": [{\"name\": \"Umumiy xolesterin (TC)\", \"key\": \"tc\", \"unit\": \"mmol/L\", \"norma\": \"< 5.2\", \"readonly\": false}, {\"name\": \"HDL xolesterin\", \"key\": \"hdl\", \"unit\": \"mmol/L\", \"norma\": \"Erkak: > 1.0 | Ayol: > 1.2\", \"readonly\": false}, {\"name\": \"LDL xolesterin\", \"key\": \"ldl\", \"unit\": \"mmol/L\", \"norma\": \"< 3.0\", \"readonly\": false}, {\"name\": \"Triglitseridlar (TG)\", \"key\": \"tg\", \"unit\": \"mmol/L\", \"norma\": \"< 1.7\", \"readonly\": false}, {\"name\": \"VLDL (hisoblangan)\", \"key\": \"vldl\", \"unit\": \"mmol/L\", \"norma\": \"0.26 - 1.04\", \"readonly\": true, \"formula\": \"tg / 2.2\"}, {\"name\": \"Non-HDL xolesterin\", \"key\": \"non_hdl\", \"unit\": \"mmol/L\", \"norma\": \"< 3.8\", \"readonly\": true, \"formula\": \"tc - hdl\"}, {\"name\": \"Aterogenlik koeffitsienti (KA)\", \"key\": \"ka\", \"unit\": \"\", \"norma\": \"< 3.0\", \"readonly\": true, \"formula\": \"(tc - hdl) / hdl\"}, {\"name\": \"TC / HDL nisbati\", \"key\": \"tc_hdl\", \"unit\": \"\", \"norma\": \"< 5.0\", \"readonly\": true, \"formula\": \"tc / hdl\"}, {\"name\": \"LDL / HDL nisbati\", \"key\": \"ldl_hdl\", \"unit\": \"\", \"norma\": \"< 3.5\", \"readonly\": true, \"formula\": \"ldl / hdl\"}, {\"name\": \"TG / HDL nisbati\", \"key\": \"tg_hdl\", \"unit\": \"\", \"norma\": \"< 1.5\", \"readonly\": true, \"formula\": \"tg / hdl\"}]}"
  },
  {
   "guruh": "IFA",
@@ -1258,7 +1263,8 @@
   "min_val_m": null,
   "max_val_m": null,
   "min_val_f": null,
-  "max_val_f": null
+  "max_val_f": null,
+  "result_template": "{\"type\": \"multi_component\", \"components\": [{\"name\": \"PT sekundalarda\", \"key\": \"pt_sek\", \"unit\": \"sek\", \"norma\": \"13-15\", \"readonly\": false}, {\"name\": \"PT bo'yicha Kviku\", \"key\": \"pt_kviku\", \"unit\": \"%\", \"norma\": \"70.0-100.0\", \"readonly\": false}, {\"name\": \"MNO/INR\", \"key\": \"pt_mno\", \"unit\": \"INR\", \"norma\": \"0.90-1.15\", \"readonly\": false}]}"
  },
  {
   "guruh": "TEST",
@@ -1323,7 +1329,8 @@
   "min_val_m": null,
   "max_val_m": null,
   "min_val_f": null,
-  "max_val_f": null
+  "max_val_f": null,
+  "result_template": "{\"type\": \"multi_component\", \"components\": [{\"name\": \"RF (Revmatoidniy faktor) avtomat\", \"key\": \"rf\", \"unit\": \"ME/ml\", \"norma\": \"0-14\", \"readonly\": false}, {\"name\": \"CRP (S-reaktivniy belok) avtomat\", \"key\": \"crp\", \"unit\": \"mg/l\", \"norma\": \"0-5\", \"readonly\": false}, {\"name\": \"ASLO (Antistreptolizin-O) avtomat\", \"key\": \"aslo\", \"unit\": \"ME/ml\", \"norma\": \"0-150\", \"readonly\": false}]}"
  },
  {
   "guruh": "TEST",
@@ -1336,7 +1343,8 @@
   "min_val_m": null,
   "max_val_m": null,
   "min_val_f": null,
-  "max_val_f": null
+  "max_val_f": null,
+  "result_template": "{\"type\": \"multi_component\", \"components\": [{\"name\": \"RF (Revmatoidniy faktor)\", \"key\": \"rf\", \"unit\": \"ME/ml\", \"norma\": \"Manfiy (-)\", \"readonly\": false}, {\"name\": \"CRP (S-reaktivniy belok)\", \"key\": \"crp\", \"unit\": \"mg/l\", \"norma\": \"Manfiy (-)\", \"readonly\": false}, {\"name\": \"ASLO (Antistreptolizin-O)\", \"key\": \"aslo\", \"unit\": \"ME/ml\", \"norma\": \"Manfiy (-)\", \"readonly\": false}]}"
  },
  {
   "guruh": "BIO",

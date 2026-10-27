@@ -4883,6 +4883,62 @@ def _is_buyrak_paneli_test(test_name: str) -> bool:
     tn = (test_name or '').lower()
     return 'buyrak paneli' in tn or 'buyrak panel' in tn
 
+
+# Panel natija oynasi shablonlari — bazada (tahlillar_norma.result_template)
+# BO'SH bo'lsa ishlatiladi. Asosiy bazadagi shablonning aynan nusxasi.
+# Usiz yangi mijozda (MED ISHONCH, 2026-10-27) panel o'rniga oddiy
+# "Natija Kiriting" oynasi ochilib, natija ichma-ich JSON bo'lib saqlanardi.
+_LIPID_ZAXIRA_SHABLON = {"type": "multi_component", "components": [
+    {"name": "Umumiy xolesterin (TC)", "key": "tc", "unit": "mmol/L", "norma": "< 5.2", "readonly": False},
+    {"name": "HDL xolesterin", "key": "hdl", "unit": "mmol/L", "norma": "Erkak: > 1.0 | Ayol: > 1.2", "readonly": False},
+    {"name": "LDL xolesterin", "key": "ldl", "unit": "mmol/L", "norma": "< 3.0", "readonly": False},
+    {"name": "Triglitseridlar (TG)", "key": "tg", "unit": "mmol/L", "norma": "< 1.7", "readonly": False},
+    {"name": "VLDL (hisoblangan)", "key": "vldl", "unit": "mmol/L", "norma": "0.26 - 1.04", "readonly": True, "formula": "tg / 2.2"},
+    {"name": "Non-HDL xolesterin", "key": "non_hdl", "unit": "mmol/L", "norma": "< 3.8", "readonly": True, "formula": "tc - hdl"},
+    {"name": "Aterogenlik koeffitsienti (KA)", "key": "ka", "unit": "", "norma": "< 3.0", "readonly": True, "formula": "(tc - hdl) / hdl"},
+    {"name": "TC / HDL nisbati", "key": "tc_hdl", "unit": "", "norma": "< 5.0", "readonly": True, "formula": "tc / hdl"},
+    {"name": "LDL / HDL nisbati", "key": "ldl_hdl", "unit": "", "norma": "< 3.5", "readonly": True, "formula": "ldl / hdl"},
+    {"name": "TG / HDL nisbati", "key": "tg_hdl", "unit": "", "norma": "< 1.5", "readonly": True, "formula": "tg / hdl"},
+]}
+_BUYRAK_ZAXIRA_SHABLON = {"type": "multi_component", "components": [
+    {"name": "Mochevina", "key": "mochevina", "unit": "mmol/L", "norma": "2.5 - 8.3", "readonly": False},
+    {"name": "Kreatinin", "key": "kreatinin", "unit": "mkmol/L", "norma": "Erkak: 62-115 | Ayol: 53-97", "readonly": False},
+    {"name": "Siydik kislotasi", "key": "siydik_kislota", "unit": "mkmol/L", "norma": "Erkak: 210-420 | Ayol: 150-350", "readonly": False},
+    {"name": "Albumin", "key": "albumin", "unit": "g/L", "norma": "35 - 52", "readonly": False},
+    {"name": "Mochevina azoti (BUN)", "key": "bun", "unit": "mmol/L", "norma": "1.1 - 3.9", "readonly": True, "formula": "mochevina * 0.467"},
+    {"name": "BUN / Kreatinin nisbati", "key": "bun_cr", "unit": "", "norma": "10 - 20", "readonly": True, "formula": "(mochevina * 0.467) / (kreatinin / 88.4)"},
+    {"name": "GFR (taxminiy)", "key": "gfr", "unit": "ml/min", "norma": "> 60", "readonly": True, "formula": "gfr_cockcroft"},
+]}
+
+
+def _panel_zaxira_shablon(test_name):
+    """LIPID SPEKTRI / BUYRAK PANELI uchun koddagi zaxira shablon (nusxa), aks holda None."""
+    import copy
+    if _is_lipid_spektri_test(test_name):
+        return copy.deepcopy(_LIPID_ZAXIRA_SHABLON)
+    if _is_buyrak_paneli_test(test_name):
+        return copy.deepcopy(_BUYRAK_ZAXIRA_SHABLON)
+    return None
+
+
+def _ichki_natija_qiymati(raw):
+    """Oddiy dialog eski natijani '{"result": ...}' ichiga qayta-qayta o'rab
+    saqlardi ('{"result": "{\\"result\\": \\"5.8\\"}"}'). Ichma-ich qatlamlarni
+    ochib, ichidagi oddiy qiymatni qaytaradi; JSON bo'lmasa — o'zini."""
+    s = '' if raw is None else str(raw)
+    for _ in range(10):
+        t = s.strip()
+        if not t.startswith('{'):
+            break
+        try:
+            d = json.loads(t)
+        except Exception:
+            break   # buzilgan dumli yozuv ('{...}8.8') — laborant o'zi qayta yozadi
+        if not (isinstance(d, dict) and set(d) <= {'result', 'value'}):
+            break
+        s = '' if d.get('result', d.get('value')) is None else str(d.get('result', d.get('value')))
+    return s
+
 def _is_gtt_test(test_name: str) -> bool:
     """Glyukozaga tolerantlik testi (GTT) ekanligini tekshirish."""
     tn = (test_name or '').lower()
@@ -19359,8 +19415,9 @@ Sana: {_sana_fmt}"""
         result_entry.pack(pady=5)
         result_entry.focus()
         
-        # Eski natijani ko'rsatish
-        old_result = self.test_results.get(test_id, "")
+        # Eski natijani ko'rsatish — '{"result": "5.8"}' JSON bo'lsa ichidagi
+        # qiymat; aks holda saqlashda yana o'ralib ichma-ich JSON bo'lardi
+        old_result = _ichki_natija_qiymati(self.test_results.get(test_id, ""))
         if old_result:
             result_entry.insert(0, old_result)
         
@@ -19540,11 +19597,18 @@ Sana: {_sana_fmt}"""
         dialog.focus_set()
     
     def get_result_template_from_db(self, test_name):
-        """Bazadan result_template ni olish"""
+        """Bazadan result_template ni olish. Bazada bo'sh bo'lsa — LIPID SPEKTRI /
+        BUYRAK PANELI uchun koddagi zaxira shablon (_panel_zaxira_shablon)."""
+        tmpl = self._result_template_bazadan(test_name)
+        if not tmpl:
+            tmpl = _panel_zaxira_shablon(test_name)
+        return tmpl
+
+    def _result_template_bazadan(self, test_name):
         conn = db_conn()
         if not conn:
             return None
-        
+
         try:
             cursor = conn.cursor(dictionary=True)
             cursor.execute(

@@ -133,25 +133,57 @@ def seed_normalar(conn, faqat_yoq: bool = True) -> int:
         return 0
     cur = conn.cursor()
     try:
-        cur.execute("SELECT tahlil_nomi FROM tahlillar_norma")
-        mavjud = set((r[0] or "").strip() for r in cur.fetchall())
+        # result_template ustuni juda eski bazada bo'lmasligi mumkin — unda
+        # avvalgidek faqat normalar seed qilinadi (start to'xtamasin).
+        try:
+            cur.execute("SELECT tahlil_nomi, result_template FROM tahlillar_norma")
+            shablon_ustuni = True
+        except Exception:
+            cur.execute("SELECT tahlil_nomi, NULL FROM tahlillar_norma")
+            shablon_ustuni = False
+        mavjud = {}
+        for _nom, _sh in cur.fetchall():
+            mavjud[(_nom or "").strip()] = bool((_sh or "").strip())
         qoshildi = 0
         for r in rows:
             nom = (r.get("tahlil_nomi") or "").strip()
             if not nom:
                 continue
+            shablon = ((r.get("result_template") or "").strip() or None) if shablon_ustuni else None
             if faqat_yoq and nom in mavjud:
+                # Panel shabloni (LIPID SPEKTRI, BUYRAK PANELI ...) bo'sh qolgan
+                # o'rnatishda faqat SHABLON to'ldiriladi — usiz Natija oynasi panel
+                # o'rniga oddiy "Natija Kiriting" ni ochardi (MED ISHONCH, 2026-10-27).
+                # Mijoz o'zi tahrirlagan shablon ustidan yozilmaydi.
+                if shablon and not mavjud[nom]:
+                    cur.execute(
+                        "UPDATE tahlillar_norma SET result_template=%s "
+                        "WHERE tahlil_nomi=%s AND (result_template IS NULL OR result_template='')",
+                        (shablon, nom))
+                    mavjud[nom] = True
+                    qoshildi += 1
                 continue
-            cur.execute(
-                "INSERT INTO tahlillar_norma "
-                " (guruh, tahlil_nomi, norma, birlik, type, min_val, max_val, "
-                "  min_val_m, max_val_m, min_val_f, max_val_f) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                (r.get("guruh") or "", nom, r.get("norma"), r.get("birlik"),
-                 r.get("type"), r.get("min_val"), r.get("max_val"),
-                 r.get("min_val_m"), r.get("max_val_m"),
-                 r.get("min_val_f"), r.get("max_val_f")))
-            mavjud.add(nom)
+            if shablon_ustuni:
+                cur.execute(
+                    "INSERT INTO tahlillar_norma "
+                    " (guruh, tahlil_nomi, norma, birlik, type, min_val, max_val, "
+                    "  min_val_m, max_val_m, min_val_f, max_val_f, result_template) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                    (r.get("guruh") or "", nom, r.get("norma"), r.get("birlik"),
+                     r.get("type"), r.get("min_val"), r.get("max_val"),
+                     r.get("min_val_m"), r.get("max_val_m"),
+                     r.get("min_val_f"), r.get("max_val_f"), shablon))
+            else:
+                cur.execute(
+                    "INSERT INTO tahlillar_norma "
+                    " (guruh, tahlil_nomi, norma, birlik, type, min_val, max_val, "
+                    "  min_val_m, max_val_m, min_val_f, max_val_f) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                    (r.get("guruh") or "", nom, r.get("norma"), r.get("birlik"),
+                     r.get("type"), r.get("min_val"), r.get("max_val"),
+                     r.get("min_val_m"), r.get("max_val_m"),
+                     r.get("min_val_f"), r.get("max_val_f")))
+            mavjud[nom] = bool(shablon)
             qoshildi += 1
         conn.commit()
         return qoshildi
