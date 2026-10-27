@@ -208,6 +208,17 @@ qayta yuborish paytida keyingi namuna so'rovi kelganda bo'lgan. №50 da `[DIQQA
 **Amaliy yechim:** ko'p natija kelgandan keyin to'plamli LIS dan oldin analizatorda LIS ulanishini
 yangilang (LIS oynasini yopib-ochish yoki «Подключить»). Toza ulanishda 1-urinish ~98%.
 
+**Kodda (27.10.2026):**
+- Listener ulanishdan beri natijalar va 1-urinishda yo'qolgan LIS javoblarini sanaydi.
+  Holat faylida `natija_ulanishdan`, `lis_yoqotish_ulanishdan`, `qayta_ulash_tavsiya` maydonlari bor.
+  Tavsiya natijalar ≥ `lis_qayta_ulash_natija` (20) bo'lsa yoki yo'qotish > 0 bo'lsa beriladi.
+  Shunda tugma «↻ Bioximiya» (zaytun rang) bo'ladi, har ulanishda bir marta toast chiqadi, tooltip'da sababi ko'rinadi.
+- QCK+DSR 1000 baytdan oshsa (12+ tahlil) faqat DSR bitta bo'lakda yuboriladi
+  (`dsr_only_if_large`, `dsr_only_max_bytes`=1024). Logda `(QCK SIZ bitta bo'lak — N bayt sig'madi)`.
+  DSR 1024 dan oshsa `[OGOHLANTIRISH] ... Tahlillarni 2 namunaga bo'ling`.
+  **Jonli sinov kerak:** 13+ tahlilli buyurtmada analizator ekranida ism va hamma tahlillar chiqishini
+  tekshiring. Chiqmasa `bioximiya.dsr_only_if_large = false` qilib eski usulga qaytaring.
+
 ## Kod xaritasi (Tahlil kodlari oynasi)
 
 Bioximiya tabida **🧬 Tahlil kodlari** tugmasi. Jadval: analizator kodi | nomi | LIMS tahlili.
