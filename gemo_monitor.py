@@ -560,8 +560,16 @@ def check(cfg=None, now=None, morning=True):
             "stats": stats, "key": key, "time": now}
 
 
-def format_report(res, full=True):
-    """full=True — holat oynasi (to'liq ro'yxat); full=False — popup (faqat muammo + harakat)."""
+def format_report(res, full=True, line_map=None):
+    """full=True — holat oynasi (to'liq ro'yxat); full=False — popup (faqat muammo + harakat).
+    line_map (dict) berilsa: Text qator raqami (1 dan) → {"id", "sample_id", "fish"} —
+    holat oynasida bemor qatorini bosib asosiy oynada ochish uchun."""
+
+    def _mark_row(o):
+        if line_map is not None:
+            line_map[len(lines) + 1] = {"id": o["id"], "sample_id": o.get("sample_id"),
+                                        "fish": o.get("fish")}
+
     s = res.get("stats", {})
     icon = {"ok": "[OK]", "crit": "[XATO]"}.get(res.get("level"), "")
     lines = ["{} {}".format(icon, res.get("summary", "")), ""]
@@ -597,6 +605,7 @@ def format_report(res, full=True):
                 extra.append("bio ✓")
             if o["urine"]:
                 extra.append("siydik ✓")
+            _mark_row(o)
             lines.append("   {}  {:<28} {:<36} {}".format(
                 o["sana_vaqt"].strftime("%H:%M"), (o["fish"] or "")[:28],
                 mark, ", ".join(extra)))
@@ -606,6 +615,7 @@ def format_report(res, full=True):
         lines.append("Egasiz CBC natijalari (buyurtmada qon tahlili yo'q):")
         for r in orphans:
             mark = "⏳ belgilangan" if r.get("snoozed") else "✗ buyurtmaga qo'shing"
+            _mark_row(r)
             lines.append("   {}  {:<28} natija {}  {}".format(
                 r["sana_vaqt"].strftime("%H:%M"), (r["fish"] or "")[:28],
                 r["arrived"].strftime("%H:%M") if r.get("arrived") else "?", mark))

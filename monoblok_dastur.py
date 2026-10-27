@@ -11790,7 +11790,10 @@ class MonoblokApp:
         win.transient(self.root)
 
         head = ttk.Label(win, text="Tekshirilmoqda...", font=("Arial", 11, "bold"))
-        head.pack(anchor="w", padx=12, pady=(10, 4))
+        head.pack(anchor="w", padx=12, pady=(10, 0))
+        ttk.Label(win, text="Bemor qatorini 2 marta bosing yoki tanlab Enter — "
+                            "asosiy oynada ochiladi (↑/↓ bilan yurish)",
+                  foreground="#555555").pack(anchor="w", padx=12, pady=(0, 4))
 
         txt = scrolledtext.ScrolledText(win, font=("Consolas", 10), wrap=tk.WORD)
         txt.pack(fill=tk.BOTH, expand=True, padx=12, pady=4)
@@ -11798,12 +11801,18 @@ class MonoblokApp:
         btns = ttk.Frame(win)
         btns.pack(fill=tk.X, padx=12, pady=10)
 
+        # Text qator raqami → {"id", "sample_id", "fish"} (format_report to'ldiradi)
+        row_map = {}
+        sel = {"line": None, "id": None}
+        txt.tag_configure("bemor_tanlangan", background="#CCE4FF")
+
         def _render(res):
             head.config(text=res.get("summary", ""),
                         foreground="#005500" if res.get("level") == "ok" else "#8B0000")
+            row_map.clear()
             txt.config(state=tk.NORMAL)
             txt.delete("1.0", tk.END)
-            txt.insert("1.0", gemo_monitor.format_report(res))
+            txt.insert("1.0", gemo_monitor.format_report(res, line_map=row_map))
             txt.config(state=tk.DISABLED)
 
         def _refresh():
@@ -11875,11 +11884,77 @@ class MonoblokApp:
         ttk.Button(snz, text="⏳ Bugun signal bermasin", command=_snooze).pack(side=tk.LEFT, padx=4)
         ttk.Button(snz, text="Belgilarni bekor qilish", command=_unsnooze_all).pack(side=tk.LEFT, padx=4)
 
+        # ── Bemor qatorini tanlash: 2-klik / Enter → asosiy oynada ochish ──
+        # (qidiruvdan qidirib nima topshirganini aniqlashga vaqt ketmasin)
+        def _select_line(line):
+            info = row_map.get(line)
+            if not info:
+                return False
+            sel["line"], sel["id"] = line, info["id"]
+            txt.tag_remove("bemor_tanlangan", "1.0", tk.END)
+            txt.tag_add("bemor_tanlangan", f"{line}.0", f"{line}.0 lineend+1c")
+            txt.see(f"{line}.0")
+            # "Bugun signal bermasin" ro'yxatida ham shu bemor tanlansin
+            for label, oid in snz_map.items():
+                if oid == info["id"]:
+                    snz_var.set(label)
+                    break
+            return True
+
+        def _line_at(event):
+            return int(txt.index(f"@{event.x},{event.y}").split(".")[0])
+
+        def _on_click(event):
+            txt.focus_set()
+            _select_line(_line_at(event))
+
+        def _move(step):
+            lines = sorted(row_map)
+            if lines:
+                if sel["line"] in row_map:
+                    i = max(0, min(lines.index(sel["line"]) + step, len(lines) - 1))
+                else:
+                    i = 0 if step > 0 else len(lines) - 1
+                _select_line(lines[i])
+            return "break"
+
+        def _open_selected(event=None):
+            info = row_map.get(sel["line"])
+            if not info:
+                return "break"
+            key = str(info.get("sample_id") or info["id"])
+            win.destroy()
+            try:
+                self.root.lift()
+                self.barcode_entry.delete(0, tk.END)
+                self.barcode_entry.insert(0, key)
+                self.process_barcode(key)
+            except Exception as e:
+                messagebox.showerror("Gemotologiya", f"Bemorni ochishda xato: {e}",
+                                     parent=self.root)
+            return "break"
+
+        def _on_double(event):
+            if _select_line(_line_at(event)):
+                _open_selected()
+            return "break"
+
+        txt.bind("<Button-1>", _on_click, add="+")
+        txt.bind("<Double-Button-1>", _on_double)
+        txt.bind("<Return>", _open_selected)
+        txt.bind("<KP_Enter>", _open_selected)
+        txt.bind("<Up>", lambda e: _move(-1))
+        txt.bind("<Down>", lambda e: _move(1))
+
         _render_base = _render
 
         def _render(res):
             _render_base(res)
             _fill_snooze(res)
+            # Qayta tekshiruvdan keyin ham tanlangan bemor saqlanadi
+            line = next((ln for ln, i in row_map.items() if i["id"] == sel["id"]), None)
+            if line is None or not _select_line(line):
+                sel["line"] = None
 
         ttk.Button(btns, text="🔄 Qayta tekshirish", command=_refresh).pack(side=tk.LEFT, padx=4)
         ttk.Button(btns, text="Gemotologiya oynasi", command=_open_hema).pack(side=tk.LEFT, padx=4)
