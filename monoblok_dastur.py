@@ -11454,7 +11454,9 @@ class MonoblokApp:
     # ───────────────── Bioximiya LIS holati (fon xizmati nazorati) ─────────────────
     _BIO_TUGMA = {"ulangan": ("#388E3C", "● Bioximiya"),
                   "ulanmagan": ("#EF6C00", "⚠ Bioximiya"),
-                  "ochiq": ("#616161", "✖ Bioximiya")}
+                  "ochiq": ("#616161", "✖ Bioximiya"),
+                  # ulangan, lekin CRYSTAL qabul navbati to'lgan — LIS dan oldin qayta ulash kerak
+                  "eskirgan": ("#9E9D24", "↻ Bioximiya")}
 
     def _bio_holat_poll(self):
         """Har 5 s: LIS holati → "● Bioximiya" tugmasi; xizmat javob bermasa qayta ochish;
@@ -11499,7 +11501,11 @@ class MonoblokApp:
                 tur = "ulangan"
             else:
                 tur = "ulanmagan"
-            self._bio_tugma_yangila(tur)
+            import bio_xizmat as _bx
+            eskirgan = tur == "ulangan" and _bx.qayta_ulash_kerak(h)
+            self._bio_tugma_yangila("eskirgan" if eskirgan else tur)
+            if eskirgan:
+                self._bio_qayta_ulash_eslat(h)
             self._bio_hodisalar(h)
             if self._bio_rejim == "xizmat":
                 self._bio_xizmat_nazorat(tur, h)
@@ -11609,6 +11615,22 @@ class MonoblokApp:
             self.root.after(0, lambda: self.status_var.set(
                 f"{'[OK]' if ok else '[XATO]'} Bioximiya: {sabab} → {msg}"))
         threading.Thread(target=ish, daemon=True).start()
+
+    def _bio_qayta_ulash_eslat(self, h):
+        """Har ulanishda bir marta: natijalar ko'paydi / LIS javobi yo'qoldi — to'plamli LIS dan
+        oldin analizatorda ulanishni yangilash (27.10.2026: <5 natija 98%, 30+ natija 53%)."""
+        kalit = h.get("conn_since") or h.get("peer")
+        if getattr(self, "_bio_qayta_ulash_kalit", None) == kalit:
+            return
+        self._bio_qayta_ulash_kalit = kalit
+        try:
+            from oyna_xabar import toast, SARIQ
+            toast(self.root, "↻ Bioximiya: analizatorda LIS ulanishini yangilang.\n"
+                  f"Ulanishdan beri {h.get('natija_ulanishdan', 0)} natija keldi — to'plamli LIS "
+                  "javoblari yo'qolishi mumkin.\nLIS dan oldin: LIS oynasini yopib-oching yoki «Подключить».",
+                  davomiylik_ms=15000, fon=SARIQ)
+        except Exception:
+            pass
 
     def _bio_ogohlantir(self, tur):
         """Holat o'zgarishida bloklamaydigan xabar. Uzilish — laborant analizatorda

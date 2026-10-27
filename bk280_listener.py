@@ -195,6 +195,24 @@ _resend = None                # {"sid","payload"|"parts","send","sock","tries","
 _resend_thread = None
 _last_dsr = None              # (barkod, yuborilgan vaqt, shu barkodga 1-DSR vaqti) — "muddatidan oldin ACK" nazorati
 
+# ── Ulanishdan beri hisob (27.10.2026) ──
+# CRYSTAL har xabarida yangi qabul zanjiri ochadi va yopmaydi: natijalar ko'paygan sari LIS
+# javobimiz natija oynasining zanjiriga tushib yo'qoladi (1-urinish: <5 natija 98%, 30+ 53%).
+# Qayta ulanish navbatni tozalaydi — hisob shuni eslatish uchun.
+_conn_key = None              # (transport id, conn_since) — hisob qaysi ulanishniki
+_natija_ulanishdan = 0
+_yoqotish_ulanishdan = 0      # 1-urinishda ACK kelmagan DSR lar
+
+
+def _ulanish_hisobi(send, natija=0, yoqotish=0):
+    global _conn_key, _natija_ulanishdan, _yoqotish_ulanishdan
+    tr = getattr(send, "__self__", None)
+    key = (id(tr), getattr(tr, "conn_since", None))
+    if key != _conn_key:
+        _conn_key, _natija_ulanishdan, _yoqotish_ulanishdan = key, 0, 0
+    _natija_ulanishdan += natija
+    _yoqotish_ulanishdan += yoqotish
+
 
 def _combine_ok() -> bool:
     model = str(_cfg_live.get("model", _bp.DEFAULT_MODEL) or "")
@@ -241,6 +259,8 @@ def _resend_worker():
                 _resend = None
                 continue
             rec["tries"] += 1
+            if rec["tries"] == 1:
+                _ulanish_hisobi(rec["send"], yoqotish=1)
             try:
                 if rec["payload"] is not None:
                     rec["send"](rec["payload"])
@@ -270,6 +290,7 @@ def _ack_bytes(kind_msh: dict, kind="R01") -> list:
 def _handle_result(message: str, send, fmt: str):
     global _last_result_time
     _last_result_time = datetime.now()
+    _ulanish_hisobi(send, natija=1)
     model = _cfg_live.get("model", _bp.DEFAULT_MODEL)
     res = _bp.parse_message(message, model)
     # ACK
@@ -374,14 +395,27 @@ def _handle_query_hl7_qry_locked(message: str, send):
     # chaqiruv. Bufer ~1024 bayt: sig'masa eski usul (QCK, pauza, DSR).
     combined = qck_b + dsr_b
     t_first = time.time()          # birinchi bo'lak vaqti (alohida rejimda QCK)
+    payload = combined
+    how = " (QCK bilan bitta bo'lak)"
     if _combine_ok() and len(combined) <= int(_bp._tune("combine_max_bytes", 1000)):
         send(combined)
         parts = None
+    elif (_combine_ok() and _bp._tune("dsr_only_if_large", True)
+          and len(dsr_b) <= int(_bp._tune("dsr_only_max_bytes", 1024))):
+        # 27.10.2026: 12 tahlildan ko'pi QCK bilan 1000 baytga sig'maydi. Alohida QCK + DSR =
+        # 2 ta dispatch → to'plamli LIS da ism surilishi. Analizator ishlovchisi
+        # (frmSampleInput) QCK^Q02 bo'lmasa ham DSR^Q03+DSP ni qayta ishlaydi (IL), shuning
+        # uchun faqat DSR — bitta bo'lak (Listrans buferi 1024 bayt, ~20 tahlilgacha).
+        send(dsr_b)
+        parts = None
+        payload = dsr_b
+        how = f" (QCK SIZ bitta bo'lak — {len(combined)} bayt sig'madi)"
     else:
         send(qck_b)
         time.sleep(float(_bp._tune("dsr_delay", 0.6)))
         send(dsr_b)
         parts = (qck_b, dsr_b)
+        how = ""
         if _combine_ok():
             _log(f"  [DIQQAT] QCK+DSR {len(combined)} bayt — bitta bo'lakka sig'madi, alohida "
                  f"yuborildi. To'plamli LIS da bu namunadan keyingisining ismini tekshiring")
@@ -393,15 +427,14 @@ def _handle_query_hl7_qry_locked(message: str, send):
     _last_dsr = (sid, t_first, t_sid)
     after, _tries = _resend_cfg()
     if after > 0:
-        _resend = {"sid": sid, "payload": combined if parts is None else None, "parts": parts,
+        _resend = {"sid": sid, "payload": payload if parts is None else None, "parts": parts,
                    "send": send, "sock": getattr(getattr(send, "__self__", None), "_sock", None),
                    "tries": 0, "due": time.time() + max(after, 1.5)}
-    how = " (QCK bilan bitta bo'lak)" if parts is None else ""
     _log(f"  -> DSR^Q03: {od['patient'].get('fish')} | tahlillar: {[a for a, *_ in items]} "
          f"| {len(dsr)} bayt{how}")
-    if len(dsr) > 1000:
-        _log(f"  [OGOHLANTIRISH] Javob {len(dsr)} bayt — analizator buferi ~1024 bayt. "
-             f"Katta ro'yxat qabul qilinmasligi mumkin (ACK kelmasa shu sabab).")
+    if len(dsr_b) > 1024:
+        _log(f"  [OGOHLANTIRISH] Javob {len(dsr_b)} bayt — analizator bir bo'lakda 1024 bayt o'qiydi, "
+             f"bo'lingan javobni qayta ishlay olmaydi (~21+ tahlil). Tahlillarni 2 namunaga bo'ling.")
     _log(f"  xom javob: {dsr.strip()[:300]!r}")
 
 
@@ -699,6 +732,10 @@ def get_status() -> dict:
         listening = bool(getattr(natija[0], "listening", False))
     else:
         listening = is_running()
+    if conn is not None and _conn_key == (id(conn), conn.conn_since):
+        nat, yoq = _natija_ulanishdan, _yoqotish_ulanishdan
+    else:
+        nat, yoq = 0, 0
     return {
         "pid": os.getpid(), "mode": _mode, "running": is_running(),
         "listening": bool(_running and listening),
@@ -708,6 +745,10 @@ def get_status() -> dict:
         "last_rx": _iso(max(rx)) if rx else "",
         "last_result": _iso(_last_result_time),
         "last_query": _iso(_last_query_time),
+        "natija_ulanishdan": nat,
+        "lis_yoqotish_ulanishdan": yoq,
+        "qayta_ulash_tavsiya": bool(conn is not None and (
+            nat >= int(_bp._tune("lis_qayta_ulash_natija", 20)) or yoq > 0)),
         "event": _event,
         "events": list(_events),
         "analyzer": ANALYZER_NAME,

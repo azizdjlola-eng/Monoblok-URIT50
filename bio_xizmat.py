@@ -175,6 +175,12 @@ def kod_eskirganmi(h) -> bool:
         return False
 
 
+def qayta_ulash_kerak(h) -> bool:
+    """Ulanishdan beri natijalar ko'p yoki LIS javobi yo'qolgan — to'plamli LIS dan oldin
+    analizatorda LIS ulanishini yangilash tavsiya etiladi (CRYSTAL qabul navbati to'lgan)."""
+    return bool(h and h.get("connected") and h.get("qayta_ulash_tavsiya"))
+
+
 def holat_matni(h) -> str:
     """Tugma ustidagi izoh uchun qisqa matn."""
     if not h:
@@ -184,6 +190,14 @@ def holat_matni(h) -> str:
         q.append(f"Analizator ulangan: {h.get('peer', '')}")
         if h.get("conn_since"):
             q.append(f"ulanish: {h['conn_since'].replace('T', ' ')}")
+        nat, yoq = h.get("natija_ulanishdan", 0), h.get("lis_yoqotish_ulanishdan", 0)
+        if qayta_ulash_kerak(h):
+            q.append(f"⚠ Ulanishdan beri {nat} natija keldi"
+                     + (f", {yoq} ta LIS javobi 1-urinishda o'tmadi" if yoq else "") + ".\n"
+                     "   To'plamli LIS dan oldin analizatorda LIS ulanishini yangilang\n"
+                     "   (LIS oynasini yopib-oching yoki «Подключить» ni bosing)")
+        else:
+            q.append(f"ulanishdan beri natijalar: {nat}")
     elif h.get("listening"):
         q.append("Analizator ULANMAGAN — BK-280 da: LIS sozlamasi → «Ulanish» (Подключить)")
     else:
