@@ -161,6 +161,53 @@ kerak emas. Biobase ga stack trace bilan xabar berish kerak.
 Tekshirish: nusxa olingan kunlik `.mdb` da `SELECT ... FROM sampleProgram WHERE DiluteSQuan IS NULL`
 (32-bit ODBC "Microsoft Access Driver (*.mdb)").
 
+## To'plamli LIS da hammasi tushmasligi: sabab tahlil soni emas (27.10.2026)
+
+**Ma'lumot (22–26.10, 245 ta DSR):** 1-urinishda ACK kelishi tahlil soniga bog'liq emas
+(1 tahlil 70%, 4 tahlil 65%, 6+ tahlil 72%). 23, 24 va 26.10 da yuborilgan har bir tahlil
+analizator bazasiga tushgan, 9 tahlilli bemorda ham. Hal qiluvchi omil: ulanishdan beri
+analizator yuborgan xabarlar soni (<5 natija 98%, 5–30 73%, 30+ 53%).
+
+**Mexanizm (Conductor.exe IL, `Listrans`):**
+- har `sendHex` (natija, QRY, ACK^Q03) yangi `ReceiveMsg` oqimi bilan yangi `BeginReceive` ochadi,
+  eskisi yopilmaydi. Har bo'lak navbatdagi ENG ESKI qabul qilgichga tushadi va o'sha nusxaga beriladi:
+  natijalar `frmSwatchTest.lll`, LIS oynasi esa `frmSampleInput.ᜀ` (har oyna uchun yangi nusxa);
+- qabul qilgich bo'lakdan keyin qayta osiladi (`sb.Length > 1`). Faqat "bokira" qabul qilgichga
+  1 baytli bo'lak kelsa u o'ladi. Shuning uchun bizning 0x06 ACK natija qabul qilgichlarini o'ldiradi,
+  lekin DSR (ko'p bayt) tushgan qabul qilgich abadiy qoladi;
+- dispatch faqat bo'lakda `DSC` / `QCK^Q02` / `ACK^R01` bo'lsa bo'ladi. Shunda 1 s kutiladi, keyin
+  ishlovchi nusxa maydonidagi OXIRGI matn bilan chaqiriladi.
+- **Sinov stendi:** haqiqiy `Listrans` klassi lokal serverga ulanib (scratchpad `harness\lis_harness.ps1`)
+  muammoni takrorladi: 5 tur × (8 natija + 5 namuna) → 1-urinishda 15/25 (60%).
+  Qayta ulanishdan keyin navbat toza bo'ladi.
+- Navbatni loglardan to'liq modellashtirish 72% aniqlik berdi. Bu filler bo'laklar bilan "aniq nishonga
+  olish" uchun yetarli emas, shuning uchun kodga kiritilmadi.
+
+**Haqiqiy tahlil soni chegarasi (1024 baytli bo'lak):** QCK 127 bayt, DSR ≈ 646 + 18×tahlil
+(ism uzunligiga qarab ±15).
+- ≤ 12 tahlil: QCK+DSR bitta bo'lakda (`combine_max_bytes` 1000), xavfsiz;
+- 13–21 tahlil: QCK va DSR alohida (2 ta dispatch), to'plamli LIS da ism surilishi xavfi bor;
+- ≥ 22 tahlil: DSR 1024 dan oshadi, bo'linadi va analizator uni qayta ishlay olmaydi.
+22–27.10 da eng ko'pi 9 tahlil bo'lgan.
+Ishlovchi (`frmSampleInput.ᜁ(String)`) `QCK^Q02` bo'lmasa ham `DSR^Q03`+`DSP` ni qayta ishlaydi.
+Shuning uchun katta buyurtmani QCK siz faqat DSR bilan yuborish mumkin: bitta bo'lakda ~20 tahlilgacha.
+Jonli analizatorda sinalmagan.
+
+**Analizator tahlilni o'zi qo'shmasligi mumkin (IL):** DSR ishlovchisi har tahlil uchun
+`reagentInfo` (reagentStyle=1, R2 bo'lsa 2) ni tekshiradi. Reagent diskda bo'lmasa `Not_added`,
+muddati o'tgan bo'lsa `isOverdue` beriladi. Namunada shu tahlil bor bo'lsa ham qo'shilmaydi.
+Bu bizning tomonda ko'rinmaydi.
+
+**LIS qatorlarida Dilute* NULL:** LIS ishlovchisi `sampleProgram` ga suyultirish miqdorlarini yozmaydi
+(`set_DiluteSQuan` yo'q). 26.10 da 177 LIS qatoridan 68 tasi NULL bo'lgan va 10:23 da FormatException
+yana chiqqan. LIS orqali kelgan namunaga suyultirish belgisini qo'ymang.
+
+**Ism surilishi (26.10, 2 holat: №50, №86):** ikkalasi ham bir barkod qayta so'ralayotgan yoki
+qayta yuborish paytida keyingi namuna so'rovi kelganda bo'lgan. №50 da `[DIQQAT!]` to'g'ri chiqqan.
+
+**Amaliy yechim:** ko'p natija kelgandan keyin to'plamli LIS dan oldin analizatorda LIS ulanishini
+yangilang (LIS oynasini yopib-ochish yoki «Подключить»). Toza ulanishda 1-urinish ~98%.
+
 ## Kod xaritasi (Tahlil kodlari oynasi)
 
 Bioximiya tabida **🧬 Tahlil kodlari** tugmasi. Jadval: analizator kodi | nomi | LIMS tahlili.
