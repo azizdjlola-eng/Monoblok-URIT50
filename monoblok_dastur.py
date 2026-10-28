@@ -4235,15 +4235,19 @@ def _ism_normallash(name):
     """
     Ismni taqqoslash uchun yagona ko'rinishga keltiradi — hamshiralar bir
     bemorni har xil yozadi: «Xursanov Xusan» / «Hursanov Husan» / «Qodirov» /
-    «Kodirov» / «Yo'ldosheva» / «Yoldosheva» / kirillcha.
-      kirill → lotin; o'/g' belgilari olib tashlanadi; kh, h → x; q → k.
+    «Kodirov» / «Yo'ldosheva» / «Yoldosheva» / «Abdullayev» / «Abdulayev» /
+    kirillcha.  LIMS dagi bemor_nazorat.ism_yumshoq_kalit bilan bir qoida:
+      kirill → lotin; o'/g' belgilari olib tashlanadi; kh, h → x; q → k;
+      w → v; iy → i; ye → e; takror harf → bitta.
     """
     import re as _re
     s = (name or '').lower().strip()
     s = ''.join(_ISM_KIRILL_LATIN.get(ch, ch) for ch in s)
-    s = _re.sub(r"['`ʻʼ’‘]", '', s)
-    s = s.replace('kh', 'x').replace('h', 'x').replace('q', 'k')
-    return _re.sub(r'\s+', ' ', s)
+    s = _re.sub(r"['`ʻʼ’‘´]", '', s)
+    s = s.replace('kh', 'x').replace('h', 'x').replace('q', 'k').replace('w', 'v')
+    s = s.replace('iy', 'i').replace('ye', 'e')
+    s = _re.sub(r'(.)\1+', r'\1', s)
+    return _re.sub(r'\s+', ' ', s).strip()
 
 
 def _fuzzy_name_score(name1, name2):
@@ -4291,15 +4295,17 @@ def _fuzzy_search_bemorlar(ref_fish, ref_year, ref_jins=None, min_score=90):
         where.append("YEAR(b.tugilgan_sana) = %s")
         params.append(ref_year)
     else:
-        # MySQL da _ism_normallash ning lotincha qismi (REPLACE registrga sezgir)
+        # MySQL da _ism_normallash ning lotincha qismi (REPLACE registrga
+        # sezgir; takror harf SQL da yo'q — shuning uchun qisqa, 3 harf prefiks)
         fish_sql = "LOWER(b.fish)"
         for eski, yangi in (("'", ''), ('`', ''), ('ʻ', ''), ('ʼ', ''),
-                            ('’', ''), ('‘', ''), ('kh', 'x'), ('h', 'x'),
-                            ('q', 'k')):
+                            ('’', ''), ('‘', ''), ('´', ''), ('kh', 'x'),
+                            ('h', 'x'), ('q', 'k'), ('w', 'v'), ('iy', 'i'),
+                            ('ye', 'e')):
             fish_sql = f"REPLACE({fish_sql}, %s, %s)"
             params.extend([eski, yangi])
         where.append(f"{fish_sql} LIKE %s")
-        params.append(f"{surname[:4]}%")
+        params.append(f"{surname[:3]}%")
 
     # Jins — SQL da filtr (jinsi yozilmagan bemor ham qoladi)
     if ref_jins:
@@ -5826,36 +5832,41 @@ def _oldingi_bemor_idlari(cur, bemor_id, takroriy: bool) -> list:
     o'rniga 01.01 qo'yilgan, telefon yozilmagan). Xavfsiz qoida: FISH bir xil
     (nom_normalized), jinsi bir xil, tug'ilgan sana AYNAN bir xil yoki biri
     01.01 (taxminiy) bo'lib, YILI bir xil. Boshqa odam natijasi blankaga
-    tushib qolmasligi uchun sana bo'lmagan yozuvlar qo'shilmaydi."""
+    tushib qolmasligi uchun sana bo'lmagan yozuvlar qo'shilmaydi.
+    FISH _ism_normallash bilan solishtiriladi — hamshira «Xursanov Xusan» ni
+    keyingi safar «Hursanov Husan» deb yozsa ham bitta odam (H/X, Q/K,
+    o'/g', kirill, Abdullayev/Abdulayev). SQL da ism filtri yo'q (prefix
+    LIKE «Xurs%» «Hursanov» ni olmasdi) — tug'ilgan yil yetarlicha toraytiradi.
+    Ishlatiladi: blanka «Oldingi natija», delta-check, «Oldingi tashriflar»."""
     ids = [bemor_id]
     if not takroriy:
         return ids
 
-    def _nom(s):
-        # bemorlar.nom_normalized to'ldirilmagan — o'zimiz: apostrof turlari, bo'shliq, registr
-        s = re.sub(r"[`'ʻʼ‘’]", "", str(s or "")).lower()
-        return " ".join(s.split())
     try:
         cur.execute("SELECT fish, jins, tugilgan_sana FROM bemorlar WHERE id = %s", (bemor_id,))
         b = cur.fetchone()
         if not b:
             return ids
-        nom = _nom(b.get('fish'))
+        if not isinstance(b, dict):
+            b = dict(zip(('fish', 'jins', 'tugilgan_sana'), b))
+        nom = _ism_normallash(b.get('fish'))
         tug = b.get('tugilgan_sana')
         if len(nom.split()) < 2 or not tug or not hasattr(tug, 'year'):
             return ids
-        birinchi = (b.get('fish') or '').split()[0]
         cur.execute("""SELECT id, fish, jins, tugilgan_sana FROM bemorlar
-                       WHERE fish LIKE %s AND id <> %s AND YEAR(tugilgan_sana) = %s""",
-                    (birinchi[:4] + '%', bemor_id, tug.year))
+                       WHERE id <> %s AND YEAR(tugilgan_sana) = %s""",
+                    (bemor_id, tug.year))
         jins = (b.get('jins') or '').strip().lower()
         for r in cur.fetchall():
-            if _nom(r.get('fish')) != nom:
+            if not isinstance(r, dict):
+                r = dict(zip(('id', 'fish', 'jins', 'tugilgan_sana'), r))
+            if _ism_normallash(r.get('fish')) != nom:
                 continue
             t2 = r.get('tugilgan_sana')
             if not t2 or not hasattr(t2, 'year') or t2.year != tug.year:
                 continue
-            if (r.get('jins') or '').strip().lower() != jins:
+            j2 = (r.get('jins') or '').strip().lower()
+            if j2 and jins and j2 != jins:      # biri yozilmagan bo'lsa — sana hal qiladi
                 continue
             taxminiy = (t2.month, t2.day) == (1, 1) or (tug.month, tug.day) == (1, 1)
             if t2 == tug or taxminiy:
@@ -14630,16 +14641,19 @@ Sana: {_sana_fmt}"""
             if not conn:
                 return []
             cursor = conn.cursor(dictionary=True)
-            cursor.execute("""
-                SELECT o.id as order_id, o.sample_id, o.sana_vaqt,
+            # Bir odamning takroriy yozuvlari ham (hamshira «Hursanov Husan»
+            # deb yozgan tashrif) — blanka «Oldingi natija» bilan bir qoida
+            bemor_ids = _oldingi_bemor_idlari(cursor, bemor_id, _oldingi_sozlama()['takroriy'])
+            cursor.execute(f"""
+                SELECT o.id as order_id, o.sample_id, o.sana_vaqt, o.bemor_id,
                        COUNT(oi.id) as tahlil_soni
                 FROM orders o
                 LEFT JOIN order_items oi ON oi.order_id = o.id
-                WHERE o.bemor_id = %s
+                WHERE o.bemor_id IN ({','.join(['%s'] * len(bemor_ids))})
                 GROUP BY o.id
                 ORDER BY o.sana_vaqt DESC
                 LIMIT 50
-            """, (bemor_id,))
+            """, bemor_ids)
             rows = cursor.fetchall()
             cursor.close()
             # conn.close() QILMAYMIZ — umumiy (global) db_conn() ulanishi
@@ -14659,7 +14673,12 @@ Sana: {_sana_fmt}"""
                 sid  = row.get('sample_id', '') or ''
                 cnt  = row.get('tahlil_soni', 0)
                 is_current = (oid == current_order_id)
-                tag = 'current' if is_current else ''
+                if is_current:
+                    tag = 'current'
+                elif row.get('bemor_id') != bemor_id:
+                    tag = 'boshqa_yozuv'     # shu odam, boshqacha yozilgan F.I.SH
+                else:
+                    tag = ''
                 self.history_tree.insert(
                     '', tk.END,
                     iid=str(oid),
@@ -14671,6 +14690,7 @@ Sana: {_sana_fmt}"""
             # Joriy buyurtmani ajratib ko'rsatish
             self.history_tree.tag_configure('current',
                                             background='#C8E6C9', font=('Arial', 9, 'bold'))
+            self.history_tree.tag_configure('boshqa_yozuv', foreground='#8E44AD')
         except Exception as e:
             print(f"[Tarix] yuklashda xato: {e}")
         return dates_list
@@ -25530,8 +25550,15 @@ Sana: {_sana_fmt}"""
             conn = db_conn()
             if not conn:
                 return []
+            # Bir odamning takroriy yozuvlari ham (Xursanov/Hursanov) — blanka
+            # «Oldingi natija» bilan bir qoida
+            _c = conn.cursor(dictionary=True)
+            try:
+                bemor_ids = _oldingi_bemor_idlari(_c, bemor_id, _oldingi_sozlama()['takroriy'])
+            finally:
+                _c.close()
             previous = lab_quality.fetch_previous_results(
-                conn, bemor_id, self.current_order_id,
+                conn, bemor_ids, self.current_order_id,
                 max_days=cfg["delta"].get("max_days", 365)
             )
             return lab_quality.check_delta(rows, previous, cfg)

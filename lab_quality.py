@@ -310,22 +310,26 @@ def fetch_previous_results(conn, bemor_id, exclude_order_id, max_days=365):
     """
     Bemorning OLDINGI (shu buyurtmadan oldingi) natijalarini oladi.
 
+    bemor_id — bitta ID yoki ID lar ro'yxati (bir odamning takroriy yozuvlari:
+    «Xursanov Xusan» / «Hursanov Husan»).
     Qaytaradi: {tahlil_nomi: (qiymat_matn, sana)} — har tahlil uchun eng oxirgisi.
     Xato bo'lsa bo'sh lug'at (delta-check jim o'tkaziladi).
     """
     out = {}
-    if not conn or not bemor_id:
+    ids = [i for i in (bemor_id if isinstance(bemor_id, (list, tuple, set))
+                       else [bemor_id]) if i]
+    if not conn or not ids:
         return out
     cur = None
     try:
         cur = conn.cursor()
         cur.execute(
-            """
+            f"""
             SELECT ri.tahlil_nomi, ri.qiymat, o.sana_vaqt
             FROM result_items ri
             JOIN results r ON ri.result_id = r.id
             JOIN orders  o ON r.order_id  = o.id
-            WHERE o.bemor_id = %s
+            WHERE o.bemor_id IN ({','.join(['%s'] * len(ids))})
               AND o.id <> %s
               AND o.deleted_at IS NULL
               AND o.sana_vaqt IS NOT NULL
@@ -333,7 +337,7 @@ def fetch_previous_results(conn, bemor_id, exclude_order_id, max_days=365):
               AND ri.qiymat IS NOT NULL AND ri.qiymat <> ''
             ORDER BY o.sana_vaqt DESC
             """,
-            (bemor_id, exclude_order_id or 0, int(max_days)),
+            (*ids, exclude_order_id or 0, int(max_days)),
         )
         for nomi, qiymat, sana in cur.fetchall():
             if nomi and nomi not in out:      # ORDER BY DESC — birinchisi eng yangisi
