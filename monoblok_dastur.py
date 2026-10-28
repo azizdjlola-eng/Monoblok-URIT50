@@ -4221,14 +4221,40 @@ def _extract_birth_year_smart(val):
     return None
 
 
+_ISM_KIRILL_LATIN = {
+    'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'ғ': "g'", 'д': 'd', 'е': 'e',
+    'ё': 'yo', 'ж': 'j', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'қ': 'q',
+    'л': 'l', 'м': 'm', 'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's',
+    'т': 't', 'у': 'u', 'ў': "o'", 'ф': 'f', 'х': 'x', 'ҳ': 'h', 'ц': 's',
+    'ч': 'ch', 'ш': 'sh', 'щ': 'sh', 'ъ': '', 'ы': 'i', 'ь': '', 'э': 'e',
+    'ю': 'yu', 'я': 'ya',
+}
+
+
+def _ism_normallash(name):
+    """
+    Ismni taqqoslash uchun yagona ko'rinishga keltiradi — hamshiralar bir
+    bemorni har xil yozadi: «Xursanov Xusan» / «Hursanov Husan» / «Qodirov» /
+    «Kodirov» / «Yo'ldosheva» / «Yoldosheva» / kirillcha.
+      kirill → lotin; o'/g' belgilari olib tashlanadi; kh, h → x; q → k.
+    """
+    import re as _re
+    s = (name or '').lower().strip()
+    s = ''.join(_ISM_KIRILL_LATIN.get(ch, ch) for ch in s)
+    s = _re.sub(r"['`ʻʼ’‘]", '', s)
+    s = s.replace('kh', 'x').replace('h', 'x').replace('q', 'k')
+    return _re.sub(r'\s+', ' ', s)
+
+
 def _fuzzy_name_score(name1, name2):
     """
     Ikkita ism o'rtasidagi o'xshashlikni 0-100 da qaytaradi.
-    SequenceMatcher asosida, katta/kichik harfni hisobga olmaydi.
+    SequenceMatcher asosida, _ism_normallash dan keyin (H/X, Q/K, apostrof,
+    kirill farqi hisobga olinmaydi).
     """
     from difflib import SequenceMatcher
-    n1 = name1.lower().strip()
-    n2 = name2.lower().strip()
+    n1 = _ism_normallash(name1)
+    n2 = _ism_normallash(name2)
     if not n1 or not n2:
         return 0
     ratio = SequenceMatcher(None, n1, n2).ratio()
@@ -4241,54 +4267,59 @@ def _fuzzy_search_bemorlar(ref_fish, ref_year, ref_jins=None, min_score=90):
     Qoidalar (qattiq filtr):
       - Tug'ilgan YIL mos bo'lishi SHART (agar ref_year ma'lum bo'lsa)
       - Jins mos bo'lishi SHART (agar ref_jins ma'lum bo'lsa)
-      - FAQAT familiya (1-so'z) bo'yicha LIKE qidiruv — ism bo'yicha EMAS
-        (aks holda "Axmedov Faxriddin" ham chiqib qoladi)
-      - Python-da SequenceMatcher >= min_score (90%)
+      - Python-da _ism_normallash dan keyin SequenceMatcher >= min_score (90%)
+        (familiya VA ism birga baholanadi, shuning uchun "Axmedov Faxriddin"
+        "Axmedov Xusan" ga 90% bermaydi)
+      - Yil ma'lum bo'lsa SQL da ism bo'yicha filtr YO'Q: «Xursanov» va
+        «Hursanov» birinchi harfdan farq qiladi — prefix LIKE ularni ajratib
+        yuborardi. Yil+jins filtri qatorlar sonini o'zi kichraytiradi.
+      - Yil noma'lum bo'lsa — normallashtirilgan familiya prefiksi bo'yicha
     Qaytaradi: [{id, fish, yosh, jins, telefon, tugilgan_sana, manzil, _score}]
     sorted by _score DESC
     """
     import re as _re
-    words = _re.split(r'\s+', ref_fish.strip())
+    words = _re.split(r'\s+', _ism_normallash(ref_fish))
     surname = words[0] if words else ''
     if len(surname) < 2:
         return []
 
-    # Familiya (1-so'z) dastlabki 4 harfi bilan LIKE
-    like_sql = "b.fish LIKE %s"
-    like_param = f"{surname[:4]}%"   # prefix LIKE — faqat bosh qismdan qidirish
+    params = []
+    where = []
 
-    params = [like_param]
-    extra_where = []
-
-    # Tug'ilgan yil — SQL da filtr
     if ref_year:
-        extra_where.append("YEAR(b.tugilgan_sana) = %s")
+        # Tug'ilgan yil — SQL da filtr (ism filtrisiz)
+        where.append("YEAR(b.tugilgan_sana) = %s")
         params.append(ref_year)
+    else:
+        # MySQL da _ism_normallash ning lotincha qismi (REPLACE registrga sezgir)
+        fish_sql = "LOWER(b.fish)"
+        for eski, yangi in (("'", ''), ('`', ''), ('ʻ', ''), ('ʼ', ''),
+                            ('’', ''), ('‘', ''), ('kh', 'x'), ('h', 'x'),
+                            ('q', 'k')):
+            fish_sql = f"REPLACE({fish_sql}, %s, %s)"
+            params.extend([eski, yangi])
+        where.append(f"{fish_sql} LIKE %s")
+        params.append(f"{surname[:4]}%")
 
-    # Jins — SQL da filtr
+    # Jins — SQL da filtr (jinsi yozilmagan bemor ham qoladi)
     if ref_jins:
-        extra_where.append("b.jins = %s")
+        where.append("(b.jins = %s OR b.jins IS NULL OR b.jins = '')")
         params.append(ref_jins)
-
-    where_sql = like_sql
-    if extra_where:
-        where_sql += " AND " + " AND ".join(extra_where)
 
     conn = db_conn()
     if not conn:
         return []
+    cursor = None
     try:
         cursor = conn.cursor(dictionary=True)
         sql = f"""
             SELECT b.id, b.fish, b.yosh, b.jins,
                    b.telefon, b.tugilgan_sana,
-                   COALESCE(b.manzil, '') AS manzil,
-                   (SELECT MAX(o.sana_vaqt) FROM orders o
-                    WHERE o.bemor_id = b.id) AS oxirgi_tashrif
+                   COALESCE(b.manzil, '') AS manzil
             FROM bemorlar b
-            WHERE {where_sql}
+            WHERE {' AND '.join(where)}
             ORDER BY b.fish
-            LIMIT 300
+            LIMIT 20000
         """
         cursor.execute(sql, params)
         rows = cursor.fetchall()
@@ -4319,7 +4350,28 @@ def _fuzzy_search_bemorlar(ref_fish, ref_year, ref_jins=None, min_score=90):
             results.append(row)
 
     results.sort(key=lambda r: r['_score'], reverse=True)
-    return results[:80]
+    results = results[:80]
+
+    # Oxirgi tashrif — faqat topilganlar uchun (har qatorga subquery emas)
+    if results:
+        cursor = None
+        try:
+            cursor = conn.cursor(dictionary=True)
+            ids = [r['id'] for r in results]
+            cursor.execute(
+                "SELECT bemor_id, MAX(sana_vaqt) AS oxirgi FROM orders "
+                f"WHERE bemor_id IN ({','.join(['%s'] * len(ids))}) "
+                "GROUP BY bemor_id", ids)
+            oxirgi = {r['bemor_id']: r['oxirgi'] for r in cursor.fetchall()}
+        except Exception as _e:
+            print(f"[fuzzy_search] oxirgi tashrif xato: {_e}")
+            oxirgi = {}
+        finally:
+            try: cursor.close()
+            except: pass
+        for r in results:
+            r['oxirgi_tashrif'] = oxirgi.get(r['id'])
+    return results
 
 
 def _fill_panel_cell(cell, panel_type, sample_id, date_only, config, kl, qr_link_override=None):
