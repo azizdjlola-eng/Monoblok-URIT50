@@ -4358,17 +4358,24 @@ def _fuzzy_search_bemorlar(ref_fish, ref_year, ref_jins=None, min_score=90):
     results.sort(key=lambda r: r['_score'], reverse=True)
     results = results[:80]
 
-    # Oxirgi tashrif — faqat topilganlar uchun (har qatorga subquery emas)
+    # Oxirgi tashrif + tashriflar soni — faqat topilganlar uchun (har qatorga
+    # subquery emas)
     if results:
         cursor = None
+        bosh = set()
         try:
             cursor = conn.cursor(dictionary=True)
             ids = [r['id'] for r in results]
             cursor.execute(
-                "SELECT bemor_id, MAX(sana_vaqt) AS oxirgi FROM orders "
+                "SELECT bemor_id, MAX(sana_vaqt) AS oxirgi, COUNT(*) AS soni FROM orders "
                 f"WHERE bemor_id IN ({','.join(['%s'] * len(ids))}) "
                 "GROUP BY bemor_id", ids)
-            oxirgi = {r['bemor_id']: r['oxirgi'] for r in cursor.fetchall()}
+            oxirgi = {r['bemor_id']: r for r in cursor.fetchall()}
+            try:
+                import bemor_birlashtirish as _bb
+                bosh = _bb.birlashgan_bosh_idlar(cursor)
+            except Exception:
+                bosh = set()
         except Exception as _e:
             print(f"[fuzzy_search] oxirgi tashrif xato: {_e}")
             oxirgi = {}
@@ -4376,7 +4383,11 @@ def _fuzzy_search_bemorlar(ref_fish, ref_year, ref_jins=None, min_score=90):
             try: cursor.close()
             except: pass
         for r in results:
-            r['oxirgi_tashrif'] = oxirgi.get(r['id'])
+            o = oxirgi.get(r['id']) or {}
+            r['oxirgi_tashrif'] = o.get('oxirgi')
+            r['tashrif'] = int(o.get('soni') or 0)
+        # Birlashtirilib bo'shab qolgan yozuv — ko'rsatilmaydi (tarixi asosiyda)
+        results = [r for r in results if not (r['id'] in bosh and not r['tashrif'])]
     return results
 
 
@@ -14790,17 +14801,17 @@ Sana: {_sana_fmt}"""
         tv_frame.pack(fill=tk.BOTH, expand=True)
 
         cols = ("Belgilash", "Mos%", "F.I.SH", "Yosh", "Jins",
-                "Telefon", "Tug'ilgan sana", "Manzil", "Tahlil sanasi")
+                "Telefon", "Tug'ilgan sana", "Manzil", "Tashrif", "Tahlil sanasi")
         tv = ttk.Treeview(tv_frame, columns=cols, show="headings", height=18)
         col_w = {
             "Belgilash": 60, "Mos%": 50, "F.I.SH": 200,
             "Yosh": 42, "Jins": 55, "Telefon": 105,
-            "Tug'ilgan sana": 100, "Manzil": 140, "Tahlil sanasi": 95
+            "Tug'ilgan sana": 100, "Manzil": 140, "Tashrif": 55, "Tahlil sanasi": 95
         }
         for c in cols:
             tv.heading(c, text=c)
             tv.column(c, width=col_w.get(c, 80),
-                      anchor=tk.CENTER if c in ("Belgilash","Mos%","Yosh","Jins","Tahlil sanasi")
+                      anchor=tk.CENTER if c in ("Belgilash","Mos%","Yosh","Jins","Tashrif","Tahlil sanasi")
                       else tk.W)
 
         sb = ttk.Scrollbar(tv_frame, orient=tk.VERTICAL, command=tv.yview)
@@ -14844,6 +14855,7 @@ Sana: {_sana_fmt}"""
                 cand.get('telefon', ''),
                 _fmt_tug_sana(cand.get('tugilgan_sana', '')),
                 (cand.get('manzil') or '')[:35],
+                cand.get('tashrif', ''),
                 _fmt_oxirgi(cand.get('oxirgi_tashrif')),
             ), tags=(base_tag,))
 
@@ -14944,6 +14956,16 @@ Sana: {_sana_fmt}"""
                   relief=tk.RIDGE, bd=1
                   ).pack(side=tk.LEFT, padx=2)
 
+        def _birlashtir():
+            """Belgilangan bemorlarni BITTA bemorga birlashtirish (admin paroli bilan)."""
+            checked = [c for c in candidates if _checked.get(str(c['id']))]
+            if len(checked) < 2:
+                messagebox.showwarning(
+                    "Diqqat", "Birlashtirish uchun kamida 2 ta bemorni ☑ bilan belgilang!",
+                    parent=dlg)
+                return
+            self._bemor_birlashtirish_dialog(dlg, checked)
+
         # O'ng: Natijani ko'rish (bir necha belgilangan uchun)
         tk.Button(btn_frame, text="✅ Natijani ko'rish",
                   command=_load_checked,
@@ -14951,10 +14973,252 @@ Sana: {_sana_fmt}"""
                   padx=10, pady=4, relief=tk.RAISED, bd=2, cursor="hand2"
                   ).pack(side=tk.RIGHT, padx=4)
 
+        tk.Button(btn_frame, text="🔗 Birlashtirish",
+                  command=_birlashtir,
+                  bg="#6A1B9A", fg="white", font=("Arial", 9, "bold"),
+                  padx=10, pady=4, relief=tk.RAISED, bd=2, cursor="hand2"
+                  ).pack(side=tk.RIGHT, padx=4)
+
         ttk.Label(btn_frame,
             text="💡 Yashil=aniq mos  Sariq=o'xshash  Oq=ehtimoliy",
             foreground="gray", font=("Arial", 8)
             ).pack(side=tk.RIGHT, padx=8)
+
+    # ─── Takror bemorlarni birlashtirish (bemor_birlashtirish.py) ────────────
+
+    def _birlashtirish_ulanish(self):
+        """Birlashtirish uchun MUSTAQIL ulanish (autocommit=False) — umumiy
+        db_conn() ga tranzaksiya ochib qo'ymaslik uchun."""
+        conn = None
+        try:
+            conn = self._create_fresh_connection()
+        except Exception:
+            conn = None
+        return conn
+
+    def _bemor_birlashtirish_dialog(self, parent, cands):
+        """Asosiy bemorni tanlash, ismni tuzatish, admin paroli → birlashtirish."""
+        import bemor_birlashtirish as BB
+        import os as _os
+
+        conn = self._birlashtirish_ulanish()
+        if not conn:
+            messagebox.showerror("Xatolik", "Bazaga ulanib bo'lmadi.", parent=parent)
+            return
+        try:
+            cur = conn.cursor(dictionary=True)
+            soni = BB.tashrif_soni(cur, [c['id'] for c in cands])
+            cur.close()
+            conn.commit()
+        except Exception as e:
+            messagebox.showerror("Xatolik", f"Tashriflarni sanashda xato:\n{e}", parent=parent)
+            try: conn.close()
+            except Exception: pass
+            return
+        tavsiya = BB.asosiy_tavsiya(cands, soni)
+        by_id = {int(c['id']): c for c in cands}
+
+        d = tk.Toplevel(parent)
+        d.title("Bemorlarni birlashtirish")
+        d.transient(parent)
+        d.grab_set()
+        d.resizable(False, False)
+        d.protocol("WM_DELETE_WINDOW", lambda: (_yop_ulanish(), d.destroy()))
+
+        def _yop_ulanish():
+            try: conn.close()
+            except Exception: pass
+
+        f = ttk.Frame(d, padding=12)
+        f.pack(fill=tk.BOTH, expand=True)
+        ttk.Label(f, text="Qaysi yozuv ASOSIY bo'lib qolsin?",
+                  font=("Arial", 10, "bold")).pack(anchor=tk.W)
+        ttk.Label(f, text="Qolganlarining barcha tashriflari, natijalari, to'lov/qarzlari "
+                          "shu bemorga o'tadi.",
+                  foreground="#555").pack(anchor=tk.W, pady=(0, 6))
+
+        asosiy_var = tk.IntVar(value=int(tavsiya))
+        fish_var = tk.StringVar(value=by_id[int(tavsiya)].get('fish') or '')
+        _qolda = {'v': False}
+
+        def _radio_ozgardi():
+            if not _qolda['v']:
+                fish_var.set(by_id[asosiy_var.get()].get('fish') or '')
+
+        for c in sorted(cands, key=lambda c: (-soni.get(int(c['id']), 0), int(c['id']))):
+            cid = int(c['id'])
+            matn = (f"{c.get('fish', '')}  —  {_fmt_tug_sana(c.get('tugilgan_sana', ''))}  —  "
+                    f"tel: {c.get('telefon') or '-'}  —  {soni.get(cid, 0)} tashrif  (ID {cid})")
+            if cid == int(tavsiya):
+                matn += "   ← tavsiya"
+            ttk.Radiobutton(f, text=matn, value=cid, variable=asosiy_var,
+                            command=_radio_ozgardi).pack(anchor=tk.W)
+
+        # Tug'ilgan sanalari har xil bo'lsa — ogohlantirish (adash bo'lishi mumkin)
+        sanalar = {_fmt_tug_sana(c.get('tugilgan_sana', '')) for c in cands}
+        if len(sanalar) > 1:
+            tk.Label(f, text="⚠ Tug'ilgan sanalari HAR XIL — bu aynan bir odam ekaniga "
+                             "ishonch hosil qiling!",
+                     fg="#C62828", font=("Arial", 9, "bold")).pack(anchor=tk.W, pady=(6, 0))
+
+        ttk.Label(f, text="To'g'ri F.I.SH (hammasi shu nomga o'tadi):").pack(anchor=tk.W, pady=(10, 0))
+        e_fish = ttk.Entry(f, textvariable=fish_var, width=50)
+        e_fish.pack(anchor=tk.W, fill=tk.X)
+        e_fish.bind("<Key>", lambda _e: _qolda.__setitem__('v', True))
+
+        ttk.Label(f, text="Admin paroli:").pack(anchor=tk.W, pady=(10, 0))
+        e_parol = ttk.Entry(f, show="*", width=25)
+        e_parol.pack(anchor=tk.W)
+        e_parol.focus_set()
+
+        def _bajar():
+            asosiy = asosiy_var.get()
+            boshqa = [i for i in by_id if i != asosiy]
+            yangi = fish_var.get().strip()
+            if len(yangi.split()) < 2:
+                messagebox.showwarning("Diqqat", "F.I.SH ni to'liq yozing (familiya va ism).",
+                                       parent=d)
+                return
+            try:
+                cur = conn.cursor(dictionary=True)
+                login = BB.admin_parol(cur, e_parol.get())
+                cur.close()
+                conn.commit()
+            except Exception as e:
+                messagebox.showerror("Xatolik", f"Parolni tekshirishda xato:\n{e}", parent=d)
+                return
+            if not login:
+                messagebox.showerror("Ruxsat yo'q", "Admin paroli noto'g'ri.", parent=d)
+                e_parol.delete(0, tk.END)
+                return
+            n_kochadi = sum(soni.get(i, 0) for i in boshqa)
+            if not messagebox.askyesno(
+                    "Tasdiqlang",
+                    f"{len(boshqa)} ta yozuvning {n_kochadi} ta tashrifi\n"
+                    f"«{yangi}» (ID {asosiy}) ga o'tkaziladi.\n\n"
+                    "Davom etilsinmi? (Keyin «Birlashtirish tarixi» dan bekor qilish mumkin)",
+                    parent=d):
+                return
+            kim = f"{login} (Monoblok, {_os.environ.get('COMPUTERNAME', '?')})"
+            try:
+                natija = BB.birlashtir(conn, asosiy, boshqa, yangi_fish=yangi, kim=kim)
+            except Exception as e:
+                messagebox.showerror("Birlashtirilmadi",
+                                     f"Hech narsa o'zgarmadi.\n\nXato: {e}", parent=d)
+                return
+            _yop_ulanish()
+            kochdi = ", ".join(f"{t}: {n}" for t, n in natija['kochdi'].items()) or "—"
+            messagebox.showinfo(
+                "Birlashtirildi",
+                f"«{natija['fish']}» — endi bitta bemor (ID {asosiy}).\n\n"
+                f"Ko'chirildi: {kochdi}", parent=d)
+            d.destroy()
+            try:
+                parent.destroy()
+            except Exception:
+                pass
+            self.show_patient_all_history(asosiy)
+
+        bf = ttk.Frame(f)
+        bf.pack(fill=tk.X, pady=(12, 0))
+        tk.Button(bf, text="🔗 Birlashtirish", command=_bajar,
+                  bg="#6A1B9A", fg="white", font=("Arial", 9, "bold"),
+                  padx=10, pady=4, cursor="hand2").pack(side=tk.LEFT)
+        ttk.Button(bf, text="Bekor", command=lambda: (_yop_ulanish(), d.destroy())
+                   ).pack(side=tk.LEFT, padx=6)
+        ttk.Button(bf, text="↩ Birlashtirish tarixi",
+                   command=lambda: self._bemor_birlashtirish_tarixi(d)
+                   ).pack(side=tk.RIGHT)
+        e_parol.bind("<Return>", lambda _e: _bajar())
+
+    def _bemor_birlashtirish_tarixi(self, parent):
+        """Oxirgi birlashtirishlar ro'yxati va bekor qilish (admin paroli bilan)."""
+        import bemor_birlashtirish as BB
+        import os as _os
+        from tkinter import simpledialog as _sd
+
+        conn = self._birlashtirish_ulanish()
+        if not conn:
+            messagebox.showerror("Xatolik", "Bazaga ulanib bo'lmadi.", parent=parent)
+            return
+        d = tk.Toplevel(parent)
+        d.title("Birlashtirish tarixi")
+        d.transient(parent)
+        d.grab_set()
+        d.geometry("900x380")
+
+        def _yop():
+            try: conn.close()
+            except Exception: pass
+            d.destroy()
+        d.protocol("WM_DELETE_WINDOW", _yop)
+
+        cols = ("Sana", "Kim", "Natija F.I.SH", "Birlashgan yozuvlar", "Tashrif", "Holat")
+        tv = ttk.Treeview(d, columns=cols, show="headings", height=12)
+        for c, w in zip(cols, (120, 170, 180, 260, 55, 90)):
+            tv.heading(c, text=c)
+            tv.column(c, width=w, anchor=tk.W)
+        tv.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+
+        def _yukla():
+            tv.delete(*tv.get_children())
+            try:
+                cur = conn.cursor(dictionary=True)
+                rows = BB.tarix(cur)
+                cur.close()
+                conn.commit()
+            except Exception as e:
+                messagebox.showerror("Xatolik", str(e), parent=d)
+                return
+            for r in rows:
+                sana = r['sana'].strftime('%d.%m.%Y %H:%M') if hasattr(r['sana'], 'strftime') else str(r['sana'])
+                tv.insert("", tk.END, iid=r['guruh'], values=(
+                    sana, r['kim'], r['yangi_fish'], " + ".join(r['eski_fishlar']),
+                    r['soni'], "bekor qilingan" if r['bekor'] else "faol"))
+
+        def _bekor():
+            sel = tv.selection()
+            if not sel:
+                messagebox.showwarning("Diqqat", "Ro'yxatdan birlashtirishni tanlang.", parent=d)
+                return
+            if tv.item(sel[0], 'values')[-1] != "faol":
+                messagebox.showinfo("Ma'lumot", "Bu allaqachon bekor qilingan.", parent=d)
+                return
+            parol = _sd.askstring("Admin paroli", "Bekor qilish uchun admin paroli:",
+                                  show="*", parent=d)
+            if not parol:
+                return
+            try:
+                cur = conn.cursor(dictionary=True)
+                login = BB.admin_parol(cur, parol)
+                cur.close()
+                conn.commit()
+            except Exception as e:
+                messagebox.showerror("Xatolik", str(e), parent=d)
+                return
+            if not login:
+                messagebox.showerror("Ruxsat yo'q", "Admin paroli noto'g'ri.", parent=d)
+                return
+            try:
+                n = BB.bekor_qil(conn, sel[0],
+                                 kim=f"{login} ({_os.environ.get('COMPUTERNAME', '?')})")
+            except Exception as e:
+                messagebox.showerror("Bekor qilinmadi", f"Hech narsa o'zgarmadi.\n\n{e}", parent=d)
+                return
+            matn = ", ".join(f"{t}: {k}" for t, k in n['qaytdi'].items()) or "—"
+            if n['qaytmadi']:
+                matn += "\n\nQaytarib bo'lmadi (satr ID si yo'q): " + \
+                        ", ".join(f"{t}: {k}" for t, k in n['qaytmadi'].items())
+            messagebox.showinfo("Bekor qilindi", f"Qaytarildi: {matn}", parent=d)
+            _yukla()
+
+        bf = ttk.Frame(d, padding="8 0 8 8")
+        bf.pack(fill=tk.X)
+        tk.Button(bf, text="↩ Tanlanganni bekor qilish", command=_bekor,
+                  bg="#C62828", fg="white", font=("Arial", 9, "bold"),
+                  padx=10, pady=4).pack(side=tk.LEFT)
+        ttk.Button(bf, text="Yopish", command=_yop).pack(side=tk.RIGHT)
+        _yukla()
 
     # ─── Tarixni ko'rish (barcha buyurtmalar) ────────────────────────────────
 
