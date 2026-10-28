@@ -4225,44 +4225,72 @@ _ISM_KIRILL_LATIN = {
     'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'ғ': "g'", 'д': 'd', 'е': 'e',
     'ё': 'yo', 'ж': 'j', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'қ': 'q',
     'л': 'l', 'м': 'm', 'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's',
-    'т': 't', 'у': 'u', 'ў': "o'", 'ф': 'f', 'х': 'x', 'ҳ': 'h', 'ц': 's',
+    'т': 't', 'у': 'u', 'ў': "o'", 'ф': 'f', 'х': 'x', 'ҳ': 'h', 'ц': 'ts',
     'ч': 'ch', 'ш': 'sh', 'щ': 'sh', 'ъ': '', 'ы': 'i', 'ь': '', 'э': 'e',
     'ю': 'yu', 'я': 'ya',
 }
 
+# So'z OXIRIDA jarangli/jarangsiz juftlar bir xil eshitiladi:
+# Murod/Murot, Ahmad/Ahmat, Yaqub/Yaqup, Ulug'beg/Ulug'bek
+_ISM_OXIRI = {'d': 't', 'b': 'p', 'g': 'k'}
+
 
 def _ism_normallash(name):
     """
-    Ismni taqqoslash uchun yagona ko'rinishga keltiradi — hamshiralar bir
-    bemorni har xil yozadi: «Xursanov Xusan» / «Hursanov Husan» / «Qodirov» /
-    «Kodirov» / «Yo'ldosheva» / «Yoldosheva» / «Abdullayev» / «Abdulayev» /
-    kirillcha.  LIMS dagi bemor_nazorat.ism_yumshoq_kalit bilan bir qoida:
+    Ismni taqqoslash kaliti — FAQAT bir xil eshitiladigan yozilish farqlari
+    yo'qotiladi (hamshiralar bir bemorni «Xursanov Xusan» / «Hursanov Husan»
+    deb yozadi):
       kirill → lotin; o'/g' belgilari olib tashlanadi; kh, h → x; q → k;
-      w → v; iy → i; ye → e; takror harf → bitta.
+      dj → j; w → v; iy → i; ye → e; takror harf → bitta;
+      so'z oxirida d → t, b → p, g → k (Murod/Murot).
+    UNLILAR HECH QACHON tenglashtirilmaydi: «Husan» ≠ «Xasan», «Hasan» ≠
+    «Husan» — egizaklar ko'p, natija boshqa odamga o'tib ketmasin
+    (egasi talabi, 2026-10-28). Shuning uchun o'xshashlik FOIZ bilan emas,
+    shu kalitning aynan tengligi bilan aniqlanadi (_fuzzy_name_score).
+    vrach_web/app.py dagi _ism_kaliti bilan AYNAN bir qoida.
     """
     import re as _re
     s = (name or '').lower().strip()
     s = ''.join(_ISM_KIRILL_LATIN.get(ch, ch) for ch in s)
     s = _re.sub(r"['`ʻʼ’‘´]", '', s)
-    s = s.replace('kh', 'x').replace('h', 'x').replace('q', 'k').replace('w', 'v')
+    s = _re.sub(r'[^a-z ]', '', s)
+    s = s.replace('dj', 'j').replace('kh', 'x').replace('h', 'x')
+    s = s.replace('q', 'k').replace('w', 'v')
     s = s.replace('iy', 'i').replace('ye', 'e')
     s = _re.sub(r'(.)\1+', r'\1', s)
-    return _re.sub(r'\s+', ' ', s).strip()
+    sozlar = [w[:-1] + _ISM_OXIRI.get(w[-1], w[-1]) for w in s.split() if w]
+    return ' '.join(sozlar)
+
+
+def _ism_kaliti(name):
+    """Familiya + ism (birinchi 2 so'z) kaliti — otasining ismi bir yozuvda
+    bor, birida yo'q bo'lsa ham («Xusan Akmalovich» / «Xusan») bir odam."""
+    return ' '.join(_ism_normallash(name).split()[:2])
 
 
 def _fuzzy_name_score(name1, name2):
     """
-    Ikkita ism o'rtasidagi o'xshashlikni 0-100 da qaytaradi.
-    SequenceMatcher asosida, _ism_normallash dan keyin (H/X, Q/K, apostrof,
-    kirill farqi hisobga olinmaydi).
+    Ikkita ism mosligi:
+      100 — aynan bir xil (registr/apostrof/bo'shliqdan tashqari)
+       95 — faqat o'xshash harflar farqi (H/X, Q/K, T/D oxirida, o'/o, kirill...)
+       90 — familiya+ism shunday, faqat otasining ismi farq qiladi / yo'q
+        0 — boshqa ism. Unli farqi (Husan/Xasan) yoki boshqa harf — MOS EMAS.
     """
-    from difflib import SequenceMatcher
-    n1 = _ism_normallash(name1)
-    n2 = _ism_normallash(name2)
-    if not n1 or not n2:
+    import re as _re
+    k1, k2 = _ism_normallash(name1), _ism_normallash(name2)
+    if not k1 or not k2 or len(k1.split()) < 2 or len(k2.split()) < 2:
         return 0
-    ratio = SequenceMatcher(None, n1, n2).ratio()
-    return int(round(ratio * 100))
+
+    def _xom(s):
+        s = _re.sub(r"['`ʻʼ’‘´]", "'", (s or '').lower())
+        return ' '.join(s.split())
+    if _xom(name1) == _xom(name2):
+        return 100
+    if k1 == k2:
+        return 95
+    if _ism_kaliti(name1) == _ism_kaliti(name2):
+        return 90
+    return 0
 
 
 def _fuzzy_search_bemorlar(ref_fish, ref_year, ref_jins=None, min_score=90):
@@ -4271,9 +4299,9 @@ def _fuzzy_search_bemorlar(ref_fish, ref_year, ref_jins=None, min_score=90):
     Qoidalar (qattiq filtr):
       - Tug'ilgan YIL mos bo'lishi SHART (agar ref_year ma'lum bo'lsa)
       - Jins mos bo'lishi SHART (agar ref_jins ma'lum bo'lsa)
-      - Python-da _ism_normallash dan keyin SequenceMatcher >= min_score (90%)
-        (familiya VA ism birga baholanadi, shuning uchun "Axmedov Faxriddin"
-        "Axmedov Xusan" ga 90% bermaydi)
+      - Ism _fuzzy_name_score >= min_score (90): familiya+ism kaliti AYNAN
+        teng — faqat o'xshash harflar (H/X, Q/K, oxirida T/D...) farqi
+        kechiriladi, unli farqi (Husan/Xasan) EMAS
       - Yil ma'lum bo'lsa SQL da ism bo'yicha filtr YO'Q: «Xursanov» va
         «Hursanov» birinchi harfdan farq qiladi — prefix LIKE ularni ajratib
         yuborardi. Yil+jins filtri qatorlar sonini o'zi kichraytiradi.
@@ -4299,8 +4327,8 @@ def _fuzzy_search_bemorlar(ref_fish, ref_year, ref_jins=None, min_score=90):
         # sezgir; takror harf SQL da yo'q — shuning uchun qisqa, 3 harf prefiks)
         fish_sql = "LOWER(b.fish)"
         for eski, yangi in (("'", ''), ('`', ''), ('ʻ', ''), ('ʼ', ''),
-                            ('’', ''), ('‘', ''), ('´', ''), ('kh', 'x'),
-                            ('h', 'x'), ('q', 'k'), ('w', 'v'), ('iy', 'i'),
+                            ('’', ''), ('‘', ''), ('´', ''), ('dj', 'j'),
+                            ('kh', 'x'), ('h', 'x'), ('q', 'k'), ('w', 'v'), ('iy', 'i'),
                             ('ye', 'e')):
             fish_sql = f"REPLACE({fish_sql}, %s, %s)"
             params.extend([eski, yangi])
@@ -5860,7 +5888,7 @@ def _oldingi_bemor_idlari(cur, bemor_id, takroriy: bool) -> list:
             return ids
         if not isinstance(b, dict):
             b = dict(zip(('fish', 'jins', 'tugilgan_sana'), b))
-        nom = _ism_normallash(b.get('fish'))
+        nom = _ism_kaliti(b.get('fish'))
         tug = b.get('tugilgan_sana')
         if len(nom.split()) < 2 or not tug or not hasattr(tug, 'year'):
             return ids
@@ -5871,7 +5899,8 @@ def _oldingi_bemor_idlari(cur, bemor_id, takroriy: bool) -> list:
         for r in cur.fetchall():
             if not isinstance(r, dict):
                 r = dict(zip(('id', 'fish', 'jins', 'tugilgan_sana'), r))
-            if _ism_normallash(r.get('fish')) != nom:
+            # Familiya+ism kaliti AYNAN teng (H/X, T/D... kechiriladi, unli EMAS)
+            if _ism_kaliti(r.get('fish')) != nom:
                 continue
             t2 = r.get('tugilgan_sana')
             if not t2 or not hasattr(t2, 'year') or t2.year != tug.year:
@@ -14767,7 +14796,8 @@ Sana: {_sana_fmt}"""
             messagebox.showinfo(
                 "Topilmadi",
                 f"'{fish}' ({birth_year}, {ref_jins or '?'}) uchun\n"
-                "o'xshash bemor topilmadi (90% dan yuqori mos kerakligi shartdir).\n\n"
+                "o'xshash bemor topilmadi (familiya va ism bir xil yoki faqat\n"
+                "H/X, Q/K, T/D kabi o'xshash harflar bilan farq qilishi kerak).\n\n"
                 "Hozirgi bemor tarixini ko'rish uchun\n"
                 "'Oldingi tashriflar' jadvalidan foydalaning.")
             return
@@ -14843,7 +14873,7 @@ Sana: {_sana_fmt}"""
         # Kandidatlarni to'ldirish
         for cand in candidates:
             score = cand.get('_score', 0)
-            base_tag = 'exact' if score >= 95 else ('close' if score >= 75 else 'fuzzy')
+            base_tag = 'exact' if score >= 100 else ('close' if score >= 90 else 'fuzzy')
             iid = str(cand['id'])
             _checked[iid] = False
             tv.insert("", tk.END, iid=iid, values=(
@@ -14980,7 +15010,7 @@ Sana: {_sana_fmt}"""
                   ).pack(side=tk.RIGHT, padx=4)
 
         ttk.Label(btn_frame,
-            text="💡 Yashil=aniq mos  Sariq=o'xshash  Oq=ehtimoliy",
+            text="💡 Yashil=aniq bir xil  Sariq=o'xshash harf (H/X, Q/K, T/D...)",
             foreground="gray", font=("Arial", 8)
             ).pack(side=tk.RIGHT, padx=8)
 
