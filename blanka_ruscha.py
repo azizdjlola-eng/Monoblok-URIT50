@@ -261,6 +261,7 @@ TARJIMA = {
     "Gepatit B (HBsAg, ekspress)": "Гепатит B (HBsAg, экспресс)",
     "Gepatit C (HCV-Ab, ekspress)": "Гепатит C (анти-HCV, экспресс)",
     "Gepatit A (IgM va IgG, ekspress)": "Гепатит A (IgM и IgG, экспресс)",
+    "Gepatit A (IgM, ekspress)": "Гепатит A (IgM, экспресс)",
     "Xulosa": "Заключение",
     "O'tkir (yangi) gepatit A infeksiyasi belgisi": "Признак острой (свежей) инфекции гепатита A",
     "O'tkir yoki yaqinda o'tkazilgan gepatit A infeksiyasi": "Острая или недавно перенесённая инфекция гепатита A",

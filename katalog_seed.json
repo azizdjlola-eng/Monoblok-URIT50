@@ -1123,5 +1123,14 @@
   "turi": "test",
   "soha": "lab",
   "aktiv": 1
+ },
+ {
+  "id": 166,
+  "nomi": "Gepatit A (IgM, ekspress)",
+  "narxi": 30000,
+  "sample": "TEST",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
  }
 ]
