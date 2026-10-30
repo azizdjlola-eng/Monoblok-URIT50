@@ -170,6 +170,17 @@ def load_config(force=False):
                 json.dump(DEFAULT_CONFIG, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
+    # Bazadagi sozlama (Tizim Sozlamalari → Kritik qiymat oynasi, hamma kompyuterda bir
+    # xil) fayldan ustun; ro'yxatlar to'liq almashtiriladi (o'chirilgani qaytmasin).
+    try:
+        import markaziy_sozlama as _ms
+        db = _ms.ol("alert_config")
+        if isinstance(db, dict) and db:
+            cfg = _deep_merge(cfg, db)
+            if isinstance(db.get("hematology"), dict):
+                cfg["hematology"] = db["hematology"]
+    except Exception as e:
+        print(f"[OGOHLANTIRISH] critical_alert: bazadagi sozlama olinmadi: {e}")
     _CFG_CACHE[0] = cfg
     return cfg
 

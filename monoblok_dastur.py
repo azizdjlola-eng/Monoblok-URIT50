@@ -24462,6 +24462,16 @@ Sana: {_sana_fmt}"""
             "olinadi.")).pack(anchor="w", pady=(6, 6))
         ttk.Button(tab_tt, text="📋 Maxsus jadvallar (nomlar, normalar)...",
                    command=lambda: _mj.ochish_oyna(dialog)).pack(anchor="w")
+        ttk.Label(tab_tt, justify=tk.LEFT, wraplength=620, text=(
+            "\nKritik qiymat, delta-check va analizator signali chegaralari. ⚠ Yangi "
+            "o'rnatishda albatta tekshiring: chegaralar katalog ID si bo'yicha yozilgan.")
+                  ).pack(anchor="w", pady=(6, 6))
+
+        def _chegara_oyna():
+            import chegara_sozlama
+            chegara_sozlama.ochish_oyna(dialog)
+        ttk.Button(tab_tt, text="🚨 Kritik qiymat va signal chegaralari...",
+                   command=_chegara_oyna).pack(anchor="w")
 
         # ───────────────────────── PAPKALAR ─────────────────────────────
         # Analizatordan kelgan RAW/TXT fayllar qayerga tushadi (natija_papka.py).

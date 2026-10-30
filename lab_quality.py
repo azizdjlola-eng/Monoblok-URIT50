@@ -180,6 +180,19 @@ def load_config(force=False):
                 json.dump(DEFAULT_CONFIG, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"[OGOHLANTIRISH] lab_quality.json yuklashda xato: {e}")
+    # Bazadagi sozlama (Tizim Sozlamalari → Kritik qiymat oynasi, hamma kompyuterda bir
+    # xil) fayldan ustun. Ro'yxatlar TO'LIQ almashtiriladi — o'chirilgan yozuv
+    # standartdan qaytib kelmasin.
+    try:
+        import markaziy_sozlama as _ms
+        db = _ms.ol("lab_quality")
+        if isinstance(db, dict) and db:
+            cfg = _deep_merge(cfg, db)
+            for sec in ("panic", "delta"):
+                if isinstance(db.get(sec), dict) and isinstance(db[sec].get("analytes"), dict):
+                    cfg[sec]["analytes"] = db[sec]["analytes"]
+    except Exception as e:
+        print(f"[OGOHLANTIRISH] lab_quality: bazadagi sozlama olinmadi: {e}")
     _CFG_CACHE[0] = cfg
     return cfg
 
