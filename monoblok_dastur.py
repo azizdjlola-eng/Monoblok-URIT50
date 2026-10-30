@@ -191,9 +191,20 @@ _CONFIG_FILE_ICHKI = os.path.join(SCRIPT_DIR, "blanka_config.json")
 TEST_GROUPS = ['GEM', 'BIO', 'IFA', 'URINE', 'TEST', 'COAG']
 
 # Lipid va Buyrak panel tarkibidagi tahlillar (tahlillar.id bo'yicha)
-# Panel buyurtmada bo'lganda, bu ID li yakka testlar ro'yxatda QAYTA ko'rsatilmaydi
-LIPID_PANEL_MEMBER_IDS = {43, 44, 123, 124}   # TC=43, TG=44, LDL=123, HDL=124
-BUYRAK_PANEL_MEMBER_IDS = {42, 41, 35, 50}    # Mochevina=42, Kreatinin=41, Albumin=35, Siydik kislota=50
+# Panel buyurtmada bo'lganda, bu ID li yakka testlar ro'yxatda QAYTA ko'rsatilmaydi.
+# ID lar katalogga bog'liq — bio_blanka sozlamasidan (standart: TC=43, TG=44, LDL=123,
+# HDL=124; Mochevina=42, Kreatinin=41, Albumin=35, Siydik kislota=50).
+import bio_blanka as _bb
+LIPID_PANEL_MEMBER_IDS = set(_bb.panel_azolari('lipid'))
+BUYRAK_PANEL_MEMBER_IDS = set(_bb.panel_azolari('buyrak'))
+
+
+def _bio_panel_idlarini_yangila():
+    """Bioximiya blanka sozlamasi saqlangach — panel a'zolari ID lari joyida yangilanadi
+    (qayta ishga tushirmasdan)."""
+    for _s, _pk in ((LIPID_PANEL_MEMBER_IDS, 'lipid'), (BUYRAK_PANEL_MEMBER_IDS, 'buyrak')):
+        _s.clear()
+        _s.update(_bb.panel_azolari(_pk, _bb.sozlama(force=True)))
 
 # Immunologik tahlillar guruhi (tahlillar.sample = 'IFA'): qidiruvdagi ustun,
 # asosiy oynadagi tugma va kuzatuv oynasi nomi. IXLA analizatori olinsa —
@@ -2672,6 +2683,8 @@ def get_group_name_from_db(guruh_code: str) -> str:
         "COAG": "KOAGULOGRAMMA",
         "EXPRESS": "EKSPRESS TESTLAR NATIJALARI",
     }
+    if guruh_code == "BIO":
+        return _bb.sarlavha()   # bioximiya blanka sozlamasi
     return group_names.get(guruh_code, guruh_code)
 
 def get_test_info_from_db(test_id: int = None, test_name: str = None) -> dict:
@@ -5116,7 +5129,7 @@ def _create_bilirubin_section(doc, bili_tests: list, test_results: dict, order_i
     heading = doc.add_paragraph()
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _set_para_spacing(heading, 0, 0, line_spacing=1.0)
-    _add_run_tnr(heading, "BILIRUBIN  (umumiy, bog\u2018langan, erkin)", 14, bold=True,
+    _add_run_tnr(heading, _bb.panel_sarlavha('bilirubin'), 14, bold=True,
                  color_rgb=_group_title_rgb())
 
     BILI_ROWS = [
@@ -5124,6 +5137,8 @@ def _create_bilirubin_section(doc, bili_tests: list, test_results: dict, order_i
         ("Bog\u2018langan Bilirubin", "bog_langan", "0,86 \u2013 5,3",  "mkmol/l"),
         ("Erkin Bilirubin",         "erkin",      "1,7 \u2013 17,1",  "mkmol/l"),
     ]
+    # Nom/norma/birlik/tartib/ko'rinish \u2014 bio_blanka sozlamasi
+    BILI_ROWS, _ = _bb.panel_qatorlari('bilirubin', BILI_ROWS, bili_result_data)
     _bili_tid = next((t.get('tahlil_id') for t in bili_tests if t.get('tahlil_id')), 55)
     _prev = _panel_oldingi(order_info, 'BIO', _bili_tid, [r[1] for r in BILI_ROWS])
     _cN, _cU = (3, 4) if _prev else (2, 3)
@@ -5192,7 +5207,8 @@ def _create_lipid_spektri_section(doc, lipid_tests: list, test_results: dict, or
 
     # Agar panel JSON bo'sh bo'lsa — individual member test natijalaridan olish
     # Usul 1: test_results ichidan tc/hdl/ldl/tg kalitli JSON qidirish
-    _lipid_id_to_key = {43: 'tc', 44: 'tg', 123: 'ldl', 124: 'hdl'}
+    # A'zolar tahlil_id → kalit — bio_blanka sozlamasidan (katalogga qarab)
+    _lipid_id_to_key = _bb.panel_azolari('lipid')
     if not any(lipid_data.get(k) for k in ('tc', 'hdl', 'ldl', 'tg')):
         for tid, raw in (test_results or {}).items():
             raw_s = str(raw).strip()
@@ -5207,7 +5223,7 @@ def _create_lipid_spektri_section(doc, lipid_tests: list, test_results: dict, or
     # Usul 2: member tahlil_id → order_item.id orqali yakka natijalardan to'ldirish
     # (result: "5.4" formatidagi yakka natijalar uchun)
     if not any(lipid_data.get(k) for k in ('tc', 'hdl', 'ldl', 'tg')):
-        _lipid_tahlil_keys = {43: 'tc', 44: 'tg', 123: 'ldl', 124: 'hdl'}
+        _lipid_tahlil_keys = _lipid_id_to_key
         for _lipid_test in lipid_tests:
             _l_tid = _lipid_test.get('tahlil_id')
             if _l_tid in _lipid_tahlil_keys and _lipid_test.get('id') in (test_results or {}):
@@ -5248,14 +5264,14 @@ def _create_lipid_spektri_section(doc, lipid_tests: list, test_results: dict, or
     except Exception:
         pass
 
-    # Tahlil nomlarini DB dan tahlillar.id bo'yicha olish (TC=43, TG=44, LDL=123, HDL=124)
-    _lipid_id_to_key = {43: 'tc', 44: 'tg', 123: 'ldl', 124: 'hdl'}
+    # Tahlil nomlarini DB dan tahlillar.id bo'yicha olish (a'zo ID lar — bio_blanka)
     _lipid_db_names = {}
     try:
-        _conn_ln = db_conn()
+        _conn_ln = db_conn() if _lipid_id_to_key else None
         if _conn_ln:
             _cur_ln = _conn_ln.cursor(dictionary=True)
-            _cur_ln.execute("SELECT id, nomi FROM tahlillar WHERE id IN (43, 44, 123, 124)")
+            _cur_ln.execute("SELECT id, nomi FROM tahlillar WHERE id IN (%s)"
+                            % ",".join("%s" for _ in _lipid_id_to_key), tuple(_lipid_id_to_key))
             for _r_ln in _cur_ln.fetchall():
                 _k_ln = _lipid_id_to_key.get(_r_ln['id'])
                 if _k_ln:
@@ -5296,6 +5312,8 @@ def _create_lipid_spektri_section(doc, lipid_tests: list, test_results: dict, or
             db_unit = norma_map[key].get('unit', '')
             if db_norma:
                 LIPID_ROWS[i] = (name, key, db_norma, db_unit or unit)
+    # Nom/norma/birlik/tartib/ko'rinish — bio_blanka sozlamasi (bazadagidan ustun)
+    LIPID_ROWS, _ = _bb.panel_qatorlari('lipid', LIPID_ROWS, lipid_data)
 
     # Vrachlar uchun ruscha nomlar (blankada qavs ichida qo'shiladi)
     LIPID_RU_NAMES = {
@@ -5314,7 +5332,7 @@ def _create_lipid_spektri_section(doc, lipid_tests: list, test_results: dict, or
     heading = doc.add_paragraph()
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _set_para_spacing(heading, 0, 0, line_spacing=1.0)
-    _add_run_tnr(heading, "LIPID SPEKTRI", 14, bold=True,
+    _add_run_tnr(heading, _bb.panel_sarlavha('lipid'), 14, bold=True,
                  color_rgb=_group_title_rgb())
 
     _lipid_tid = next((t.get('tahlil_id') for t in lipid_tests
@@ -5406,7 +5424,8 @@ def _create_buyrak_paneli_section(doc, buyrak_tests: list, test_results: dict, o
                     pass
     # Usul 2: member tahlil_id → order_item.id orqali yakka natijalardan to'ldirish
     # tahlil_id: 42=mochevina, 41=kreatinin, 35=albumin, 50=siydik_kislota
-    _buyrak_tahlil_keys = {42: 'mochevina', 41: 'kreatinin', 35: 'albumin', 50: 'siydik_kislota'}
+    # A'zolar tahlil_id → kalit — bio_blanka sozlamasidan (katalogga qarab)
+    _buyrak_tahlil_keys = _bb.panel_azolari('buyrak')
     if not any(buyrak_data.get(k) for k in _buyrak_keys):
         for _bt in buyrak_tests:
             _b_tid = _bt.get('tahlil_id')
@@ -5484,14 +5503,15 @@ def _create_buyrak_paneli_section(doc, buyrak_tests: list, test_results: dict, o
     except Exception:
         yosh_bp_int = 0
 
-    _buyrak_id_to_key = {42: 'mochevina', 41: 'kreatinin', 35: 'albumin', 50: 'siydik_kislota'}
+    _buyrak_id_to_key = _buyrak_tahlil_keys
     _buyrak_db_names = {}
     _comp_norma_info = {}  # key -> norma_info dict (individual test DB normasi)
     try:
-        _conn_bn = db_conn()
+        _conn_bn = db_conn() if _buyrak_id_to_key else None
         if _conn_bn:
             _cur_bn = _conn_bn.cursor(dictionary=True)
-            _cur_bn.execute("SELECT id, nomi FROM tahlillar WHERE id IN (42, 41, 35, 50)")
+            _cur_bn.execute("SELECT id, nomi FROM tahlillar WHERE id IN (%s)"
+                            % ",".join("%s" for _ in _buyrak_id_to_key), tuple(_buyrak_id_to_key))
             for _r_bn in _cur_bn.fetchall():
                 _k_bn = _buyrak_id_to_key.get(_r_bn['id'])
                 if _k_bn:
@@ -5532,11 +5552,16 @@ def _create_buyrak_paneli_section(doc, buyrak_tests: list, test_results: dict, o
          "≥ 90 — 1-bosqich: Normal\n60–89 — 2-bosqich: Yengil pasayish\n45–59 — 3a-bosqich: O'rtacha pasayish\n30–44 — 3b-bosqich: O'rtacha–og'ir\n15–29 — 4-bosqich: Og'ir\n< 15  — 5-bosqich: Buyrak yetishmovchiligi",
          "ml/min/1.73m²"),
     ]
+    # Nom/norma/birlik/tartib/ko'rinish — bio_blanka sozlamasi. Sozlamada norma
+    # yozilgan qatorda bazadagi (get_test_norma) norma ishlatilmaydi.
+    BUYRAK_ROWS, _user_norma = _bb.panel_qatorlari('buyrak', BUYRAK_ROWS, buyrak_data)
+    for _k in _user_norma:
+        _comp_norma_info.pop(_k, None)
 
     heading = doc.add_paragraph()
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _set_para_spacing(heading, 0, 0, line_spacing=1.0)
-    _add_run_tnr(heading, "BUYRAK PANELI", 14, bold=True,
+    _add_run_tnr(heading, _bb.panel_sarlavha('buyrak'), 14, bold=True,
                  color_rgb=_group_title_rgb())
 
     _buyrak_tid = next((t.get('tahlil_id') for t in buyrak_tests
@@ -6387,11 +6412,13 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
             _keep_row_together(row)
             cells = row.cells
 
-            # Tahlil nomi
+            # Tahlil nomi (bioximiyada blankadagi nom sozlamadan bo'lishi mumkin —
+            # faqat ko'rinish; norma/turini aniqlash katalog nomi bilan qoladi)
             p0 = cells[0].paragraphs[0]
             p0.alignment = WD_ALIGN_PARAGRAPH.LEFT
             _set_para_spacing(p0, 0, 0, line_spacing=1)
-            _add_run_tnr(p0, test_name, 11, bold=True)
+            _add_run_tnr(p0, _bb.yakka_nomi(test.get('tahlil_id'), test_name) if group == "BIO"
+                         else test_name, 11, bold=True)
 
             # Natija
             result_value = _format_result_value(raw_val) if raw_val else ""
@@ -6925,9 +6952,11 @@ def create_unified_blank(order_id: int, order_info: dict, organized: dict, test_
                                      and not _is_lipid_spektri_test(t.get('nomi', ''))
                                      and not _is_buyrak_paneli_test(t.get('nomi', ''))
                                      and t.get('tahlil_id') not in _panel_skip_ids]
+                    # Blankadagi tartib — bio_blanka sozlamasi (yoqilgan bo'lsa)
+                    bio_only = _bb.yakka_tartiblash(bio_only)
 
                     if bio_only:
-                        guruh_nomi = get_group_name_from_db(group)
+                        guruh_nomi = _bb.sarlavha()
                         h = doc.add_paragraph()
                         h.alignment = WD_ALIGN_PARAGRAPH.CENTER
                         _set_para_spacing(h, 0, 0, line_spacing=1.0)
@@ -23157,6 +23186,56 @@ Sana: {_sana_fmt}"""
             doc.save(yol)
         os.startfile(yol)
 
+    def _bio_blanka_namuna(self, sozlama):
+        """Bioximiya blanka sozlamasi oynasidan: saqlanmagan sozlama bilan namuna Word blanka
+        (katalogdagi bir nechta yakka tahlil + Bilirubin/Lipid/Buyrak panellari, namunaviy raqamlar)."""
+        import tempfile
+        _eski = _bb.sozlama
+        _bb.sozlama = lambda force=False: sozlama      # vaqtincha — barcha bio renderlar shuni o'qisin
+        try:
+            kat = _bb.katalog_bio_tahlillar()
+            _panel_ids = set(_bb.panel_azolari('lipid', sozlama)) | set(_bb.panel_azolari('buyrak', sozlama))
+            yakka = [{'id': 900000 + i, 'tahlil_id': tid, 'nomi': nom}
+                     for i, (tid, nom) in enumerate(kat) if tid not in _panel_ids
+                     and not _is_bilirubin_test(nom) and not _is_lipid_spektri_test(nom)
+                     and not _is_buyrak_paneli_test(nom)][:8]
+            yakka = _bb.yakka_tartiblash(yakka, sozlama)
+            natija = {t['id']: '5.0' for t in yakka}
+            order_info = {'yosh': 40, 'jins': 'Erkak'}
+            doc = Document()
+            try:
+                sec = doc.sections[0]
+                sec.left_margin = sec.right_margin = Cm(1.0)
+                sec.top_margin = sec.bottom_margin = Cm(1.0)
+            except Exception:
+                pass
+            if yakka:
+                h = doc.add_paragraph()
+                h.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                _add_run_tnr(h, _bb.sarlavha(sozlama), 14, bold=True, color_rgb=_group_title_rgb())
+                create_results_table(doc, yakka, "BIO", order_info, natija)
+            _create_bilirubin_section(doc, [{'id': 1, 'nomi': 'Bilirubin'}],
+                                      {1: json.dumps({'umumiy': 15.2, 'bog_langan': 3.1, 'erkin': 12.1})},
+                                      order_info)
+            _create_lipid_spektri_section(doc, [{'id': 2, 'nomi': 'Lipid spektri'}],
+                                          {2: json.dumps({'tc': 5.6, 'hdl': 1.1, 'ldl': 3.6, 'tg': 1.9,
+                                                          'vldl': 0.86, 'non_hdl': 4.5, 'ka': 4.1,
+                                                          'tc_hdl': 5.1, 'ldl_hdl': 3.3, 'tg_hdl': 1.7})},
+                                          order_info)
+            _create_buyrak_paneli_section(doc, [{'id': 3, 'nomi': 'Buyrak paneli'}],
+                                          {3: json.dumps({'mochevina': 5.4, 'kreatinin': 88,
+                                                          'siydik_kislota': 310, 'albumin': 44})},
+                                          order_info)
+        finally:
+            _bb.sozlama = _eski
+        yol = os.path.join(tempfile.gettempdir(), "bio_blanka_namuna.docx")
+        try:
+            doc.save(yol)
+        except PermissionError:
+            yol = os.path.join(tempfile.gettempdir(), f"bio_blanka_namuna_{datetime.now():%H%M%S}.docx")
+            doc.save(yol)
+        os.startfile(yol)
+
     def open_system_settings(self):
         """Tizim sozlamalari oynasi — baza va analizatorlarning ulanishini
         kodga tegmasdan o'zgartirish (IP, port, COM, parol va h.k.).
@@ -24004,6 +24083,13 @@ Sana: {_sana_fmt}"""
         ttk.Button(_b_btns, text="🧬 Tahlil kodlari", command=open_bio_code_map).pack(side=tk.LEFT, padx=6)
         ttk.Button(_b_btns, text="☑ Worklist tahlillari", command=open_bio_worklist_channels).pack(side=tk.LEFT, padx=6)
         ttk.Button(_b_btns, text="🧪 Shtrix-kod so'rovini sinash", command=test_bio_query).pack(side=tk.LEFT, padx=6)
+
+        # Blanka ko'rinishi: sarlavha, yakka tahlillar nomi/tartibi, panellar (Bilirubin,
+        # Lipid, Buyrak) qatorlari va a'zo tahlil ID lari — bio_blanka.py
+        ttk.Button(tab_b, text="🧾 Blanka ko'rinishi (nomlar, tartib, panellar)...",
+                   command=lambda: _bb.ochish_oyna(dialog, namuna_fn=self._bio_blanka_namuna,
+                                                   saqlangach_fn=_bio_panel_idlarini_yangila)
+                   ).grid(row=10, column=0, columnspan=2, pady=(0, 8))
 
 
         # ───────────────────────── PRINTER (avto-pechat) ─────────────────

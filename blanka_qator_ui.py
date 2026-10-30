@@ -19,7 +19,11 @@ class QatorJadvali:
     """maydonlar: [(kalit, sarlavha, kenglik_px, royxatmi)] — "korsat" ustuni avtomatik
     birinchi turadi; royxatmi=True maydon (kodlar, variantlar) vergul bilan kiritiladi."""
 
-    def __init__(self, parent, qatorlar, standart, maydonlar, korsat, toza_fn, yordam=""):
+    def __init__(self, parent, qatorlar, standart, maydonlar, korsat, toza_fn, yordam="",
+                 faqat_oqish=(), yangi_qator=True):
+        """faqat_oqish — tahrirlash oynasida o'zgarmaydigan maydonlar (masalan katalog nomi);
+        yangi_qator=False — «Yangi qator» va «O'chirish» tugmalari yo'q (ro'yxat tashqaridan)."""
+        self.faqat_oqish = set(faqat_oqish)
         self.qatorlar = qatorlar
         self.standart = standart
         self.standart_kodlar = {q["kod"] for q in standart}
@@ -47,15 +51,21 @@ class QatorJadvali:
 
         side = ttk.Frame(frm)
         side.pack(side=tk.LEFT, fill=tk.Y, padx=(8, 0))
-        for txt, cmd in [("▲ Yuqoriga", lambda: self._kochir(-1)), ("▼ Pastga", lambda: self._kochir(1)),
-                         ("✎ Tahrirlash", self._tahrir_tanlangan), ("👁 Ko'rinish", self._korinish),
-                         ("＋ Yangi qator", lambda: self._tahrir(None)), ("✖ O'chirish", self._ochir)]:
+        tugmalar = [("▲ Yuqoriga", lambda: self._kochir(-1)), ("▼ Pastga", lambda: self._kochir(1)),
+                    ("✎ Tahrirlash", self._tahrir_tanlangan)]
+        if len(korsat) > 1:
+            tugmalar.append(("👁 Ko'rinish", self._korinish))
+        if yangi_qator:
+            tugmalar += [("＋ Yangi qator", lambda: self._tahrir(None)), ("✖ O'chirish", self._ochir)]
+        for txt, cmd in tugmalar:
             ttk.Button(side, text=txt, command=cmd, width=16).pack(fill=tk.X, pady=2)
 
         tree.bind("<Double-1>", self._tahrir_tanlangan)
         tree.bind("<Return>", self._tahrir_tanlangan)
-        tree.bind("<space>", self._korinish)
-        tree.bind("<Delete>", lambda e: self._ochir())
+        if len(korsat) > 1:
+            tree.bind("<space>", self._korinish)
+        if yangi_qator:
+            tree.bind("<Delete>", lambda e: self._ochir())
         self.yangila(0)
 
     # ── ko'rsatish ────────────────────────────────────────────────────
@@ -144,7 +154,7 @@ class QatorJadvali:
             v = tk.StringVar(value=val)
             e = ttk.Entry(d, textvariable=v, width=52 if (k == "nom" or royxat) else 30)
             e.grid(row=r, column=1, sticky=tk.W, padx=8, pady=4)
-            if k == "kod" and not yangi:
+            if (k == "kod" and not yangi) or k in self.faqat_oqish:
                 e.configure(state="readonly")   # kod = natija kaliti; mavjud qatorda o'zgarmaydi
             vs[k] = v
         r = len(self.maydonlar)

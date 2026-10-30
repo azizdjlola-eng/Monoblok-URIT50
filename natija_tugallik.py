@@ -73,11 +73,17 @@ PANEL_AZOLARI = {
 
 
 def panel_azolari(nom) -> set:
-    """Tahlil panel bo'lsa — a'zolarining tahlil_id lari, aks holda bo'sh set."""
+    """Tahlil panel bo'lsa — a'zolarining tahlil_id lari, aks holda bo'sh set.
+    Monoblokda ID lar bio_blanka sozlamasidan (katalog boshqa bo'lsa); u yo'q joyda
+    (masalan LIMS) — yuqoridagi standart."""
     n = _norm(nom)
     for kalit, azolar in PANEL_AZOLARI.items():
         if kalit in n:
-            return azolar
+            try:
+                import bio_blanka as _bbl
+                return set(_bbl.panel_azolari("buyrak" if "buyrak" in kalit else "lipid"))
+            except Exception:
+                return azolar
     return set()
 
 _BOSHLIQ = re.compile(r"\s+")
