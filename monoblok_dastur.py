@@ -11010,6 +11010,14 @@ class MonoblokApp:
                     ensure_norma_tahlil_id()
                 except Exception as _me:
                     print(f"   [OGOHLANTIRISH] norma ID migratsiyasi: {_me}")
+                # Mijoz buildi: o'rnatish tugadi deb belgilanmagan bo'lsa — usta o'zi ochiladi
+                try:
+                    if _mijoz_belgisi():
+                        import ornatish_ustasi as _ou
+                        if not _ou.tugadimi():
+                            self.root.after(3000, self.ornatish_ustasi)
+                except Exception as _oe:
+                    print(f"   [OGOHLANTIRISH] o'rnatish ustasi: {_oe}")
             else:
                 print("   [XATO] MySQL serverga ulanib bo'lmadi")
                 self.root.after(0, lambda: self.status_var.set("[OGOHLANTIRISH] MySQL serverga ulanib bo'lmadi"))
@@ -23412,10 +23420,11 @@ Sana: {_sana_fmt}"""
             doc.save(yol)
         os.startfile(yol)
 
-    def open_system_settings(self):
+    def open_system_settings(self, tab=None):
         """Tizim sozlamalari oynasi — baza va analizatorlarning ulanishini
         kodga tegmasdan o'zgartirish (IP, port, COM, parol va h.k.).
-        Sozlamalar analizator_config.json ga saqlanadi."""
+        Sozlamalar analizator_config.json ga saqlanadi.
+        tab — shu so'z bor varaq ochiladi (masalan "Siydik"; o'rnatish ustasidan)."""
         import socket as _socket_mod
         import datetime as _dt
 
@@ -24741,6 +24750,200 @@ Sana: {_sana_fmt}"""
                   bg="#2E7D32", fg="white", font=("Arial", 10, "bold"),
                   padx=16, pady=5, cursor="hand2").pack(side=tk.RIGHT, padx=4)
         ttk.Button(btn_frame, text="Bekor qilish", command=dialog.destroy).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(btn_frame, text="🧭 O'rnatish ustasi",
+                   command=lambda: self.ornatish_ustasi(dialog)).pack(side=tk.LEFT, padx=4)
+
+        if tab:
+            for _t in nb.tabs():
+                if tab.lower() in str(nb.tab(_t, "text")).lower():
+                    nb.select(_t)
+                    break
+
+    def ornatish_ustasi(self, parent=None):
+        """Yangi laboratoriyaga o'rnatish tekshiruvi (ornatish_ustasi.py) — har qadam
+        avtomatik tekshiriladi va tegishli sozlash oynasini ochadi."""
+        import ornatish_ustasi as _ou
+        import lab_quality
+        import chegara_sozlama
+
+        def _katalog():
+            # Tekshiruvlar fon oqimida — umumiy db_conn() emas, alohida ulanish
+            import mysql.connector as _myc
+            conn = _myc.connect(**DB_CONFIG)
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT id, nomi FROM tahlillar")
+                return {int(i): str(n or '') for i, n in cur.fetchall()}
+            finally:
+                conn.close()
+
+        def t_baza():
+            db = load_config().get("database", {})
+            n = len(_katalog())
+            return True, (f"Ulandi: {db.get('host')}:{db.get('port')} / {db.get('database')} — "
+                          f"katalogda {n} ta tahlil")
+
+        def t_klinika():
+            c = load_blanka_config()
+            m = []
+            if (c.get('klinika_nomi') or '').strip() in ('', 'Tibbiy laboratoriya'):
+                m.append("klinika nomi")
+            for k, n in (('klinika_manzil', 'manzil'), ('klinika_tel', 'telefon'),
+                         ('laborant_vrach', 'laborant vrach F.I.Sh')):
+                if not (c.get(k) or '').strip():
+                    m.append(n)
+            if not os.path.exists((c.get('logo_path') or '').strip()):
+                m.append("logo fayli")
+            if m:
+                return False, "To'ldirilmagan: " + ", ".join(m)
+            return True, f"{c.get('klinika_nomi')} — laborant vrach: {c.get('laborant_vrach')}"
+
+        def t_analizator():
+            cfg = load_config()
+            qator, xato = [], False
+            for sek, nomi, prof in (("siydik", "Siydik", "siydik_protokol"),
+                                    ("gemotologiya", "Gemotologiya", "gemo_protokol"),
+                                    ("bioximiya", "Bioximiya", "bio_protokol")):
+                a = cfg.get(sek, {})
+                try:
+                    mn = __import__(prof).PROFILES.get(a.get("model"), {}).get("name", a.get("model"))
+                except Exception:
+                    mn = a.get("model")
+                if a.get("enabled", True):
+                    ulanish = (a.get("com_port") if a.get("connection_type") == "serial"
+                               else f"{a.get('ip')}:{a.get('port')}")
+                    qator.append(f"{nomi}: {mn} ({a.get('connection_type')}, {ulanish})")
+                else:
+                    qator.append(f"{nomi}: o'chiq — natija qo'lda kiritiladi")
+                    if sek == "siydik" and not _sb.qolda_rejimmi():
+                        xato = True
+                        qator.append("   ⚠ Siydik analizatori o'chiq, lekin «Qo'lda (test poloska)» "
+                                     "rejimi tanlanmagan: Siydik → «Blanka va kiritish»")
+            return (False if xato else None), "\n".join(qator)
+
+        def _turlar_holati(kat):
+            nom_qoida = {'gemo_cbc': _nom_cbc, 'siydik_umumiy': _nom_siydik_umumiy,
+                         'bilirubin': _nom_bilirubin, 'lipid': _nom_lipid, 'buyrak': _nom_buyrak,
+                         'gtt': _nom_gtt, 'hav_combo': _nom_hav_combo, 'revmo_avto': _nom_revmo_avto,
+                         'revmo_qolda': _nom_revmo_qolda, 'qondan_mazok': _nom_qondan_mazok}
+            bog = _tt.sozlama(force=True)
+            out = {}
+            for k, fn in nom_qoida.items():
+                ids = [i for i in bog.get(k, []) if i in kat]
+                if not ids:
+                    ids = [i for i, n in kat.items() if fn(n)]
+                out[k] = ids
+            return out
+
+        def t_turlar():
+            kat = _katalog()
+            h = _turlar_holati(kat)
+            yoq = [_tt.TURLAR[k][0] for k, v in h.items() if not v]
+            asosiy = [_tt.TURLAR[k][0] for k in ('gemo_cbc', 'siydik_umumiy') if not h[k]]
+            if asosiy:
+                return False, ("Katalogda topilmadi: " + ", ".join(asosiy) +
+                               " — analizator natijasi bemorga tushmaydi! Katalogga bog'lang.")
+            if yoq:
+                return None, ("Asosiylari topildi. Katalogda yo'q (laboratoriyada bo'lsa — bog'lang): "
+                              + ", ".join(yoq))
+            return True, "Hamma maxsus tahlillar katalogda topildi"
+
+        _AZO_KALIT = {'tc': ('xolest',), 'hdl': ('hdl', 'yuqori'), 'ldl': ('ldl', 'past'),
+                      'tg': ('trigli',), 'mochevina': ('mochevina', 'urea', 'karbamid'),
+                      'kreatinin': ('kreatinin',), 'siydik_kislota': ('siydik kislota', 'mochevaya'),
+                      'albumin': ('albumin',)}
+
+        def t_panel():
+            kat = _katalog()
+            h = _turlar_holati(kat)
+            m, bor = [], False
+            for pk in ('lipid', 'buyrak'):
+                if not h.get(pk):
+                    continue
+                bor = True
+                for tid, kod in _bb.panel_azolari(pk, _bb.sozlama(force=True)).items():
+                    n = kat.get(tid)
+                    if n is None:
+                        m.append(f"{pk}.{kod}: ID {tid} katalogda yo'q")
+                    elif not any(s in n.lower() for s in _AZO_KALIT.get(kod, (kod,))):
+                        m.append(f"{pk}.{kod}: ID {tid} = «{n}»")
+            if m:
+                return False, "A'zo ID lari mos emas:\n   " + "\n   ".join(m)
+            if not bor:
+                return None, "Lipid / Buyrak paneli katalogda yo'q — tekshirish shart emas"
+            return True, "Panel a'zolari katalogga mos"
+
+        def t_chegara():
+            kat = _katalog()
+            c = lab_quality.load_config(force=True)
+            m = []
+            for sek in ('panic', 'delta'):
+                for k, v in (c.get(sek, {}).get('analytes') or {}).items():
+                    if not isinstance(v, dict):
+                        continue
+                    kn = chegara_sozlama._katalog_nomi(k, v.get('name', ''), kat)
+                    if kn.startswith('⚠'):
+                        m.append(f"{k} «{v.get('name', '')}» → {kn}")
+            if m:
+                return False, (f"{len(m)} ta chegara boshqa tahlilga tushadi:\n   " + "\n   ".join(m[:6])
+                               + ("\n   ..." if len(m) > 6 else ""))
+            return True, "Kritik qiymat / delta-check ID lari katalogga mos"
+
+        def t_blanka():
+            return None, ("Gemo / Siydik / Bioximiya blankalarini «👁 Namuna blanka» bilan ko'rib, "
+                          "nomlarni laboratoriya odatiga moslang")
+
+        def t_printer():
+            c = load_config().get("printer", {})
+            pr = (c.get("blanka_printer") or '').strip() or "Windows standart printeri"
+            try:
+                wd = get_save_dir()
+            except Exception as e:
+                wd = f"(aniqlanmadi: {e})"
+            return None, f"Printer: {pr}\nWord blankalar papkasi: {wd}"
+
+        def t_litsenziya():
+            try:
+                from litsenziya import litsenziya_manager as _lm
+                n = _lm.holatni_tekshir(online=False)
+                return bool(n.yaroqli), f"{getattr(n.holat, 'value', n.holat)} — {n.xabar}"
+            except Exception as e:
+                return None, f"Litsenziya moduli: {e}"
+
+        p = parent or self.root
+        qadamlar = [
+            {"nomi": "Baza ulanishi", "tekshir": t_baza, "ochish": lambda: self.open_system_settings("Baza"),
+             "izoh": "Hamma kompyuterlar bitta bazaga ulanadi (blanka sozlamalari ham bazada)."},
+            {"nomi": "Klinika ma'lumotlari, logo, laborant vrach", "tekshir": t_klinika,
+             "ochish": self.open_blanka_settings, "tugma": "Blanka Sozlamalari..."},
+            {"nomi": "Analizatorlar", "tekshir": t_analizator,
+             "ochish": lambda: self.open_system_settings("Siydik"),
+             "izoh": "Har analizator: model, ulanish. Analizator yo'q bo'lsa — «Yoqilgan» ni olib "
+                     "tashlang (siydikda «Qo'lda — test poloska» rejimi)."},
+            {"nomi": "Maxsus tahlillarni katalogga bog'lash", "tekshir": t_turlar,
+             "ochish": lambda: _tt.ochish_oyna(p, eski_qoidalar={
+                 'gemo_cbc': _nom_cbc, 'siydik_umumiy': _nom_siydik_umumiy, 'bilirubin': _nom_bilirubin,
+                 'lipid': _nom_lipid, 'buyrak': _nom_buyrak, 'gtt': _nom_gtt, 'hav_combo': _nom_hav_combo,
+                 'revmo_avto': _nom_revmo_avto, 'revmo_qolda': _nom_revmo_qolda,
+                 'qondan_mazok': _nom_qondan_mazok})},
+            {"nomi": "Panel a'zolarining tahlil ID lari (Lipid, Buyrak)", "tekshir": t_panel,
+             "ochish": lambda: _bb.ochish_oyna(p, namuna_fn=self._bio_blanka_namuna,
+                                               saqlangach_fn=_bio_panel_idlarini_yangila),
+             "tugma": "Bioximiya blankasi..."},
+            {"nomi": "Kritik qiymat va delta-check chegaralari", "tekshir": t_chegara,
+             "ochish": lambda: chegara_sozlama.ochish_oyna(p)},
+            {"nomi": "Gemotologiya blankasi va normalari", "tekshir": t_blanka,
+             "ochish": lambda: _gb.ochish_oyna(p, namuna_fn=self._gemo_blanka_namuna)},
+            {"nomi": "Siydik blankasi va kiritish usuli", "tekshir": t_blanka,
+             "ochish": lambda: _sb.ochish_oyna(p, namuna_fn=self._siydik_blanka_namuna)},
+            {"nomi": "Maxsus jadvallar normalari (Nechiporenko, Spermogramma ...)", "tekshir": None,
+             "ochish": lambda: _mj.ochish_oyna(p)},
+            {"nomi": "Printer va saqlash papkalari", "tekshir": t_printer,
+             "ochish": lambda: self.open_system_settings("Printer")},
+            {"nomi": "Litsenziya", "tekshir": t_litsenziya,
+             "ochish": lambda: self.open_system_settings("Litsenziya")},
+        ]
+        return _ou.ochish_oyna(p, qadamlar)
 
     def open_blanka_settings(self):
         """Blanka sozlamalari oynasini ochish — to'liq universal"""
