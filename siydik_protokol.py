@@ -88,10 +88,26 @@ CODE_ALIASES = {
 }
 
 
+def _foydalanuvchi_kodi(code: str):
+    """Blanka sozlamasidagi "Analizator kodlari" (siydik_blanka) — analizator boshqa nom
+    bilan yuborsa yoki foydalanuvchi qo'shgan ko'rsatkich. Topilmasa None."""
+    try:
+        import siydik_blanka as _sbl
+        kod = _sbl.analizator_kod_xaritasi().get(re.sub(r"[\s.\-_/:]", "", str(code)).upper())
+    except Exception:
+        return None
+    if kod and kod.upper() == "PH":
+        return "pH"   # parser kanonigi
+    return kod
+
+
 def normalize_code(code: str):
     """Analizator kodini kanonik kodga keltiradi. Noma'lum bo'lsa None."""
     if not code:
         return None
+    uk = _foydalanuvchi_kodi(code)
+    if uk:
+        return uk
     key = re.sub(r"[\s.\-_/]", "", str(code)).upper()
     if key in CODE_ALIASES:
         return CODE_ALIASES[key]

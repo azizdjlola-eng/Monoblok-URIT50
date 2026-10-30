@@ -3384,6 +3384,7 @@ def _create_blood_group_table(doc, raw_value):
 # gistogramma. Tizim Sozlamalari → 🔵 Gemotologiya → «🧾 Blanka ko'rinishi».
 # Quyidagi nomlar — standart qiymatlar (eski kod bilan moslik uchun).
 import gemo_blanka as _gb
+import siydik_blanka as _sb   # siydik blankasi + qo'lda (test poloska) kiritish sozlamasi
 CBC_HEMA_ROWS = [(q["nom"], q["kod"], q["birlik"], q["norma"]) for q in _gb.DEFAULT_QATORLAR]
 CBC_HEMA_3DIFF_ROWS = _gb.DIFF3_KODLAR
 CBC_HEMA_5DIFF_KEYS = _gb.DIFF5_KODLAR
@@ -3667,8 +3668,11 @@ def _add_hema_histograms_to_doc(doc: Document, rd: dict, sample_id):
         print(f"[OGOHLANTIRISH] Gistogramma blankaga qo'shilmadi: {e}")
 
 
-def create_urine_full_table_in_doc(doc: Document, result_data, order_info: dict):
-    """Siydik tahlili — Kimyoviy tahlil (URIT-50) + Cho'kma mikroskopiyasi. Rang: norma=qora, past=ko'k, yuqori=qizil."""
+def create_urine_full_table_in_doc(doc: Document, result_data, order_info: dict, blanka_sozlama=None):
+    """Siydik tahlili — Kimyoviy tahlil (analizator / test poloska) + Cho'kma mikroskopiyasi.
+    Rang: norma=qora, past=ko'k, yuqori=qizil. Qatorlar, nomlar, normalar, bo'limlar —
+    siydik_blanka sozlamasidan (blanka_sozlama — namuna uchun saqlanmagan sozlama)."""
+    _ss = blanka_sozlama or _sb.sozlama()
     rd = {}
     if result_data:
         try:
@@ -3679,23 +3683,38 @@ def create_urine_full_table_in_doc(doc: Document, result_data, order_info: dict)
         rd = {}
     all_analytes = rd.get('all_analytes', {})
     mikro = rd.get('mikroskopiya', {})
-    try:
-        from urine_window import PARAM_NAMES as _PNAMES
-    except Exception:
-        _PNAMES = {}
-    MIKRO_FIELDS = [
-        ('SEC', "Epiteliy: yassi", "1.0-15", "ko'ruv maydonida"),
-        ('TEC', "Epiteliy: o'tuvchi", "manfiy", "preparatda"),
-        ('RTEC', "Epiteliy: buyrak", "manfiy", "preparatda"),
-        ('WBC', "Leykotsitlar", "0-7", "ko'ruv maydonida"),
-        ('RBC-D', "Eritrotsitlar: o'zgargan", "1-2", "ko'ruv maydonida"),
-        ('RBC-U', "Eritrotsitlar: o'zgarmagan", "0-1", "ko'ruv maydonida"),
-        ('CAST', "Silindrlar", "manfiy", "preparatda"),
-        ('MUC', "Shilliq", "manfiy", "preparatda"),
-        ('CRY', "Tuzlar", "manfiy", "preparatda"),
-        ('BACT', "Bakteriyalar", "manfiy", "preparatda"),
-        ('YEAST', "Zamburug'lar", "manfiy", "preparatda"),
-    ]
+    # «Kod» ustuni sozlamada o'chirilsa — jadvallar 4 ustunli (kenglik Ko'rsatkichga qo'shiladi)
+    _kod_ust = bool(_ss.get("kod_ustuni", True))
+    _HDRS = ["Ko'rsatkich", "Kod", "Natija", "Norma", "O'lchov birligi"] if _kod_ust else \
+        ["Ko'rsatkich", "Natija", "Norma", "O'lchov birligi"]
+    _WIDTHS = [4.5, 2.0, 5.0, 3.5, 4.0] if _kod_ust else [6.5, 5.0, 3.5, 4.0]
+    _NAT_I = 2 if _kod_ust else 1
+
+    def _qator_yoz(tbl, matnlar, color, bold_nat):
+        """[nom, kod, natija, norma, birlik] → qator (Kod ustuni o'chiq bo'lsa tashlanadi)."""
+        if not _kod_ust:
+            matnlar = [matnlar[0]] + matnlar[2:]
+        row = tbl.add_row()
+        _keep_row_together(row)
+        for i, txt in enumerate(matnlar):
+            p = row.cells[i].paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.LEFT if i in (0, _NAT_I + 1) else WD_ALIGN_PARAGRAPH.CENTER
+            _set_para_spacing(p, 0, 0, line_spacing=1)
+            _add_run_tnr(p, txt, 11, bold=(i == _NAT_I and bold_nat),
+                         color_rgb=color if i == _NAT_I else None)
+
+    def _jadval():
+        tbl = doc.add_table(rows=1, cols=len(_HDRS))
+        tbl.style = 'Table Grid'
+        tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+        _apply_table_widths(tbl, _WIDTHS)
+        for cell, hdr in zip(tbl.rows[0].cells, _HDRS):
+            _set_cell_shading(cell, TABLE_HEADER_HEX)
+            ph = cell.paragraphs[0]
+            ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _set_para_spacing(ph, 0, 0, line_spacing=1)
+            _add_run_tnr(ph, hdr, 11, bold=True)
+        return tbl
     # ACR (Mikroalbumin/Kreatinin nisbati) — KDIGO 3 bosqichli shkalasi
     # (A1/A2/A3). Norma ustunida natijaga mos KELGAN BITTA bosqich chiqadi
     # (boshqa qatorlar kabi bir qatorli) — barcha 3 tasini birga ko'rsatish
@@ -3704,24 +3723,16 @@ def create_urine_full_table_in_doc(doc: Document, result_data, order_info: dict)
     # natijasining o'z kategoriyasidan (< / oraliq / >) aniqlanadi.
     # _ACR_BOSQICH_NORMA faqat kategoriya aniqlanmagan kamdan-kam holatda
     # zaxira sifatida ishlatiladi.
-    _ACR_BOSQICH_NORMA = ("A1 (norma): 0-3.3; "
-                          "A2 (mikroalbuminuriya): 3.4-33.9; "
-                          "A3 (klinik albuminuriya): 34-999")
-    URIT_NORMA = {'LEU': '(0) manfiy', 'KET': '(0) manfiy', 'NIT': '(0) manfiy', 'URO': '(3.2-16)  normal',
-                  'BIL': '(0) manfiy', 'GLU': '<2.8', 'PRO': '<0.15', 'SG': '1.010-1.025',
-                  'PH': '5.5-7.0', 'BLD': '<10', 'Vc': '(0) manfiy', 'MA': '<20', 'Ca': '1.5-9.0',
-                  'CR': '2.0-22.0', 'ACR': _ACR_BOSQICH_NORMA}
-    URIT_UNITS = {'LEU': 'Leyk/mkl', 'KET': 'Mmol/l', 'NIT': 'Mmol/l', 'URO': 'Mkmol/l',
-                  'BIL': 'Mkmol/l', 'GLU': 'Mmol/l', 'PRO': 'G/l', 'SG': 'g/l',
-                  'PH': '', 'BLD': 'Erit/mkl', 'Vc': 'Mmol/l', 'MA': 'Mg/l',
-                  'Ca': 'Mmol/l', 'CR': 'Mmol/l', 'ACR': 'mg/mmol'}
+    # Norma/birlik/nom — siydik_blanka sozlamasidagi kimyoviy qatorlardan (ACR standart
+    # normasi = siydik_blanka.ACR_BOSQICH_NORMA)
     _manba = str(rd.get('source') or '')
+    _anal = _sb.analizator_nomi(_ss)
     if _manba == "Qo'lda":
         meta = "Kimyoviy tahlil (test poloska, qo'lda kiritilgan)"
     elif "qo'lda" in _manba.lower():
-        meta = "Kimyoviy tahlil (URIT-50 Analizator, qo'lda tuzatilgan)"
+        meta = f"Kimyoviy tahlil ({_anal} Analizator, qo'lda tuzatilgan)"
     else:
-        meta = f"Kimyoviy tahlil (URIT-50 Analizator)"
+        meta = f"Kimyoviy tahlil ({_anal} Analizator)"
     if rd.get('sid'):
         meta += f" Sample ID: {rd.get('sid')}"
     if rd.get('sno'):
@@ -3734,21 +3745,12 @@ def create_urine_full_table_in_doc(doc: Document, result_data, order_info: dict)
     miqdori = (fizik.get('miqdori') or '').strip()
     rangi = (fizik.get('rangi') or '').strip()
     tiniqligi = (fizik.get('tiniqligi') or '').strip()
-    if True:
-        h_fizik = doc.add_paragraph()
-        h_fizik.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        _set_para_spacing(h_fizik, 0, 0, line_spacing=1.0)
-        _add_run_tnr(h_fizik, "FIZIK-KIMYOVIY XOSSALARI", 12, bold=True)
-        tbl_fizik = doc.add_table(rows=1, cols=5)
-        tbl_fizik.style = 'Table Grid'
-        tbl_fizik.alignment = WD_TABLE_ALIGNMENT.CENTER
-        _apply_table_widths(tbl_fizik, [4.5, 2.0, 5.0, 3.5, 4.0])
-        for cell, hdr in zip(tbl_fizik.rows[0].cells, ["Ko'rsatkich", "Kod", "Natija", "Norma", "O'lchov birligi"]):
-            _set_cell_shading(cell, TABLE_HEADER_HEX)
-            ph = cell.paragraphs[0]
-            ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            _set_para_spacing(ph, 0, 0, line_spacing=1)
-            _add_run_tnr(ph, hdr, 11, bold=True)
+    h_fizik = doc.add_paragraph()
+    h_fizik.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_para_spacing(h_fizik, 0, 0, line_spacing=1.0)
+    _add_run_tnr(h_fizik, "FIZIK-KIMYOVIY XOSSALARI", 12, bold=True)
+    if _ss.get("fizik_bolim", True):   # miqdori/rangi/tiniqligi jadvali (sozlamada o'chirilishi mumkin)
+        tbl_fizik = _jadval()
         _RANGI_QIZIL = {'qizg\'ish', 'qon aralash', 'bulutli', 'qizil'}
         _RANGI_KOK   = {'shaffof'}
         _TINIQ_QIZIL = {'xira', 'bulutli', "cho'kindi bilan"}
@@ -3757,8 +3759,6 @@ def create_urine_full_table_in_doc(doc: Document, result_data, order_info: dict)
             ("Rangi", "-", rangi, "och sariq", "-"),
             ("Tiniqligi", "-", tiniqligi, "Tiniq", "-"),
         ]:
-            row = tbl_fizik.add_row()
-            _keep_row_together(row)
             if kod == 'ml':
                 fizik_color = _get_value_color_for_norma(natija, norma, False) if natija else RGBColor(0xFF, 0x00, 0x00)
             elif nomi == "Rangi":
@@ -3777,27 +3777,11 @@ def create_urine_full_table_in_doc(doc: Document, result_data, order_info: dict)
                     fizik_color = RGBColor(0xFF, 0x00, 0x00)
                 else:
                     fizik_color = None  # tiniq, biroz xira → qora
-            for i, txt in enumerate([nomi, kod, natija or '-', norma, birlik]):
-                p = row.cells[i].paragraphs[0]
-                p.alignment = WD_ALIGN_PARAGRAPH.CENTER if i in (1, 2, 4) else WD_ALIGN_PARAGRAPH.LEFT
-                _set_para_spacing(p, 0, 0, line_spacing=1)
-                _add_run_tnr(p, txt, 11, bold=(i == 2 and bool(natija)), color_rgb=fizik_color if i == 2 else None)
-    HEADER_COLOR = TABLE_HEADER_HEX
-    table = doc.add_table(rows=1, cols=5)
-    table.style = 'Table Grid'
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    _apply_table_widths(table, [4.5, 2.0, 5.0, 3.5, 4.0])
-    for cell, hdr in zip(table.rows[0].cells, ["Ko'rsatkich", "Kod", "Natija", "Norma", "O'lchov birligi"]):
-        _set_cell_shading(cell, HEADER_COLOR)
-        ph = cell.paragraphs[0]
-        ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        _set_para_spacing(ph, 0, 0, line_spacing=1)
-        _add_run_tnr(ph, hdr, 11, bold=True)
+            _qator_yoz(tbl_fizik, [nomi, kod, natija or '-', norma, birlik], fizik_color, bool(natija))
+    table = _jadval()
     # Analizator * belgisi asosida patologik natijalarni aniqlash
     abnormal_set = set(rd.get('abnormal_params') or [])
     has_analyzer_flags = 'abnormal_params' in rd
-    # Blankada to'liq nomlar (UI dan farqli)
-    _BLANK_NAMES = {'ACR': "Mikroalbumin/Kreatinin nisbati"}
     # ACR (Mikroalbumin/Kreatinin nisbati) haqiqiy qiymatini MA/CR dan
     # hisoblash — MA cheklangan (">=150" kabi) bo'lsa ham hisoblanadi,
     # natija shunga mos ">"/"<" belgisi bilan chiqadi (masalan MA=">=150",
@@ -3818,12 +3802,12 @@ def create_urine_full_table_in_doc(doc: Document, result_data, order_info: dict)
                     _acr_calc_prefix = '<'
     except Exception:
         pass
-    for code in ['LEU', 'KET', 'NIT', 'URO', 'BIL', 'GLU', 'PRO', 'SG', 'PH', 'BLD', 'Vc', 'MA', 'Ca', 'CR', 'ACR']:
-        name = _BLANK_NAMES.get(code) or _PNAMES.get(code, code)
-        val = (all_analytes.get(code) or '').strip()
-        # 11-parametrli poloskа: MA, Ca, CR, ACR yo'q bo'lsa — qatorni o'tkazib yuborish
-        if code in ('MA', 'Ca', 'CR', 'ACR') and not val:
-            continue
+    # Qatorlar, tartib, nomlar — siydik_blanka (11-parametrli poloskada MA/Ca/CR/ACR
+    # natija bo'lmasa chiqmaydi; qo'lda kiritilgan MA+CR dan ACR hisoblanadi)
+    for _sq in _sb.kimyoviy_qatorlar(all_analytes, _ss):
+        code, name, val = _sq["kod"], _sq["nom"], _sq["natija"]
+        if code == 'ACR' and not val and _acr_calculated is not None:
+            val = str(_acr_calculated)
         # ACR: Natija ustunida FAQAT hisoblangan (MA/CR) raqam chiqadi —
         # analizatorning o'z bucket-oralig'i ("3.4-33.9" kabi) BU YERDA
         # ko'rsatilmaydi, chunki u aslida norma (kategoriya chegarasi),
@@ -3857,8 +3841,8 @@ def create_urine_full_table_in_doc(doc: Document, result_data, order_info: dict)
                     _acr_stage_norma = f"{_ACR_BASE}   (>33.9) Klinik albuminuriya"
                 elif '-' in val_raw:
                     _acr_stage_norma = f"{_ACR_BASE}   (3.4-33.9) Mikroalbuminuriya"
-        norma = _acr_stage_norma if (code == 'ACR' and _acr_stage_norma) else URIT_NORMA.get(code, '-')
-        birlik = URIT_UNITS.get(code, '')
+        norma = _acr_stage_norma if (code == 'ACR' and _acr_stage_norma) else (_sq["norma"] or '-')
+        birlik = _sq["birlik"]
         if has_analyzer_flags:
             # Analizator * belgisi bor — shu asosda rang
             color = RGBColor(0xFF, 0x00, 0x00) if code in abnormal_set else None
@@ -3868,43 +3852,25 @@ def create_urine_full_table_in_doc(doc: Document, result_data, order_info: dict)
                 color = RGBColor(0xFF, 0x00, 0x00)
             else:
                 color = _get_value_color_for_norma(val, norma, False)
-        row = table.add_row()
-        _keep_row_together(row)
-        cells = row.cells
-        for i, txt in enumerate([name, code, val or '-', norma, birlik]):
-            p = cells[i].paragraphs[0]
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER if i in (1, 2, 4) else WD_ALIGN_PARAGRAPH.LEFT
-            _set_para_spacing(p, 0, 0, line_spacing=1)
-            _add_run_tnr(p, txt, 11, bold=(i == 2 and bool(val)), color_rgb=color if i == 2 else None)
+        # ACR analizatordan kelmagan, MA/CR dan o'zimiz hisobladik (qo'lda poloska) — >=3.4 qizil
+        if code == 'ACR' and not _sq["natija"] and _acr_calculated is not None:
+            color = RGBColor(0xFF, 0x00, 0x00) if _acr_calculated >= 3.4 else None
+        _qator_yoz(table, [name, _sq["qisqa"], val or '-', norma, birlik], color, bool(val))
+    if not _ss.get("mikroskopiya_bolim", True):
+        return
     h2 = doc.add_paragraph()
     h2.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _set_para_spacing(h2, 0, 0, line_spacing=1.0)
     _add_run_tnr(h2, "CHO'KMA MIKROSKOPIYASI", 12, bold=True)
-    tbl2 = doc.add_table(rows=1, cols=5)
-    tbl2.style = 'Table Grid'
-    tbl2.alignment = WD_TABLE_ALIGNMENT.CENTER
-    _apply_table_widths(tbl2, [4.5, 2.0, 5.0, 3.5, 4.0])
-    for cell, hdr in zip(tbl2.rows[0].cells, ["Ko'rsatkich", "Kod", "Natija", "Norma", "O'lchov birligi"]):
-        _set_cell_shading(cell, HEADER_COLOR)
-        ph = cell.paragraphs[0]
-        ph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        _set_para_spacing(ph, 0, 0, line_spacing=1)
-        _add_run_tnr(ph, hdr, 11, bold=True)
-    for kod, nomi, norma, birlik in MIKRO_FIELDS:
-        val = (mikro.get(kod) or '').strip()
+    tbl2 = _jadval()
+    for _mq in _sb.mikro_qatorlar(mikro, _ss):
+        kod, nomi, norma, birlik, val = _mq["kod"], _mq["nom"], _mq["norma"], _mq["birlik"], _mq["natija"]
         is_sec = (kod == 'SEC')
         if not val:
             color = RGBColor(0xFF, 0x00, 0x00)  # bo'sh natija qizil
         else:
             color = _get_value_color_for_norma(val, norma, is_sec)
-        row = tbl2.add_row()
-        _keep_row_together(row)
-        cells = row.cells
-        for i, txt in enumerate([nomi, kod, val or '-', norma, birlik]):
-            p = cells[i].paragraphs[0]
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER if i in (1, 2, 4) else WD_ALIGN_PARAGRAPH.LEFT
-            _set_para_spacing(p, 0, 0, line_spacing=1)
-            _add_run_tnr(p, txt, 11, bold=(i == 2 and bool(val)), color_rgb=color if i == 2 else None)
+        _qator_yoz(tbl2, [nomi, _mq["qisqa"], val or '-', norma, birlik], color, bool(val))
 
 def _apply_table_widths(table, widths_cm):
     """
@@ -17951,54 +17917,32 @@ Sana: {_sana_fmt}"""
 
         win.focus_set()
 
-    # Siydik kimyoviy qismini QO'LDA kiritish (test poloska) — analizator ishlamasa
-    # yoki poloska tugaganda (mijoz talabi, 2026-10-11). Variantlar URIT poloskasi
-    # darajalari; Combobox tahrirlanadi — istalgan qiymat yozilishi mumkin.
-    SIYDIK_QOLDA_VARIANT = {
-        'LEU': ["manfiy", "± (15)", "+1 (70)", "+2 (125)", "+3 (500)"],
-        'KET': ["manfiy", "± (0.5)", "+1 (1.5)", "+2 (4.0)", "+3 (8.0)"],
-        'NIT': ["manfiy", "musbat"],
-        'URO': ["normal", "+1 (33)", "+2 (66)", "+3 (131)"],
-        'BIL': ["manfiy", "+1 (8.6)", "+2 (33)", "+3 (100)"],
-        'GLU': ["manfiy", "± (5.5)", "+1 (14)", "+2 (28)", "+3 (55)", "+4 (111)"],
-        'PRO': ["manfiy", "± (0.15)", "+1 (0.3)", "+2 (1.0)", "+3 (3.0)"],
-        'SG':  ["1.000", "1.005", "1.010", "1.015", "1.020", "1.025", "1.030"],
-        'PH':  ["5.0", "5.5", "6.0", "6.5", "7.0", "7.5", "8.0", "8.5", "9.0"],
-        'BLD': ["manfiy", "± (10)", "+1 (25)", "+2 (80)", "+3 (200)"],
-        'Vc':  ["manfiy", "± (0.6)", "+1 (1.4)", "+2 (2.8)"],
-        'MA':  ["10", "30", "80", "150"],
-        'Ca':  ["1.0", "2.5", "5.0", "7.5", "10"],
-        'CR':  ["0.9", "4.4", "8.8", "17.7", "26.5"],
-    }
-    SIYDIK_QOLDA_KODLAR = ['LEU', 'KET', 'NIT', 'URO', 'BIL', 'GLU', 'PRO', 'SG',
-                           'PH', 'BLD', 'Vc', 'MA', 'Ca', 'CR']
-
-    @staticmethod
-    def _siydik_qolda_patologikmi(code, val):
-        """Qo'lda kiritilgan siydik qiymati normadan chetmi (blankada qizil)."""
-        v = (val or '').strip().lower()
-        if not v:
-            return False
-        if code in ('SG', 'PH', 'MA', 'Ca', 'CR'):
-            try:
-                n = float(re.search(r'[\d.]+', v.replace(',', '.')).group(0))
-            except Exception:
-                return False
-            chegara = {'SG': (1.010, 1.025), 'PH': (5.5, 7.0), 'MA': (0, 20),
-                       'Ca': (1.5, 9.0), 'CR': (2.0, 22.0)}[code]
-            return not (chegara[0] <= n <= chegara[1])
-        return v not in ('manfiy', 'neg', 'negative', '-', '(0) manfiy', 'normal', 'norma')
+    # Siydik kimyoviy qismini QO'LDA kiritish (test poloska) — analizator ishlamasa,
+    # poloska tugaganda (mijoz talabi, 2026-10-11) yoki laboratoriyada analizator
+    # umuman yo'q bo'lsa (30.10.2026). Qatorlar va poloska darajalari (variantlar)
+    # siydik_blanka sozlamasidan; Combobox tahrirlanadi — istalgan qiymat yozilishi mumkin.
 
     def _siydik_qolda_taklif(self, test_id, test_name):
-        """Siydik natijasi analizatordan kelmagan — qo'lda kiritishni taklif qiladi.
+        """Siydik natijasi yo'q — qo'lda kiritish (yoki analizator natijasini tanlash).
+        Sozlamada "qo'lda (test poloska)" rejimi bo'lsa — savolsiz qo'lda oynasi.
         True — taklif ko'rsatildi (chaqiruvchi boshqa ish qilmasin)."""
-        if not messagebox.askyesno(
+        if not _sb.qolda_rejimmi():
+            # Analizator ID/barkod yubormasligi mumkin (Mindray UA-66) — natija Siydik
+            # oynasida turadi, u yerdan «Natijani qo'shish» bilan bemorga biriktiriladi
+            javob = messagebox.askyesnocancel(
                 "Siydik tahlili",
-                "Bu tahlil natijasi analizatordan (URIT) hali kelmagan.\n\n"
-                "Kimyoviy qismni (test poloska) QO'LDA kiritasizmi?\n\n"
-                "«Yo'q» — analizatordan kutiladi («● Siydik» tugmasi).",
-                parent=self.root):
-            return True
+                f"Bu tahlil natijasi analizatordan ({_sb.analizator_nomi()}) hali kelmagan "
+                "yoki bemorga biriktirilmagan.\n\n"
+                "«Ha» — kimyoviy qismni (test poloska) QO'LDA kiritish\n"
+                "«Yo'q» — Siydik oynasini ochib, analizator natijasini tanlash\n"
+                "        (analizator barkod/ID yubormasa — shu yo'l bilan)\n"
+                "«Bekor» — hech narsa qilmaslik",
+                parent=self.root)
+            if javob is None:
+                return True
+            if javob is False:
+                self.open_urine_raw()
+                return True
         self._show_urine_mikroskopiya_popup(
             test_id, test_name,
             {'type': 'urine', 'result': "qo'lda", 'source': "Qo'lda",
@@ -18015,25 +17959,15 @@ Sana: {_sana_fmt}"""
         """
         import json as _json
 
-        # ── Mikroskopiya maydonlari ────────────────────────────────────────
-        MIKRO_FIELDS = [
-            # (kod,     uzbek nomi,                     norma,     birlik)
-            ('SEC',   "Epiteliy: yassi",               "1.0-15",  "ko'ruv maydonida"),
-            ('TEC',   "Epiteliy: o'tuvchi",            "manfiy",  "preparatda"),
-            ('RTEC',  "Epiteliy: buyrak",              "manfiy",  "preparatda"),
-            ('WBC',   "Leykotsitlar",                  "0-7",     "ko'ruv maydonida"),
-            ('RBC-D', "Eritrotsitlar: o'zgargan",      "1-2",     "ko'ruv maydonida"),
-            ('RBC-U', "Eritrotsitlar: o'zgarmagan",    "0-1",     "ko'ruv maydonida"),
-            ('CAST',  "Silindrlar",                    "manfiy",  "preparatda"),
-            ('MUC',   "Shilliq",                       "manfiy",  "preparatda"),
-            ('CRY',   "Tuzlar",                        "manfiy",  "preparatda"),
-            ('BACT',  "Bakteriyalar",                  "manfiy",  "preparatda"),
-            ('YEAST', "Zamburug'lar",                  "manfiy",  "preparatda"),
-        ]
+        # ── Mikroskopiya maydonlari (siydik_blanka sozlamasidan, yashirinlarsiz) ──
+        _ss = _sb.sozlama()
+        MIKRO_FIELDS = [(q["kod"], q["nom"], q["norma"], q["birlik"])
+                        for q in _sb.mikro_kiritish_qatorlari(_ss)]
+        _mikro_variant = {q["kod"]: q.get("variantlar") or [] for q in _ss["mikroskopiya"]}
 
         sid          = result_dict.get('sid', '')
         sno          = result_dict.get('sno', '')
-        source       = result_dict.get('source', 'URIT-50')
+        source       = result_dict.get('source') or _sb.analizator_nomi(_ss)
         all_analytes = result_dict.get('all_analytes', {})
         saved_mikro  = result_dict.get('mikroskopiya', {})
 
@@ -18131,24 +18065,17 @@ Sana: {_sana_fmt}"""
         left = ttk.LabelFrame(
             content,
             text=("KIMYOVIY TAHLIL — qo'lda (test poloska)  ✏" if qolda
-                  else "URIT-50 Analitlari  (faqat ko'rish)"),
+                  else f"{_sb.analizator_nomi(_ss)} natijalari  (faqat ko'rish)"),
             padding=4)
         left.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=(0, 6))
         left.configure(width=360 if qolda else 340)
         left.pack_propagate(False)
 
-        try:
-            from urine_window import PARAM_NAMES as _PNAMES, ANALYTES as _URIT_AN
-        except Exception:
-            _PNAMES  = {}
-            _URIT_AN = list(all_analytes.keys())
+        # Kimyoviy qatorlar (nom, birlik, poloska darajalari) — siydik_blanka sozlamasi
+        _kim_qatorlar = {q["kod"]: q for q in _ss["kimyoviy"]}
 
         qolda_vars = {}   # {kod: StringVar} — faqat qolda rejimida
         if qolda:
-            _BIRLIK = {'LEU': 'Leyk/mkl', 'KET': 'mmol/l', 'NIT': '', 'URO': 'mkmol/l',
-                       'BIL': 'mkmol/l', 'GLU': 'mmol/l', 'PRO': 'g/l', 'SG': '',
-                       'PH': '', 'BLD': 'Erit/mkl', 'Vc': 'mmol/l', 'MA': 'mg/l',
-                       'Ca': 'mmol/l', 'CR': 'mmol/l'}
             tk.Label(left, text="Ro'yxatdan tanlang yoki qiymatni o'zingiz yozing.\n"
                                 "Bo'sh ko'rsatkich blankada «-» bo'lib chiqadi.\n"
                                 "MA, Ca, CR — faqat 14 parametrli poloskada (bo'sh = chiqmaydi).",
@@ -18156,19 +18083,18 @@ Sana: {_sana_fmt}"""
                      ).pack(anchor="w", pady=(0, 4))
             qgrid = tk.Frame(left)
             qgrid.pack(fill=tk.BOTH, expand=True)
-            for r_i, code in enumerate(self.SIYDIK_QOLDA_KODLAR):
-                if code == 'MA':
+            for r_i, _sq in enumerate(_sb.qolda_qatorlar(_ss)):
+                code = _sq["kod"]
+                if code == 'MA' and r_i:
                     ttk.Separator(qgrid, orient=tk.HORIZONTAL).grid(
-                        row=r_i * 2 - 1 if r_i else 0, column=0, columnspan=3,
-                        sticky="ew", pady=(4, 2))
-                tk.Label(qgrid, text=f"{_PNAMES.get(code, code)} ({code})",
+                        row=r_i * 2 - 1, column=0, columnspan=3, sticky="ew", pady=(4, 2))
+                tk.Label(qgrid, text=f"{_sq['nom']} ({code})",
                          font=("Arial", 9), anchor="w", width=19
                          ).grid(row=r_i * 2, column=0, sticky="w", pady=1)
-                qv = tk.StringVar(value=(all_analytes.get(code) or '').strip())
-                ttk.Combobox(qgrid, textvariable=qv, width=12,
-                             values=self.SIYDIK_QOLDA_VARIANT.get(code, [])
+                qv = tk.StringVar(value=_sb.qiymat(all_analytes, code))
+                ttk.Combobox(qgrid, textvariable=qv, width=12, values=_sq.get("variantlar") or []
                              ).grid(row=r_i * 2, column=1, sticky="w", pady=1, padx=2)
-                tk.Label(qgrid, text=_BIRLIK.get(code, ''), font=("Arial", 8), fg="#666"
+                tk.Label(qgrid, text=_sq.get("birlik", ''), font=("Arial", 8), fg="#666"
                          ).grid(row=r_i * 2, column=2, sticky="w", padx=2)
                 qolda_vars[code] = qv
 
@@ -18185,11 +18111,14 @@ Sana: {_sana_fmt}"""
             utree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
             usb.pack(side=tk.RIGHT, fill=tk.Y)
 
-            for code in _URIT_AN:
-                val = (all_analytes.get(code) or '').strip()
+            _kodlar = [q["kod"] for q in _ss["kimyoviy"]]
+            _kodlar += [k for k in all_analytes if k not in _kodlar and k.upper() not in
+                        {x.upper() for x in _kodlar}]
+            for code in _kodlar:
+                val = _sb.qiymat(all_analytes, code)
                 if not val:
                     continue
-                name_disp = _PNAMES.get(code, code)
+                name_disp = _kim_qatorlar.get(code, {}).get("nom", code)
                 is_ab = ('+' in val or '>' in val or '<' in val) and \
                         'normal' not in val.lower() and 'neg' not in val.lower()
                 utree.insert("", tk.END, values=(name_disp, val),
@@ -18414,7 +18343,8 @@ Sana: {_sana_fmt}"""
                 init_val = auto_mikro[code]['value']
                 row_bg   = '#f5f7fa' if idx % 2 == 0 else 'white'
             else:
-                init_val = '-'
+                # siz qo'shgan qator — bo'sh (blankada "natija bo'lsa" chiqadi)
+                init_val = '-' if code in _sb.DEFAULT_MIKRO_KODLAR else ''
                 row_bg   = '#f5f7fa' if idx % 2 == 0 else 'white'
 
             row = tk.Frame(rows_frame, bg=row_bg)
@@ -18447,6 +18377,10 @@ Sana: {_sana_fmt}"""
                     command=lambda v=var, it=pick_items, ti=pick_title:
                         _open_picker(ti, it, v)
                 ).pack(side=tk.LEFT, padx=(0, 4))
+            elif _mikro_variant.get(code):
+                # Sozlamada tanlov variantlari berilgan qator (masalan Trixomonadalar)
+                ent = ttk.Combobox(row, textvariable=var, width=14, values=_mikro_variant[code])
+                ent.pack(side=tk.LEFT, padx=4)
             else:
                 ent = tk.Entry(row, textvariable=var, width=10, font=("Arial", 10),
                                fg=ab_fg, relief=tk.SOLID, borderwidth=1)
@@ -18464,16 +18398,19 @@ Sana: {_sana_fmt}"""
             _avto_oxirgi = {k: entry_vars[k].get() for k in ('WBC', 'RBC-D', 'RBC-U', 'BACT')
                             if k in entry_vars and not (saved_mikro.get(k) or '')}
 
+            def _qv(k):   # sozlamada yashirilgan bo'lishi mumkin
+                return qolda_vars[k].get() if k in qolda_vars else ''
+
             def _avto_yangila(*_a):
-                yangi = _calc_auto_mikro(qolda_vars['LEU'].get(), qolda_vars['BLD'].get(),
-                                         qolda_vars['NIT'].get())
+                yangi = _calc_auto_mikro(_qv('LEU'), _qv('BLD'), _qv('NIT'))
                 for k, eski in list(_avto_oxirgi.items()):
                     if entry_vars[k].get() == eski:
                         entry_vars[k].set(yangi[k]['value'])
                         _avto_oxirgi[k] = yangi[k]['value']
 
             for _k in ('LEU', 'BLD', 'NIT'):
-                qolda_vars[_k].trace_add("write", _avto_yangila)
+                if _k in qolda_vars:
+                    qolda_vars[_k].trace_add("write", _avto_yangila)
 
         # ── Quyi tugmalar ─────────────────────────────────────────────────
         btn_frame = tk.Frame(popup, pady=8, padx=10)
@@ -18499,7 +18436,7 @@ Sana: {_sana_fmt}"""
                 result_dict['all_analytes'] = aa
                 # Blanka ranglari shu ro'yxatdan olinadi (analizator * belgisi o'rnida)
                 result_dict['abnormal_params'] = [
-                    k for k, v in aa.items() if self._siydik_qolda_patologikmi(k, v)]
+                    k for k, v in aa.items() if _sb.patologikmi(_kim_qatorlar.get(k, {}), v)]
                 result_dict['type'] = 'urine'
                 _src = str(result_dict.get('source') or '')
                 if not _src or _src == "Qo'lda":
@@ -23175,6 +23112,51 @@ Sana: {_sana_fmt}"""
             doc.save(yol)
         os.startfile(yol)
 
+    def _siydik_blanka_namuna(self, sozlama):
+        """Siydik blanka sozlamasi oynasidan: saqlanmagan sozlama bilan namuna Word blanka.
+        Ma'lumot — bazadagi eng so'nggi siydik natijasi, bo'lmasa namunaviy raqamlar."""
+        import tempfile
+        rd = None
+        try:
+            conn = db_conn()
+            cur = conn.cursor(dictionary=True)
+            cur.execute("""SELECT result_data FROM test_results
+                           WHERE result_data LIKE '%%"type": "urine"%%'
+                             AND result_data LIKE '%%mikroskopiya%%'
+                           ORDER BY updated_at DESC LIMIT 1""")
+            row = cur.fetchone()
+            conn.close()
+            if row and row.get('result_data'):
+                rd = json.loads(row['result_data'])
+        except Exception as e:
+            print(f"[ma'lumot] namuna uchun siydik natijasi topilmadi: {e}")
+        if not isinstance(rd, dict):
+            rd = {'type': 'urine', 'sid': 'NAMUNA', 'source': _sb.analizator_nomi(sozlama),
+                  'all_analytes': {'LEU': '+1 (70)', 'KET': '-', 'NIT': '-', 'URO': 'Normal',
+                                   'BIL': '-', 'GLU': '-', 'PRO': '+-', 'SG': '1.020', 'PH': '6.0',
+                                   'BLD': '-', 'Vc': '-'},
+                  'abnormal_params': ['LEU', 'PRO'],
+                  'fizik': {'miqdori': '50', 'rangi': 'Och sariq', 'tiniqligi': 'Tiniq'},
+                  'mikroskopiya': {'SEC': '2-3', 'TEC': '-', 'RTEC': '-', 'WBC': '50-60',
+                                   'RBC-D': '1-2', 'RBC-U': '0-1', 'CAST': '-', 'MUC': '-',
+                                   'CRY': '-', 'BACT': '-', 'YEAST': '-'}}
+        doc = Document()
+        try:
+            sec = doc.sections[0]
+            sec.left_margin = sec.right_margin = Cm(1.0)
+            sec.top_margin = sec.bottom_margin = Cm(1.0)
+        except Exception:
+            pass
+        create_urine_full_table_in_doc(doc, json.dumps(rd, ensure_ascii=False), {},
+                                       blanka_sozlama=sozlama)
+        yol = os.path.join(tempfile.gettempdir(), "siydik_blanka_namuna.docx")
+        try:
+            doc.save(yol)
+        except PermissionError:
+            yol = os.path.join(tempfile.gettempdir(), f"siydik_blanka_namuna_{datetime.now():%H%M%S}.docx")
+            doc.save(yol)
+        os.startfile(yol)
+
     def open_system_settings(self):
         """Tizim sozlamalari oynasi — baza va analizatorlarning ulanishini
         kodga tegmasdan o'zgartirish (IP, port, COM, parol va h.k.).
@@ -23441,6 +23423,11 @@ Sana: {_sana_fmt}"""
 
         ttk.Button(tab_s, text="Ulanishni tekshirish", command=test_siydik).grid(
             row=8, column=0, columnspan=2, pady=8)
+
+        # Blanka ko'rinishi + kiritish usuli (analizator / qo'lda test poloska) — siydik_blanka.py
+        ttk.Button(tab_s, text="🧾 Blanka va kiritish (nomlar, poloska, qo'lda rejim)...",
+                   command=lambda: _sb.ochish_oyna(dialog, namuna_fn=self._siydik_blanka_namuna)
+                   ).grid(row=9, column=0, columnspan=2, pady=(0, 8))
 
 
         # ───────────── GEMOTOLOGIYA (universal: Mindray / Genrui / Edan / Dymind / Sysmex ...) ─────
@@ -27039,7 +27026,7 @@ Sana: {_sana_fmt}"""
                 'type':         'urine',
                 'sid':          sample_id,
                 'sno':          sno,
-                'source':       'URIT-50',
+                'source':       _sb.analizator_nomi(),   # sozlamadagi model (URIT-50, UA-66 ...)
                 'all_analytes': all_analytes,
                 'abnormal_params': patient_info.get('abnormal_params', []),
             }
@@ -27061,7 +27048,7 @@ Sana: {_sana_fmt}"""
 
         # ── Mavjud natija ustiga yozilsa — TASDIQ so'raymiz ──────────────────
         if not self._confirm_result_overwrite(
-                plan, manba=f"URIT-50 siydik (Sample ID: {display_id})"):
+                plan, manba=f"{_sb.analizator_nomi()} siydik (Sample ID: {display_id})"):
             self.status_var.set(
                 "[BEKOR] Siydik natijasi yangilanmadi — eski natija qoldi")
             return 0

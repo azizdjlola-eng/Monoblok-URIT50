@@ -57,6 +57,16 @@ PARAM_NAMES = {
 }
 
 
+def _qoshimcha_analitlar():
+    """Blanka sozlamasida foydalanuvchi qo'shgan kimyoviy ko'rsatkichlar (siydik_blanka) —
+    analizator yuborsa natijadan tashlab yuborilmasin."""
+    try:
+        import siydik_blanka as _sbl
+        return [k for k in _sbl.qoshimcha_kodlar() if k not in ANALYTES]
+    except Exception:
+        return []
+
+
 def detect_strip_type(sdata):
     """MA satri faylda mavjud bo'lsa — 14-param, bo'lmasa — 11-param.
     Natija qiymatiga qaralmas — faqat MA satri borligiga qaraladi.
@@ -412,7 +422,7 @@ def open_window(parent=None, on_import_callback=None):
         auto_type = sdata.get('strip_type', 14)
         override  = strip_override[0]
         active_type = override if override in (11, 14) else auto_type
-        active_analytes = ANALYTES_11 if active_type == 11 else ANALYTES
+        active_analytes = (ANALYTES_11 if active_type == 11 else ANALYTES) + _qoshimcha_analitlar()
 
         # Tests dict qurish — faqat aktiv analitlar
         tests = {}
@@ -734,7 +744,7 @@ def parse_result(file_path):
             'file_path': file_path
         }
         starred = set(parsed.get('ABNORMAL') or [])
-        for code in ANALYTES:
+        for code in ANALYTES + _qoshimcha_analitlar():
             # Oyna 'PH' ishlatadi, parser 'pH' qaytaradi
             val = parsed.get(code) or parsed.get('pH' if code == 'PH' else code) or ''
             result_dict[fname_key][code] = val

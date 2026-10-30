@@ -269,9 +269,9 @@ def ochish_oyna(parent, namuna_fn=None):
     namuna_fn(sozlama_dict) — joriy (saqlanmagan) sozlama bilan namuna blanka ochadi."""
     import tkinter as tk
     from tkinter import ttk, messagebox
+    from blanka_qator_ui import QatorJadvali
 
     s = json.loads(json.dumps(sozlama(force=True)))
-    qatorlar = s["qatorlar"]
 
     win = tk.Toplevel(parent)
     win.title("🧾 Umumiy qon tahlili — blanka ko'rinishi")
@@ -305,172 +305,36 @@ def ochish_oyna(parent, namuna_fn=None):
     # ── Qatorlar jadvali ──────────────────────────────────────────────
     mid = ttk.Frame(win)
     mid.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
-    cols = ("korsat", "kod", "nom", "qisqa", "birlik", "norma", "kodlar")
-    hdrs = {"korsat": "Ko'rinish", "kod": "Kod", "nom": "Blankadagi nomi (Ko'rsatkich)",
-            "qisqa": "Qisqa nom", "birlik": "Birlik", "norma": "Standart norma",
-            "kodlar": "Analizator kodlari"}
-    widths = {"korsat": 95, "kod": 70, "nom": 330, "qisqa": 80, "birlik": 70, "norma": 100, "kodlar": 160}
-    tree = ttk.Treeview(mid, columns=cols, show="headings", selectmode="browse")
-    for c in cols:
-        tree.heading(c, text=hdrs[c])
-        tree.column(c, width=widths[c], anchor=tk.W if c in ("nom", "kodlar") else tk.CENTER,
-                    stretch=(c == "nom"))
-    tree.tag_configure("yashirin", foreground="#999999")
-    tree.tag_configure("yangi", foreground="#1565C0")
-    sb = ttk.Scrollbar(mid, orient=tk.VERTICAL, command=tree.yview)
-    tree.configure(yscrollcommand=sb.set)
-    tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-    sb.pack(side=tk.LEFT, fill=tk.Y)
-
-    def _yangila(sel_idx=None):
-        tree.delete(*tree.get_children())
-        for i, q in enumerate(qatorlar):
-            tags = []
-            if q["korsat"] == "yashirin":
-                tags.append("yashirin")
-            elif q["kod"] not in DEFAULT_KODLAR:
-                tags.append("yangi")
-            tree.insert("", tk.END, iid=str(i), tags=tags, values=(
-                KORSAT.get(q["korsat"], q["korsat"]), q["kod"], q["nom"], q["qisqa"],
-                q["birlik"], q["norma"], ", ".join(q.get("kodlar") or [])))
-        if sel_idx is not None and 0 <= sel_idx < len(qatorlar):
-            tree.selection_set(str(sel_idx))
-            tree.see(str(sel_idx))
-
-    def _tanlangan():
-        sel = tree.selection()
-        return int(sel[0]) if sel else None
-
-    # ── Bitta qatorni tahrirlash ──────────────────────────────────────
-    def _tahrir(idx=None):
-        yangi = idx is None
-        q = _toza_qator({"kod": "", "korsat": "auto"}) if yangi else dict(qatorlar[idx])
-        d = tk.Toplevel(win)
-        d.title("Yangi qator" if yangi else f"Qator: {q['kod']}")
-        d.transient(win)
-        try:
-            d.grab_set()
-        except Exception:
-            pass
-        vs = {}
-        maydonlar = [
-            ("kod", "Kod (kalit):"), ("nom", "Blankadagi nomi:"), ("qisqa", "Qisqa nom:"),
-            ("birlik", "Birlik:"), ("norma", "Standart norma:"), ("kodlar", "Analizator kodlari:"),
-        ]
-        for r, (k, lbl) in enumerate(maydonlar):
-            ttk.Label(d, text=lbl).grid(row=r, column=0, sticky=tk.W, padx=8, pady=4)
-            val = ", ".join(q.get("kodlar") or []) if k == "kodlar" else q.get(k, "")
-            v = tk.StringVar(value=val)
-            e = ttk.Entry(d, textvariable=v, width=52 if k == "nom" else 30)
-            e.grid(row=r, column=1, sticky=tk.W, padx=8, pady=4)
-            if k == "kod" and not yangi:
-                e.configure(state="readonly")   # kod = natija kaliti; standart qatorda o'zgarmaydi
-            vs[k] = v
-        r = len(maydonlar)
-        ttk.Label(d, text="Ko'rinish:").grid(row=r, column=0, sticky=tk.W, padx=8, pady=4)
-        v_k = tk.StringVar(value=KORSAT[q["korsat"]])
-        ttk.Combobox(d, textvariable=v_k, values=list(KORSAT.values()), state="readonly",
-                     width=16).grid(row=r, column=1, sticky=tk.W, padx=8, pady=4)
-        ttk.Label(d, foreground="#555", justify=tk.LEFT, wraplength=520, text=(
-            "• Kod — analizatordan kelgan natija kaliti (WBC, Lymph#, Mid% ...). Yangi parametr "
-            "uchun istalgan qisqa kod yozing (masalan IG#, NRBC%).\n"
-            "• Analizator kodlari — analizator shu ko'rsatkichni qanday nom/raqam bilan yuborsa "
-            "(OBX-3 / ASTM), vergul bilan: masalan  IG#, 10014. Dastur tanimagan kodlar "
-            "logs\\bc20s_YYYYMMDD.log faylida «Noma'lum kodlar» qatorida ko'rinadi.\n"
-            "• Avto — 5-diff qatorlar faqat natija bo'lsa, Mid/Gran 5-diff natijada yashiriladi, "
-            "qo'shimcha qatorlar faqat natija bo'lsa chiqadi.\n"
-            "• Standart norma — yosh/jinsga mos norma topilmasa ishlatiladi.")
-        ).grid(row=r + 1, column=0, columnspan=2, sticky=tk.W, padx=8, pady=(6, 4))
-
-        def _ok():
-            kod = vs["kod"].get().strip()
-            if not kod:
-                messagebox.showwarning("Kod", "Kod bo'sh bo'lmasin.", parent=d)
-                return
-            if yangi and any(x["kod"].upper() == kod.upper() for x in qatorlar):
-                messagebox.showwarning("Kod", f"«{kod}» kodi allaqachon bor.", parent=d)
-                return
-            rej = next((k for k, t in KORSAT.items() if t == v_k.get()), "auto")
-            nq = _toza_qator({
-                "kod": kod, "nom": vs["nom"].get(), "qisqa": vs["qisqa"].get(),
-                "birlik": vs["birlik"].get(), "norma": vs["norma"].get(),
-                "kodlar": vs["kodlar"].get(), "korsat": rej})
-            if not vs["nom"].get().strip():
-                nq["nom"] = kod
-            if yangi:
-                pos = _tanlangan()
-                pos = len(qatorlar) if pos is None else pos + 1
-                qatorlar.insert(pos, nq)
-            else:
-                pos = idx
-                qatorlar[idx] = nq
-            d.destroy()
-            _yangila(pos)
-
-        bf = ttk.Frame(d)
-        bf.grid(row=r + 2, column=0, columnspan=2, sticky=tk.E, padx=8, pady=8)
-        ttk.Button(bf, text="OK", command=_ok).pack(side=tk.RIGHT, padx=4)
-        ttk.Button(bf, text="Bekor", command=d.destroy).pack(side=tk.RIGHT, padx=4)
-        d.bind("<Return>", lambda e: _ok())
-        d.bind("<Escape>", lambda e: d.destroy())
-
-    def _tahrir_tanlangan(_e=None):
-        i = _tanlangan()
-        if i is not None:
-            _tahrir(i)
-
-    def _kochir(delta):
-        i = _tanlangan()
-        if i is None:
-            return
-        j = i + delta
-        if 0 <= j < len(qatorlar):
-            qatorlar[i], qatorlar[j] = qatorlar[j], qatorlar[i]
-            _yangila(j)
-
-    def _korinish_almashtir(_e=None):
-        """Bo'sh joy — Ko'rinish rejimini navbat bilan almashtirish."""
-        i = _tanlangan()
-        if i is None:
-            return
-        keys = list(KORSAT)
-        qatorlar[i]["korsat"] = keys[(keys.index(qatorlar[i]["korsat"]) + 1) % len(keys)]
-        _yangila(i)
-
-    def _ochir():
-        i = _tanlangan()
-        if i is None:
-            return
-        q = qatorlar[i]
-        if q["kod"] in DEFAULT_KODLAR:
-            if messagebox.askyesno("Standart qator",
-                                   f"«{q['nom']}» standart qator — o'chirib bo'lmaydi.\n"
-                                   "Yashirin qilinsinmi?", parent=win):
-                q["korsat"] = "yashirin"
-                _yangila(i)
-            return
-        if messagebox.askyesno("O'chirish", f"«{q['nom']}» ({q['kod']}) qatori o'chirilsinmi?", parent=win):
-            del qatorlar[i]
-            _yangila(min(i, len(qatorlar) - 1))
+    jad = QatorJadvali(
+        mid, s["qatorlar"], DEFAULT_QATORLAR,
+        [("kod", "Kod", 70, False), ("nom", "Blankadagi nomi (Ko'rsatkich)", 330, False),
+         ("qisqa", "Qisqa nom", 80, False), ("birlik", "Birlik", 70, False),
+         ("norma", "Standart norma", 100, False), ("kodlar", "Analizator kodlari", 160, True)],
+        KORSAT, _toza_qator,
+        yordam=("• Kod — analizatordan kelgan natija kaliti (WBC, Lymph#, Mid% ...). Yangi parametr "
+                "uchun istalgan qisqa kod yozing (masalan IG#, NRBC%).\n"
+                "• Analizator kodlari — analizator shu ko'rsatkichni qanday nom/raqam bilan yuborsa "
+                "(OBX-3 / ASTM), vergul bilan: masalan  IG#, 10014. Dastur tanimagan kodlar "
+                "logs\\bc20s_YYYYMMDD.log faylida «Noma'lum kodlar» qatorida ko'rinadi.\n"
+                "• Avto — 5-diff qatorlar faqat natija bo'lsa, Mid/Gran 5-diff natijada yashiriladi, "
+                "qo'shimcha qatorlar faqat natija bo'lsa chiqadi.\n"
+                "• Standart norma — yosh/jinsga mos norma topilmasa ishlatiladi."))
 
     def _standart():
         if not messagebox.askyesno("Standart", "Barcha qatorlar va sozlamalar standart holatga "
                                    "qaytarilsinmi?\n(Qo'shilgan qatorlar o'chadi.)", parent=win):
             return
-        qatorlar[:] = json.loads(json.dumps(DEFAULT_QATORLAR))
+        jad.standartga()
         v_sarl.set(DEFAULT["sarlavha"]); v_anal.set("")
         v_meta.set(True); v_qisq.set(True); v_hist.set(True)
-        _yangila(0)
 
     def _yig():
         return {"sarlavha": v_sarl.get().strip() or DEFAULT["sarlavha"],
                 "analizator_nomi": v_anal.get().strip(),
                 "meta_qatori": bool(v_meta.get()), "qisqa_nom_ustuni": bool(v_qisq.get()),
-                "gistogramma": bool(v_hist.get()), "qatorlar": qatorlar}
+                "gistogramma": bool(v_hist.get()), "qatorlar": jad.qatorlar}
 
     def _namuna():
-        if namuna_fn is None:
-            return
         try:
             namuna_fn(_toza(_yig()))
         except Exception as e:
@@ -484,19 +348,6 @@ def ochish_oyna(parent, namuna_fn=None):
         else:
             messagebox.showerror("Xato", "Sozlamani saqlab bo'lmadi!", parent=win)
 
-    side = ttk.Frame(mid)
-    side.pack(side=tk.LEFT, fill=tk.Y, padx=(8, 0))
-    for txt, cmd in [("▲ Yuqoriga", lambda: _kochir(-1)), ("▼ Pastga", lambda: _kochir(1)),
-                     ("✎ Tahrirlash", _tahrir_tanlangan), ("👁 Ko'rinish", _korinish_almashtir),
-                     ("＋ Yangi qator", lambda: _tahrir(None)), ("✖ O'chirish", _ochir),
-                     ("↺ Standart", _standart)]:
-        ttk.Button(side, text=txt, command=cmd, width=16).pack(fill=tk.X, pady=2)
-
-    tree.bind("<Double-1>", _tahrir_tanlangan)
-    tree.bind("<Return>", _tahrir_tanlangan)
-    tree.bind("<space>", _korinish_almashtir)
-    tree.bind("<Delete>", lambda e: _ochir())
-
     ttk.Label(win, foreground="#555", justify=tk.LEFT, wraplength=1060, text=(
         "Ikki marta bosing — tahrirlash; Bo'sh joy — ko'rinishni almashtirish; ▲/▼ — tartib. "
         "Ko'k — siz qo'shgan qator, kulrang — yashirin. Rus tilidagi blankada faqat standart "
@@ -508,9 +359,9 @@ def ochish_oyna(parent, namuna_fn=None):
     tk.Button(bot, text="💾 Saqlash", command=_saqla, bg="#2E7D32", fg="white",
               font=("Arial", 10, "bold"), padx=16, pady=4, cursor="hand2").pack(side=tk.RIGHT, padx=4)
     ttk.Button(bot, text="Bekor qilish", command=win.destroy).pack(side=tk.RIGHT, padx=4)
+    ttk.Button(bot, text="↺ Standart", command=_standart).pack(side=tk.RIGHT, padx=4)
     if namuna_fn is not None:
         ttk.Button(bot, text="👁 Namuna blanka (Word)", command=_namuna).pack(side=tk.LEFT, padx=4)
 
-    _yangila(0)
     win.bind("<Escape>", lambda e: win.destroy())
     return win
