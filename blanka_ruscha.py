@@ -70,6 +70,8 @@ TARJIMA = {
     "Ayol": "Женский",
     "Erkak": "Мужской",
     "Laborant vrach": "Врач-лаборант",
+    "Tasdiqladi": "Утвердил",
+    "Laboratoriya mudiri": "Заведующий лабораторией",
     "Buyurtma №": "Заказ №",
 
     # ── Bo'lim (guruh) sarlavhalari ────────────────────────────────────────

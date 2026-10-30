@@ -429,6 +429,12 @@ def load_blanka_config() -> dict:
         "klinika_manzil": "" if _mijoz else "Surxondaryo vil., Sherobod tumani, Qo'rg'on MFY,\nY. Oxunboboev ko'chasi, 57E-uy",
         "klinika_tel": "" if _mijoz else "Tel.: (998) 99-673-13-42",
         "laborant_vrach": "" if _mijoz else "Murodov A.X",
+        # Blanka pastidagi imzo rasmi (shaffof PNG), ixtiyoriy «Tasdiqladi» qatori, izoh
+        "imzo_rasm_path": "",
+        "imzo_balandlik": 1.0,       # sm
+        "tasdiq_lavozim": "Tasdiqladi:",
+        "tasdiq_fish": "",           # bo'sh = qator chiqmaydi
+        "blanka_izoh": "",           # blanka ostidagi matn (bo'sh = yo'q)
         "logo_width": 3.2,
         "logo_height": 3.2,
         "chap_panel": "barcode",
@@ -6865,6 +6871,35 @@ def add_footer(doc: Document, order_info: dict):
         para.alignment = align
         _set_para_spacing(para, 2, 2, line_spacing=1)
         _add_run_tnr(para, text, 10, bold=True)
+
+    # Blanka Sozlamalari → Klinika ma'lumotlari: imzo rasmi, «Tasdiqladi» qatori, izoh.
+    # «Laborant vrach:» matni o'zgarmaydi — PDF elektron muhr shu matnni qidiradi.
+    try:
+        _bc = load_blanka_config()
+    except Exception:
+        _bc = {}
+    _imzo = (_bc.get('imzo_rasm_path') or '').strip()
+    if _imzo and os.path.exists(_imzo):
+        try:
+            _h = max(0.4, min(float(_bc.get('imzo_balandlik') or 1.0), 3.0))
+            cells[1].paragraphs[0].add_run("  ").add_picture(_imzo, height=Cm(_h))
+        except Exception as e:
+            print(f"[OGOHLANTIRISH] imzo rasmi qo'yilmadi: {e}")
+    _tasdiq_fish = (_bc.get('tasdiq_fish') or '').strip()
+    if _tasdiq_fish:
+        row2 = sign_table.add_row().cells
+        for cell, text, align in zip(row2, ["", (_bc.get('tasdiq_lavozim') or 'Tasdiqladi:').strip(),
+                                            _tasdiq_fish], aligns):
+            para = cell.paragraphs[0]
+            para.alignment = align
+            _set_para_spacing(para, 2, 2, line_spacing=1)
+            _add_run_tnr(para, text, 10, bold=True)
+    _izoh = (_bc.get('blanka_izoh') or '').strip()
+    if _izoh:
+        p_iz = doc.add_paragraph()
+        p_iz.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_para_spacing(p_iz, 4, 0, line_spacing=1)
+        _add_run_tnr(p_iz, _izoh, 9, italic=True)
 
 def add_page_footer_to_doc(doc: Document, order_info: dict):
     dt_str = datetime.now().strftime("%d.%m.%Y")
@@ -24892,6 +24927,43 @@ Sana: {_sana_fmt}"""
             kl_fields[key] = var
         klinika_lf.columnconfigure(1, weight=1)
 
+        # Imzo rasmi / «Tasdiqladi» qatori / blanka izohi (add_footer). Imzo — laborant
+        # vrachniki: kim saqlaganidan qat'i nazar, natija uchun u javob beradi.
+        _r0 = len(kl_labels)
+        ttk.Label(klinika_lf, text="Imzo rasmi (PNG):").grid(row=_r0, column=0, sticky=tk.W, pady=2, padx=(0, 5))
+        _imzo_fr = ttk.Frame(klinika_lf)
+        _imzo_fr.grid(row=_r0, column=1, sticky=tk.EW, pady=2)
+        imzo_var = tk.StringVar(value=config.get('imzo_rasm_path', ''))
+        ttk.Entry(_imzo_fr, textvariable=imzo_var, width=38).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        def _pick_imzo():
+            from tkinter import filedialog as _fdi
+            f = _fdi.askopenfilename(title="Imzo rasmini tanlang (shaffof PNG)", parent=dialog,
+                                     filetypes=[("PNG rasm", "*.png"), ("Barcha rasmlar", "*.png *.jpg *.jpeg")])
+            if f:
+                imzo_var.set(os.path.normpath(f))
+        ttk.Button(_imzo_fr, text="Tanlash...", command=_pick_imzo).pack(side=tk.LEFT, padx=4)
+        ttk.Button(_imzo_fr, text="Tozalash", command=lambda: imzo_var.set("")).pack(side=tk.LEFT)
+        ttk.Label(_imzo_fr, text="  Balandligi (sm):").pack(side=tk.LEFT)
+        imzo_h_var = tk.StringVar(value=str(config.get('imzo_balandlik', 1.0)))
+        ttk.Entry(_imzo_fr, textvariable=imzo_h_var, width=5).pack(side=tk.LEFT)
+        ttk.Label(klinika_lf, text="Tasdiq qatori:").grid(row=_r0 + 1, column=0, sticky=tk.W, pady=2, padx=(0, 5))
+        _tq_fr = ttk.Frame(klinika_lf)
+        _tq_fr.grid(row=_r0 + 1, column=1, sticky=tk.EW, pady=2)
+        tasdiq_lav_var = tk.StringVar(value=config.get('tasdiq_lavozim', 'Tasdiqladi:'))
+        tasdiq_fish_var = tk.StringVar(value=config.get('tasdiq_fish', ''))
+        ttk.Entry(_tq_fr, textvariable=tasdiq_lav_var, width=20).pack(side=tk.LEFT)
+        ttk.Label(_tq_fr, text=" F.I.Sh:").pack(side=tk.LEFT)
+        ttk.Entry(_tq_fr, textvariable=tasdiq_fish_var, width=28).pack(side=tk.LEFT, padx=(2, 0))
+        ttk.Label(klinika_lf, text="(F.I.Sh bo'sh — qator chiqmaydi; masalan «Laboratoriya mudiri:»)",
+                  foreground="#777").grid(row=_r0 + 2, column=1, sticky=tk.W)
+        ttk.Label(klinika_lf, text="Blanka izohi:").grid(row=_r0 + 3, column=0, sticky=tk.NW, pady=2, padx=(0, 5))
+        izoh_txt = tk.Text(klinika_lf, height=3, width=55, font=("Arial", 9), wrap=tk.WORD)
+        izoh_txt.insert("1.0", config.get('blanka_izoh', ''))
+        izoh_txt.grid(row=_r0 + 3, column=1, sticky=tk.EW, pady=2)
+        ttk.Label(klinika_lf, text="(blanka ostida kichik kursiv: ogohlantirish, ish vaqti, sayt ...)",
+                  foreground="#777").grid(row=_r0 + 4, column=1, sticky=tk.W)
+
         # ══════════════════════════════════════════════════════════════
         # 6. RANGLAR
         # ══════════════════════════════════════════════════════════════
@@ -25201,6 +25273,14 @@ Sana: {_sana_fmt}"""
             new_config["oldingi_natija_takroriy_bemor"] = bool(old_takror_var.get())
             for key, var in kl_fields.items():
                 new_config[key] = var.get().strip()
+            new_config["imzo_rasm_path"] = imzo_var.get().strip()
+            try:
+                new_config["imzo_balandlik"] = max(0.4, min(float(imzo_h_var.get().replace(',', '.')), 3.0))
+            except Exception:
+                new_config["imzo_balandlik"] = 1.0
+            new_config["tasdiq_lavozim"] = tasdiq_lav_var.get().strip() or "Tasdiqladi:"
+            new_config["tasdiq_fish"] = tasdiq_fish_var.get().strip()
+            new_config["blanka_izoh"] = izoh_txt.get("1.0", "end").strip()
             for key, var in color_vars.items():
                 hex_c = var.get().strip().lstrip('#').upper()
                 new_config[key] = hex_c if len(hex_c) == 6 else config.get(key, '2E75B6')
