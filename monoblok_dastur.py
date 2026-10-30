@@ -435,6 +435,8 @@ def load_blanka_config() -> dict:
         "tasdiq_lavozim": "Tasdiqladi:",
         "tasdiq_fish": "",           # bo'sh = qator chiqmaydi
         "blanka_izoh": "",           # blanka ostidagi matn (bo'sh = yo'q)
+        "blanka_yozuv": "lotin",     # lotin | kirill (blanka_kirill.py)
+        "kirill_qoldir": "",         # kirillda lotincha qoladigan so'zlar (vergul bilan)
         "logo_width": 3.2,
         "logo_height": 3.2,
         "chap_panel": "barcode",
@@ -505,6 +507,22 @@ def _blanka_ruscha_qoshish(doc):
         ruscha_qoshish(doc)
     except Exception as e:
         print(f"[RUSCHA] Ruscha tarjima qo'shilmadi: {e}")
+    return doc
+
+
+def _blanka_kirill(doc):
+    """Blanka Sozlamalarida yozuv «Kirill» bo'lsa — tayyor blankani o'zbek kirilliga
+    o'giradi (blanka_kirill.py). Ruscha tarjimadan KEYIN chaqiriladi (u lotin matnga
+    qarab qo'shiladi). Xatolik blankani saqlashga to'sqinlik qilmaydi."""
+    try:
+        cfg = load_blanka_config()
+        if cfg.get('blanka_yozuv', 'lotin') != 'kirill':
+            return doc
+        from blanka_kirill import hujjatga
+        qoldir = [x.strip() for x in str(cfg.get('kirill_qoldir', '')).replace(';', ',').split(',')]
+        hujjatga(doc, qoldir)
+    except Exception as e:
+        print(f"[KIRILL] Kirillga o'girilmadi: {e}")
     return doc
 
 
@@ -7614,7 +7632,8 @@ def _pdf_elektron_muhr_qoy(pdf_path):
         page, anchor = None, None
         # Imzo qatori oxirgi sahifada bo'ladi — oxiridan qidiramiz
         for _pno in range(len(doc) - 1, -1, -1):
-            _hits = doc[_pno].search_for("Laborant vrach")
+            # lotin yoki kirill blanka (blanka_kirill)
+            _hits = doc[_pno].search_for("Laborant vrach") or doc[_pno].search_for("Лаборант врач")
             if _hits:
                 page, anchor = doc[_pno], _hits[-1]
                 break
@@ -8069,6 +8088,7 @@ def create_blanks_for_order(order_id: int, test_results: dict = None, file_exist
                     return [full_path]
             _blanka_zaxiralash(full_path)
         _blanka_ruscha_qoshish(unified_doc)
+        _blanka_kirill(unified_doc)
         unified_doc.save(full_path)
         if os.path.exists(full_path):
             return [full_path]
@@ -9125,6 +9145,7 @@ def generate_unified_blank(order_id):
         output_filename = build_natija_filename(order_info, order_id)
         output_path = os.path.join(save_dir, output_filename)
         _blanka_ruscha_qoshish(doc)
+        _blanka_kirill(doc)
         doc.save(output_path)
         return output_path
     except Exception as e:
@@ -25284,6 +25305,23 @@ Sana: {_sana_fmt}"""
                        "  (vrach/UZI blankasidagi kabi). Kerak bo'lganda yoqing.\n"
                        "• Belgi olib tashlansa: blanka odatdagidek FAQAT o'zbekcha chiqadi.",
                   foreground="#555", justify=tk.LEFT).pack(anchor=tk.W, pady=(4, 0))
+        # O'zbekcha qism yozuvi: lotin (standart) yoki kirill (blanka_kirill.py)
+        _yoz_fr = ttk.Frame(til_lf)
+        _yoz_fr.pack(anchor=tk.W, pady=(8, 0))
+        yozuv_var = tk.StringVar(value=config.get('blanka_yozuv', 'lotin'))
+        ttk.Label(_yoz_fr, text="O'zbekcha yozuv:").pack(side=tk.LEFT)
+        ttk.Radiobutton(_yoz_fr, text="Lotin", value="lotin", variable=yozuv_var).pack(side=tk.LEFT, padx=6)
+        ttk.Radiobutton(_yoz_fr, text="Kirill (Ўзбек)", value="kirill", variable=yozuv_var).pack(side=tk.LEFT)
+        _kq_fr = ttk.Frame(til_lf)
+        _kq_fr.pack(anchor=tk.W, fill=tk.X, pady=(4, 0))
+        ttk.Label(_kq_fr, text="Lotincha qoladigan so'zlar:").pack(side=tk.LEFT)
+        kirill_qoldir_var = tk.StringVar(value=config.get('kirill_qoldir', ''))
+        ttk.Entry(_kq_fr, textvariable=kirill_qoldir_var, width=44).pack(side=tk.LEFT, padx=6)
+        ttk.Label(til_lf,
+                  text="• Kirill: blanka saqlashdan oldin kirillga o'giriladi. Tahlil kodlari (WBC, HGB, ALT ...),\n"
+                       "  raqamli belgilar (10⁹/L, Lymph#) va analizator brendlari lotincha qoladi.\n"
+                       "• Lotincha qoladigan so'zlar — vergul bilan (masalan klinika brendi: MEDLINE).",
+                  foreground="#555", justify=tk.LEFT).pack(anchor=tk.W, pady=(4, 0))
 
         # ══════════════════════════════════════════════════════════════
         # 6.55. OLDINGI NATIJA USTUNI — doimiy bemorlar uchun dinamika
@@ -25460,6 +25498,8 @@ Sana: {_sana_fmt}"""
                 "ong_panel": ong_var.get(),
                 "qr_link_template": qr_link_var.get().strip(),
                 "blanka_ruscha": bool(ruscha_var.get()),
+                "blanka_yozuv": yozuv_var.get() if yozuv_var.get() in ("lotin", "kirill") else "lotin",
+                "kirill_qoldir": kirill_qoldir_var.get().strip(),
                 "pdf_muhr": bool(muhr_on_var.get()),
                 "pdf_muhr_path": muhr_path_var.get().strip(),
             }
