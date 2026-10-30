@@ -20,7 +20,6 @@ Saqlanadi: analizator_config.json → "siydik_blanka" (Tizim Sozlamalari → �
 """
 
 import json
-import os
 import re
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -118,14 +117,6 @@ KORSAT = {
 _KESH = {"mtime": None, "cfg": None}
 
 
-def _config_path():
-    try:
-        import monoblok_db_config as _mc
-        return _mc.CONFIG_PATH
-    except Exception:
-        return ""
-
-
 def _royxat(x):
     if isinstance(x, str):
         x = x.replace(";", ",").split(",")
@@ -171,37 +162,17 @@ def _toza(raw) -> dict:
 
 
 def sozlama(force=False) -> dict:
-    """Joriy sozlama (fayl o'zgarmaguncha keshdan)."""
-    path = _config_path()
-    try:
-        mt = os.path.getmtime(path) if path and os.path.exists(path) else None
-    except Exception:
-        mt = None
-    if not force and _KESH["cfg"] is not None and _KESH["mtime"] == mt:
-        return _KESH["cfg"]
-    raw = None
-    if mt is not None:
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                raw = (json.load(f) or {}).get("siydik_blanka")
-        except Exception as e:
-            print(f"[OGOHLANTIRISH] siydik_blanka sozlamasi o'qilmadi: {e}")
-    cfg = _toza(raw)
-    _KESH.update(mtime=mt, cfg=cfg, xarita_cfg=None)
-    return cfg
+    """Joriy sozlama — bazadan (hamma kompyuterda bir xil), baza ishlamasa mahalliy
+    nusxa (markaziy_sozlama). Faqat o'zgarganda qayta quriladi."""
+    import markaziy_sozlama as _ms
+    return _ms.modul_sozlama("siydik_blanka", _toza, _KESH, force, xarita_cfg=None)
 
 
 def saqla(s: dict) -> bool:
-    try:
-        import monoblok_db_config as _mc
-        cfg = _mc.load_config()
-        cfg["siydik_blanka"] = _toza(s)
-        ok = _mc.save_config(cfg)
-        _KESH.update(mtime=None, cfg=None, xarita_cfg=None)
-        return ok
-    except Exception as e:
-        print(f"[XATO] siydik_blanka saqlanmadi: {e}")
-        return False
+    """Bazaga (va mahalliy nusxaga) yozish."""
+    import markaziy_sozlama as _ms
+    return _ms.modul_saqla("siydik_blanka", _toza, s, _KESH, xarita_cfg=None)
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────

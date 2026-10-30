@@ -18,7 +18,6 @@ Saqlanadi: analizator_config.json → "tahlil_turlari": {tur: [tahlil_id, ...]}
 """
 
 import json
-import os
 import time
 
 # tur kaliti → (UI nomi, nima uchun kerak)
@@ -41,14 +40,6 @@ _KESH = {"mtime": "?", "cfg": None, "xarita": {}, "vaqt": 0.0}
 _YANGILASH_SEK = 300   # bazadagi nomlar shuncha sekundda bir qayta o'qiladi
 
 
-def _config_path():
-    try:
-        import monoblok_db_config as _mc
-        return _mc.CONFIG_PATH
-    except Exception:
-        return ""
-
-
 def _toza(raw) -> dict:
     out = {k: [] for k in TURLAR}
     if isinstance(raw, dict):
@@ -66,36 +57,17 @@ def _toza(raw) -> dict:
 
 
 def sozlama(force=False) -> dict:
-    path = _config_path()
-    try:
-        mt = os.path.getmtime(path) if path and os.path.exists(path) else None
-    except Exception:
-        mt = None
-    if not force and _KESH["cfg"] is not None and _KESH["mtime"] == mt:
-        return _KESH["cfg"]
-    raw = None
-    if mt is not None:
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                raw = (json.load(f) or {}).get("tahlil_turlari")
-        except Exception as e:
-            print(f"[OGOHLANTIRISH] tahlil_turlari o'qilmadi: {e}")
-    cfg = _toza(raw)
-    _KESH.update(mtime=mt, cfg=cfg, vaqt=0.0)     # nomlar xaritasi qayta quriladi
-    return cfg
+    """Joriy sozlama — bazadan (hamma kompyuterda bir xil), baza ishlamasa mahalliy
+    nusxa (markaziy_sozlama). Faqat o'zgarganda qayta quriladi."""
+    import markaziy_sozlama as _ms
+    return _ms.modul_sozlama("tahlil_turlari", _toza, _KESH, force, vaqt=0.0)
 
 
 def saqla(s: dict) -> bool:
-    try:
-        import monoblok_db_config as _mc
-        cfg = _mc.load_config()
-        cfg["tahlil_turlari"] = _toza(s)
-        ok = _mc.save_config(cfg)
-        _KESH.update(mtime="?", cfg=None, vaqt=0.0)
-        return ok
-    except Exception as e:
-        print(f"[XATO] tahlil_turlari saqlanmadi: {e}")
-        return False
+    """Bazaga (va mahalliy nusxaga) yozish."""
+    import markaziy_sozlama as _ms
+    return _ms.modul_saqla("tahlil_turlari", _toza, s, _KESH, vaqt=0.0)
+
 
 
 def _norm(nom) -> str:
