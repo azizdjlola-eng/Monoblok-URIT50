@@ -195,6 +195,7 @@ TEST_GROUPS = ['GEM', 'BIO', 'IFA', 'URINE', 'TEST', 'COAG']
 # ID lar katalogga bog'liq — bio_blanka sozlamasidan (standart: TC=43, TG=44, LDL=123,
 # HDL=124; Mochevina=42, Kreatinin=41, Albumin=35, Siydik kislota=50).
 import bio_blanka as _bb
+import maxsus_jadval as _mj   # maxsus jadvallar (Nechiporenko, Spermogramma ...) nom/norma sozlamasi
 LIPID_PANEL_MEMBER_IDS = set(_bb.panel_azolari('lipid'))
 BUYRAK_PANEL_MEMBER_IDS = set(_bb.panel_azolari('buyrak'))
 
@@ -1951,6 +1952,21 @@ def extract_tables_from_docx(source_path: str, target_doc: Document,
         traceback.print_exc()
         return False
 
+# Blanka jadvali qatorlari — nom/norma maxsus_jadval sozlamasidan moslanadi (Tizim Sozlamalari → 🧩 Maxsus tahlillar → Maxsus jadvallar)
+GINEKOLOGIK_ROWS = [
+    ("Leykotsitlar",                                                    "leykot"),
+    ("Yassi epiteliy",                                                  "yassi"),
+    ("Shilliq",                                                         "shilliq"),
+    ("Gonokokklar",                                                     "gonok"),
+    ("Trixomonada",                                                     "trixom"),
+    ("Atipik (klyucheviy) xujayralar",                                  "atipik"),
+    ("Laktobatsillalar (tayoqcha Doderleyna, gramm musbat tayoqcha)",   "lakto"),
+    ("Candida (Aitqi zamburug'i)",                                      "candida"),
+    ("Anaerob bakteriyalar (gramm manfiy tayoqcha), kokklar",           "anaerob"),
+]
+_mj.royxat('ginekologik', "Ginekologik surtma", GINEKOLOGIK_ROWS)
+
+
 def create_ginekologik_table_in_doc(doc: Document, result_json: str, order_info: dict):
     """
     Ginekologik surtma natijasini Word hujjatiga jadval sifatida qo'shish.
@@ -1990,17 +2006,7 @@ def create_ginekologik_table_in_doc(doc: Document, result_json: str, order_info:
         _add_run_tnr(ph, header, 11, bold=True)
 
     # Ma'lumot qatorlari
-    rows_data = [
-        ("Leykotsitlar",                                                    "leykot"),
-        ("Yassi epiteliy",                                                  "yassi"),
-        ("Shilliq",                                                         "shilliq"),
-        ("Gonokokklar",                                                     "gonok"),
-        ("Trixomonada",                                                     "trixom"),
-        ("Atipik (klyucheviy) xujayralar",                                  "atipik"),
-        ("Laktobatsillalar (tayoqcha Doderleyna, gramm musbat tayoqcha)",   "lakto"),
-        ("Candida (Aitqi zamburug'i)",                                      "candida"),
-        ("Anaerob bakteriyalar (gramm manfiy tayoqcha), kokklar",           "anaerob"),
-    ]
+    rows_data = _mj.moslash('ginekologik', GINEKOLOGIK_ROWS)
 
     for ko_rsatkich, kalit in rows_data:
         row   = table.add_row()
@@ -2048,6 +2054,24 @@ def _cell_write(cell, text, bold=False, align=WD_ALIGN_PARAGRAPH.CENTER):
 # ─────────────────────────────────────────────────────────────────────────────
 #  UROLOGIK SURTMA (MUJSKOY MAZOK) — Word jadval generatsiyasi
 # ─────────────────────────────────────────────────────────────────────────────
+# Blanka jadvali qatorlari — nom/norma maxsus_jadval sozlamasidan moslanadi (Tizim Sozlamalari → 🧩 Maxsus tahlillar → Maxsus jadvallar)
+UROLOGIK_ROWS = [
+    ("Leykotsitlar",                                                    "leykot",       "2-5"),
+    ("Eritrotsitlar",                                                   "eritr",        "1-2"),
+    ("Epiteliy",                                                        "epitel",       "1-10"),
+    ("Shilliq",                                                         "shilliq",      "Manfiy (-)"),
+    ("Kokklar mikroflora",                                              "kokklar",      "O'rtacha (0-5)"),
+    ("Hujayra ichi gram manfiy diplakokklari (Gonokokklar)",           "gonok",        "Manfiy (-)"),
+    ("Hujayradan tashqari gramm manfiy palochka va kokklar",           "gramm_manfiy", "Manfiy (-)"),
+    ("Hujayradan tashqari gramm musbat kokklar",                       "gramm_musbat", "Manfiy (-)"),
+    ("Trixomonada",                                                     "trixom",       "Manfiy (-)"),
+    ("Xlamidiya",                                                       "xlamid",       "Manfiy (-)"),
+    ("Ureaplazma",                                                      "ureaplaz",     "Manfiy (-)"),
+    ("Zamburug'lar",                                                    "zamburuglar",  "Manfiy (-)"),
+]
+_mj.royxat('urologik', "Urologik surtma", UROLOGIK_ROWS, norma_i=(2,))
+
+
 def create_urologik_table_in_doc(doc, result_json, order_info):
     """Urologik surtma natijasini Word hujjatiga jadval sifatida qo'shish."""
     import json
@@ -2062,20 +2086,7 @@ def create_urologik_table_in_doc(doc, result_json, order_info):
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     _add_table_header(table, ["Ko'rsatkich", "Natija", "Norma"], [11.0, 4.5, 3.5])
 
-    rows_data = [
-        ("Leykotsitlar",                                                    "leykot",       "2-5"),
-        ("Eritrotsitlar",                                                   "eritr",        "1-2"),
-        ("Epiteliy",                                                        "epitel",       "1-10"),
-        ("Shilliq",                                                         "shilliq",      "Manfiy (-)"),
-        ("Kokklar mikroflora",                                              "kokklar",      "O'rtacha (0-5)"),
-        ("Hujayra ichi gram manfiy diplakokklari (Gonokokklar)",           "gonok",        "Manfiy (-)"),
-        ("Hujayradan tashqari gramm manfiy palochka va kokklar",           "gramm_manfiy", "Manfiy (-)"),
-        ("Hujayradan tashqari gramm musbat kokklar",                       "gramm_musbat", "Manfiy (-)"),
-        ("Trixomonada",                                                     "trixom",       "Manfiy (-)"),
-        ("Xlamidiya",                                                       "xlamid",       "Manfiy (-)"),
-        ("Ureaplazma",                                                      "ureaplaz",     "Manfiy (-)"),
-        ("Zamburug'lar",                                                    "zamburuglar",  "Manfiy (-)"),
-    ]
+    rows_data = _mj.moslash('urologik', UROLOGIK_ROWS)
     for ko_rsatkich, kalit, norma in rows_data:
         row = table.add_row()
         _cell_write(row.cells[0], ko_rsatkich, align=WD_ALIGN_PARAGRAPH.LEFT)
@@ -2237,6 +2248,14 @@ def create_qondan_mazok_table_in_doc(doc, result_json, order_info):
 # ─────────────────────────────────────────────────────────────────────────────
 #  BRUSELLYOZ — Word jadval generatsiyasi
 # ─────────────────────────────────────────────────────────────────────────────
+# Blanka jadvali qatorlari — nom/norma maxsus_jadval sozlamasidan moslanadi (Tizim Sozlamalari → 🧩 Maxsus tahlillar → Maxsus jadvallar)
+BRUSELLEZ_ROWS = [
+    ("Reaksiya Xeddelsona", "xeddelson", "Manfiy (-)"),
+    ("Reaksiya Rayta",      "rayta",     "< 1:40"),
+]
+_mj.royxat('brusellez', "Brutsellez", BRUSELLEZ_ROWS, norma_i=(2,))
+
+
 def create_brusellez_table_in_doc(doc, result_json, order_info):
     """Brusellyoz (Reaksiya Xeddelsona + Rayta) natijasini Word hujjatiga qo'shish."""
     import json
@@ -2257,10 +2276,7 @@ def create_brusellez_table_in_doc(doc, result_json, order_info):
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     _add_table_header(table, ["Ko'rsatgich", "Natija", "Titr", "Me'yor"], [8.0, 4.0, 3.5, 3.5])
 
-    rows_data = [
-        ("Reaksiya Xeddelsona", "xeddelson", "Manfiy (-)"),
-        ("Reaksiya Rayta",      "rayta",     "< 1:40"),
-    ]
+    rows_data = _mj.moslash('brusellez', BRUSELLEZ_ROWS)
     PENDING = "Kutilmoqda..."
     for ko_rsatkich, kalit, me_yor in rows_data:
         row = table.add_row()
@@ -2283,6 +2299,35 @@ def create_brusellez_table_in_doc(doc, result_json, order_info):
 # ─────────────────────────────────────────────────────────────────────────────
 #  NAJAS TAHLILI — Word jadval generatsiyasi
 # ─────────────────────────────────────────────────────────────────────────────
+# Blanka jadvali qatorlari — nom/norma maxsus_jadval sozlamasidan moslanadi (Tizim Sozlamalari → 🧩 Maxsus tahlillar → Maxsus jadvallar)
+NAJAS_ROWS1 = [
+    ("Sutkalik miqdori",        "sutkalik_miqdori",  "100-250 gr"),
+    ("Namuna miqdori",           "namuna_miqdori",    "10-25 gr"),
+    ("Konsistensiyasi",          "konsistensiya",     "Shak. (yumshoq va quyuq)"),
+    ("Shakli",                   "shakli",            "Silindrsimon"),
+    ("Rangi",                    "rangi",             "Jigarrang"),
+    ("Reaksiyasi (pH)",          "reaksiya",          "Neytral"),
+    ("O'simlik kletchatkasi",    "kletchatka",        "Yo'q"),
+    ("Kraxmal",                  "kraxmal",           "Yo'q"),
+    ("Yodofil flora",            "yodofil",           "Yo'q"),
+    ("Shilliq, epiteliy",        "shilliq_epitel",    "Yo'q"),
+]
+_mj.royxat('najas', "Najas (asosiy)", NAJAS_ROWS1, norma_i=(2,))
+
+
+# Blanka jadvali qatorlari — nom/norma maxsus_jadval sozlamasidan moslanadi (Tizim Sozlamalari → 🧩 Maxsus tahlillar → Maxsus jadvallar)
+NAJAS_ROWS2 = [
+    ("Neytral yog'",             "neytral_yog"),
+    ("Shilliq (mikroskopiya)",   "shilliq_mikro"),
+    ("Leykotsitlar",             "leykot"),
+    ("Eritrotsitlar",            "eritr"),
+    ("Sodda xayvonlar (Protozoa)","protozoa"),
+    ("Gijja tuxumlari",          "gijja"),
+    ("Zamburug'lar",             "zamburuglar"),
+]
+_mj.royxat('najas_mikro', "Najas (mikroskopiya)", NAJAS_ROWS2)
+
+
 def create_najas_table_in_doc(doc, result_json, order_info):
     """Najas tahlili natijasini Word hujjatiga jadval sifatida qo'shish."""
     import json
@@ -2299,18 +2344,7 @@ def create_najas_table_in_doc(doc, result_json, order_info):
     table1.alignment = WD_TABLE_ALIGNMENT.CENTER
     _add_table_header(table1, ["Ko'rsatgich", "Natija", "Norma"], [11.0, 4.0, 4.0])
 
-    rows1 = [
-        ("Sutkalik miqdori",        "sutkalik_miqdori",  "100-250 gr"),
-        ("Namuna miqdori",           "namuna_miqdori",    "10-25 gr"),
-        ("Konsistensiyasi",          "konsistensiya",     "Shak. (yumshoq va quyuq)"),
-        ("Shakli",                   "shakli",            "Silindrsimon"),
-        ("Rangi",                    "rangi",             "Jigarrang"),
-        ("Reaksiyasi (pH)",          "reaksiya",          "Neytral"),
-        ("O'simlik kletchatkasi",    "kletchatka",        "Yo'q"),
-        ("Kraxmal",                  "kraxmal",           "Yo'q"),
-        ("Yodofil flora",            "yodofil",           "Yo'q"),
-        ("Shilliq, epiteliy",        "shilliq_epitel",    "Yo'q"),
-    ]
+    rows1 = _mj.moslash('najas', NAJAS_ROWS1)
     for ko_rsatkich, kalit, norma in rows1:
         row = table1.add_row()
         _cell_write(row.cells[0], ko_rsatkich, align=WD_ALIGN_PARAGRAPH.LEFT)
@@ -2328,15 +2362,7 @@ def create_najas_table_in_doc(doc, result_json, order_info):
     table2.alignment = WD_TABLE_ALIGNMENT.CENTER
     _add_table_header(table2, ["Ko'rsatgich", "Natija"], [13.0, 6.0])
 
-    rows2 = [
-        ("Neytral yog'",             "neytral_yog"),
-        ("Shilliq (mikroskopiya)",   "shilliq_mikro"),
-        ("Leykotsitlar",             "leykot"),
-        ("Eritrotsitlar",            "eritr"),
-        ("Sodda xayvonlar (Protozoa)","protozoa"),
-        ("Gijja tuxumlari",          "gijja"),
-        ("Zamburug'lar",             "zamburuglar"),
-    ]
+    rows2 = _mj.moslash('najas_mikro', NAJAS_ROWS2)
     for ko_rsatkich, kalit in rows2:
         row = table2.add_row()
         _cell_write(row.cells[0], ko_rsatkich, align=WD_ALIGN_PARAGRAPH.LEFT)
@@ -2346,6 +2372,15 @@ def create_najas_table_in_doc(doc, result_json, order_info):
 # ─────────────────────────────────────────────────────────────────────────────
 #  PEPSINOGEN 1 VA 2 — Word jadval generatsiyasi
 # ─────────────────────────────────────────────────────────────────────────────
+# Blanka jadvali qatorlari — nom/norma maxsus_jadval sozlamasidan moslanadi (Tizim Sozlamalari → 🧩 Maxsus tahlillar → Maxsus jadvallar)
+PEPSINOGEN_ROWS = [
+    ("Pepsinogen I (PGI) IFA",   "pg1",      "30-130",  "mkg/l"),
+    ("Pepsinogen II (PGII) IFA", "pg2",      "4-22",    "mkg/l"),
+    ("PG I / PG II Nisbati",     "pg_ratio", "3-20",    ""),
+]
+_mj.royxat('pepsinogen', "Pepsinogen", PEPSINOGEN_ROWS, norma_i=(2, 3), norma_nomlari=('Norma', 'Birlik'))
+
+
 def create_pepsinogen_table_in_doc(doc, result_json, order_info):
     """Pepsinogen 1 va 2 natijasini Word hujjatiga qo'shish (revmoproba uslubida)."""
     import json
@@ -2372,11 +2407,7 @@ def create_pepsinogen_table_in_doc(doc, result_json, order_info):
         _set_para_spacing(ph, 0, 0, line_spacing=1)
         _add_run_tnr(ph, hdr, 11, bold=True)
 
-    rows_data = [
-        ("Pepsinogen I (PGI) IFA",   "pg1",      "30-130",  "mkg/l"),
-        ("Pepsinogen II (PGII) IFA", "pg2",      "4-22",    "mkg/l"),
-        ("PG I / PG II Nisbati",     "pg_ratio", "3-20",    ""),
-    ]
+    rows_data = _mj.moslash('pepsinogen', PEPSINOGEN_ROWS)
     for ko_rsatkich, kalit, norma, birlik in rows_data:
         row = table.add_row()
         _keep_row_together(row)
@@ -2389,6 +2420,15 @@ def create_pepsinogen_table_in_doc(doc, result_json, order_info):
 # ─────────────────────────────────────────────────────────────────────────────
 #  GTT — GLYUKOZAGA TOLERANTLIK TESTI — Word jadval generatsiyasi
 # ─────────────────────────────────────────────────────────────────────────────
+# Blanka jadvali qatorlari — nom/norma maxsus_jadval sozlamasidan moslanadi (Tizim Sozlamalari → 🧩 Maxsus tahlillar → Maxsus jadvallar)
+GTT_ROWS_STD = [
+    ("natoshchak",  "Glyukoza-natoshchak",                "3,2 \u2013 6,1",  "mmol/L"),
+    ("bir_soat",    "Glyukoza 1 soat o\u2018tgach",       "\u22649,4",        "mmol/L"),
+    ("ikki_soat",   "Glyukoza 2 soat o\u2018tgach",       "\u22647,8",        "mmol/L"),
+]
+_mj.royxat('gtt', "GTT", GTT_ROWS_STD, nom_i=1, kalit_i=0, norma_i=(2, 3), norma_nomlari=('Norma', 'Birlik'))
+
+
 def create_gtt_table_in_doc(doc, result_json, order_info):
     """Glyukozaga tolerantlik testi natijasini Word hujjatiga chiroyli jadval bilan qo'shish."""
     try:
@@ -2396,11 +2436,7 @@ def create_gtt_table_in_doc(doc, result_json, order_info):
     except Exception:
         data = {}
 
-    GTT_ROWS = [
-        ("natoshchak",  "Glyukoza-natoshchak",                "3,2 \u2013 6,1",  "mmol/L"),
-        ("bir_soat",    "Glyukoza 1 soat o\u2018tgach",       "\u22649,4",        "mmol/L"),
-        ("ikki_soat",   "Glyukoza 2 soat o\u2018tgach",       "\u22647,8",        "mmol/L"),
-    ]
+    GTT_ROWS = _mj.moslash('gtt', GTT_ROWS_STD)
     GTT_NORMA_MINMAX = {
         "natoshchak": (3.2, 6.1),
         "bir_soat":   (None, 9.4),
@@ -2497,6 +2533,15 @@ def create_gtt_table_in_doc(doc, result_json, order_info):
 # ─────────────────────────────────────────────────────────────────────────────
 #  NECHIPORENKO TAHLILI — Word jadval generatsiyasi
 # ─────────────────────────────────────────────────────────────────────────────
+# Blanka jadvali qatorlari — nom/norma maxsus_jadval sozlamasidan moslanadi (Tizim Sozlamalari → 🧩 Maxsus tahlillar → Maxsus jadvallar)
+NECHIPORENKO_ROWS = [
+    ("Leykotsitlar",   "leykot",      "4000 gacha", "2000 gacha", 4000, 2000),
+    ("Eritrotsitlar",  "eritr",        "1000 gacha", "1000 gacha", 1000, 1000),
+    ("Silindirlar",    "silindirlar",  "20 gacha",   "20 gacha",   20,   20),
+]
+_mj.royxat('nechiporenko', "Nechiporenko", NECHIPORENKO_ROWS, norma_i=(2, 3), norma_nomlari=('Norma (Ayol)', 'Norma (Erkak)'), son_i={2: 4, 3: 5})
+
+
 def create_nechiporenko_table_in_doc(doc, result_json, order_info):
     """Nechiporenko tahlili natijasini Word hujjatiga qo'shish."""
     import json
@@ -2517,11 +2562,7 @@ def create_nechiporenko_table_in_doc(doc, result_json, order_info):
     _jins_l = ((order_info or {}).get('jins') or '').strip().lower()
     _is_erkak = _jins_l in ('erkak', 'e', 'm', 'male') or 'erkak' in _jins_l
 
-    rows_data = [
-        ("Leykotsitlar",   "leykot",      "4000 gacha", "2000 gacha", 4000, 2000),
-        ("Eritrotsitlar",  "eritr",        "1000 gacha", "1000 gacha", 1000, 1000),
-        ("Silindirlar",    "silindirlar",  "20 gacha",   "20 gacha",   20,   20),
-    ]
+    rows_data = _mj.moslash('nechiporenko', NECHIPORENKO_ROWS)
     for i, (ko_rsatkich, kalit, norma_a, norma_e, lim_a, lim_e) in enumerate(rows_data, 1):
         natija = data.get(kalit, '')
         limit = lim_e if _is_erkak else lim_a
@@ -2585,6 +2626,32 @@ def create_zimnitskiy_table_in_doc(doc, result_json, order_info):
 # ─────────────────────────────────────────────────────────────────────────────
 #  SPERMOGRAMMA — Word jadval generatsiyasi
 # ─────────────────────────────────────────────────────────────────────────────
+# Blanka jadvali qatorlari — nom/norma maxsus_jadval sozlamasidan moslanadi (Tizim Sozlamalari → 🧩 Maxsus tahlillar → Maxsus jadvallar)
+SPERMOGRAMMA_ROWS = [
+    ("Saqlanish vaqti",               "saqlanish",     "3-5 sutka"),
+    ("Xajmi (ml)",                    "xajmi",         "2-6.4 ml"),
+    ("Rangi",                         "rangi",         "Qo'ng'ir sut"),
+    ("Xidi",                          "xidi",          "Xom kashtan"),
+    ("Suyulish vaqti (daq.)",         "suyulish",      "10-30 daq."),
+    ("rN (pH)",                       "rn",            "7.2-8.0"),
+    ("Ilashuvchanglik (mm)",           "ilashuv",       "0-20 mm"),
+    ("Spermatozoidlar a) 1 mlda",     "sperma_1ml",    "≥20 mln."),
+    ("Spermatozoidlar b) umumiy xajmida", "sperma_umumiy", "≥40 mln."),
+    ("Harakati: a) faol (%)",         "harakat_faol",  "40-85%"),
+    ("Harakati: b) sust (%)",         "harakat_sust",  "4-30%"),
+    ("Harakati: v) harakatsiz (%)",   "harakat_xar",   "0-14%"),
+    ("Tirik spermatozoidlar (%)",     "tirik",         "≥50%"),
+    ("Patologik shakllar (%)",        "patologik",     "15-25%"),
+    ("Spermatogen epiteliy",          "epitel",        "2-10 k.d."),
+    ("Leykotsitlar",                  "leykot",        "1-8 k.d."),
+    ("Letsitin donachalar",           "letsitin",      "Ko'p miqdorda"),
+    ("Agglyutinatsiya",               "agglyut",       "Yo'q"),
+    ("Fruktoza (mkmol/eyak.)",        "fruktoza",      "≥1.3"),
+    ("Limon kislotasi (mkmol/eyak.)","limon",          "≥52"),
+]
+_mj.royxat('spermogramma', "Spermogramma", SPERMOGRAMMA_ROWS, norma_i=(2,))
+
+
 def create_spermogramma_table_in_doc(doc, result_json, order_info):
     """Spermogramma natijasini Word hujjatiga jadval sifatida qo'shish."""
     import json
@@ -2599,28 +2666,7 @@ def create_spermogramma_table_in_doc(doc, result_json, order_info):
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     _add_table_header(table, ["Ko'rsatkich", "Natija", "Me'yor"], [11.0, 4.0, 4.0])
 
-    rows_data = [
-        ("Saqlanish vaqti",               "saqlanish",     "3-5 sutka"),
-        ("Xajmi (ml)",                    "xajmi",         "2-6.4 ml"),
-        ("Rangi",                         "rangi",         "Qo'ng'ir sut"),
-        ("Xidi",                          "xidi",          "Xom kashtan"),
-        ("Suyulish vaqti (daq.)",         "suyulish",      "10-30 daq."),
-        ("rN (pH)",                       "rn",            "7.2-8.0"),
-        ("Ilashuvchanglik (mm)",           "ilashuv",       "0-20 mm"),
-        ("Spermatozoidlar a) 1 mlda",     "sperma_1ml",    "≥20 mln."),
-        ("Spermatozoidlar b) umumiy xajmida", "sperma_umumiy", "≥40 mln."),
-        ("Harakati: a) faol (%)",         "harakat_faol",  "40-85%"),
-        ("Harakati: b) sust (%)",         "harakat_sust",  "4-30%"),
-        ("Harakati: v) harakatsiz (%)",   "harakat_xar",   "0-14%"),
-        ("Tirik spermatozoidlar (%)",     "tirik",         "≥50%"),
-        ("Patologik shakllar (%)",        "patologik",     "15-25%"),
-        ("Spermatogen epiteliy",          "epitel",        "2-10 k.d."),
-        ("Leykotsitlar",                  "leykot",        "1-8 k.d."),
-        ("Letsitin donachalar",           "letsitin",      "Ko'p miqdorda"),
-        ("Agglyutinatsiya",               "agglyut",       "Yo'q"),
-        ("Fruktoza (mkmol/eyak.)",        "fruktoza",      "≥1.3"),
-        ("Limon kislotasi (mkmol/eyak.)","limon",          "≥52"),
-    ]
+    rows_data = _mj.moslash('spermogramma', SPERMOGRAMMA_ROWS)
     for ko_rsatkich, kalit, me_yor in rows_data:
         row = table.add_row()
         _cell_write(row.cells[0], ko_rsatkich, align=WD_ALIGN_PARAGRAPH.LEFT)
@@ -2631,6 +2677,17 @@ def create_spermogramma_table_in_doc(doc, result_json, order_info):
 # ─────────────────────────────────────────────────────────────────────────────
 #  TORCH INFEKSIYASI IgM VA IgG — Word jadval generatsiyasi
 # ─────────────────────────────────────────────────────────────────────────────
+# Blanka jadvali qatorlari — nom/norma maxsus_jadval sozlamasidan moslanadi (Tizim Sozlamalari → 🧩 Maxsus tahlillar → Maxsus jadvallar)
+TORCH_ROWS = [
+    ("Toxoplasma (TOKSOPLAZMOZ) Ekspress test",          "toxo"),
+    ("Rubella (QIZILCHA) Ekspress test",                 "rubella"),
+    ("Cytomegalovirus (SITOMYEGALOVIRUS) Ekspress test", "cmv"),
+    ("Herpes 1 (ODDIY GERPYES 1 tipi) Ekspress test",   "herpes1"),
+    ("Herpes 2 (ODDIY GERPYES 2 tipi) Ekspress test",   "herpes2"),
+]
+_mj.royxat('torch', "TORCH", TORCH_ROWS)
+
+
 def create_torch_table_in_doc(doc, result_json, order_info):
     """TORCH infeksiyasi IgM va IgG natijasini Word hujjatiga qo'shish.
     Ustunlar: Ko'rsatkich | IgM | IgG | Me'yor
@@ -2649,13 +2706,7 @@ def create_torch_table_in_doc(doc, result_json, order_info):
                       ["Ko'rsatkich", "IgM", "IgG", "Me'yor"],
                       [9.5, 3.5, 3.5, 2.5])
 
-    rows_data = [
-        ("Toxoplasma (TOKSOPLAZMOZ) Ekspress test",          "toxo"),
-        ("Rubella (QIZILCHA) Ekspress test",                 "rubella"),
-        ("Cytomegalovirus (SITOMYEGALOVIRUS) Ekspress test", "cmv"),
-        ("Herpes 1 (ODDIY GERPYES 1 tipi) Ekspress test",   "herpes1"),
-        ("Herpes 2 (ODDIY GERPYES 2 tipi) Ekspress test",   "herpes2"),
-    ]
+    rows_data = _mj.moslash('torch', TORCH_ROWS)
     for ko_rsatkich, kalit in rows_data:
         row = table.add_row()
         _cell_write(row.cells[0], ko_rsatkich, align=WD_ALIGN_PARAGRAPH.LEFT)
@@ -5021,6 +5072,53 @@ def _is_gtt_test(test_name: str) -> bool:
     """Glyukozaga tolerantlik testi (GTT) ekanligini tekshirish."""
     return _tt.tekshir('gtt', test_name, _nom_gtt)
 
+def _sonlar(matn):
+    return [float(x.replace(',', '.')) for x in re.findall(r'\d+(?:[.,]\d+)?', str(matn or ''))]
+
+
+def _shablon_normasini_qoy(rows, tahlil_id=None, nomi=None, kalit_i=1, norma_i=2, birlik_i=3):
+    """Katalogdagi («Tahlil Qo'shish» → sub-normalar) result_template normalari blankaga.
+    Ilgari koagulogramma/bilirubin normasi kodda qattiq yozilgan edi — katalogda
+    o'zgartirilsa ham blankada eski chiqardi. Katalogdagi son koddagi bilan bir xil
+    bo'lsa — koddagi ko'rinish (masalan "13 – 15") saqlanadi; farq qilsa — katalogniki."""
+    comps = {}
+    try:
+        conn = db_conn()
+        if conn:
+            cur = conn.cursor(dictionary=True)
+            row = None
+            if tahlil_id:
+                cur.execute("SELECT result_template FROM tahlillar_norma WHERE tahlil_id = %s "
+                            "AND result_template IS NOT NULL AND result_template <> '' LIMIT 1", (tahlil_id,))
+                row = cur.fetchone()
+            if not row and nomi:
+                cur.execute("SELECT result_template FROM tahlillar_norma WHERE tahlil_nomi = %s "
+                            "AND result_template IS NOT NULL AND result_template <> '' LIMIT 1", (nomi,))
+                row = cur.fetchone()
+            cur.close()
+            if row and row.get('result_template'):
+                for c in (json.loads(row['result_template']) or {}).get('components', []):
+                    if c.get('key'):
+                        comps[c['key']] = c
+    except Exception as e:
+        print(f"[OGOHLANTIRISH] katalog sub-normasi o'qilmadi ({nomi}): {e}")
+    if not comps:
+        return rows
+    out = []
+    for r in rows:
+        r = list(r)
+        c = comps.get(r[kalit_i])
+        if c:
+            n = (c.get('norma') or '').strip()
+            if n and _sonlar(n) != _sonlar(r[norma_i]):
+                r[norma_i] = n
+            u = (c.get('unit') or '').strip()
+            if u and birlik_i is not None and u.lower() != str(r[birlik_i]).lower():
+                r[birlik_i] = u
+        out.append(tuple(r))
+    return out
+
+
 def _get_revmoproba_component_normas(test_name: str) -> dict:
     """tahlillar_norma.result_template dan RF/CRP/ASLO normalari uchun {key: norma} lug'at qaytaradi."""
     import json as _j
@@ -5175,9 +5273,11 @@ def _create_bilirubin_section(doc, bili_tests: list, test_results: dict, order_i
         ("Bog\u2018langan Bilirubin", "bog_langan", "0,86 \u2013 5,3",  "mkmol/l"),
         ("Erkin Bilirubin",         "erkin",      "1,7 \u2013 17,1",  "mkmol/l"),
     ]
-    # Nom/norma/birlik/tartib/ko'rinish \u2014 bio_blanka sozlamasi
-    BILI_ROWS, _ = _bb.panel_qatorlari('bilirubin', BILI_ROWS, bili_result_data)
     _bili_tid = next((t.get('tahlil_id') for t in bili_tests if t.get('tahlil_id')), 55)
+    # Katalogdagi sub-normalar (\u00abTahlil Qo'shish\u00bb), so'ng bio_blanka sozlamasi (ustun)
+    BILI_ROWS = _shablon_normasini_qoy(BILI_ROWS, _bili_tid,
+                                       next((t.get('nomi') for t in bili_tests if t.get('nomi')), 'Bilirubin'))
+    BILI_ROWS, _ = _bb.panel_qatorlari('bilirubin', BILI_ROWS, bili_result_data)
     _prev = _panel_oldingi(order_info, 'BIO', _bili_tid, [r[1] for r in BILI_ROWS])
     _cN, _cU = (3, 4) if _prev else (2, 3)
     _prev_sana = _oldingi_umumiy_sana(_prev) if _prev else None
@@ -6297,6 +6397,8 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
                                 ("ACHTV",                    'achtv',      "25 – 40",     "sek"),
                                 ("Fibrinogen",               'fibrinogen', "2,0 – 4,0",   "g/l"),
                             ]
+                            # Katalogdagi sub-normalar («Tahlil Qo'shish» → Koagulogramma)
+                            _koag_rows = _shablon_normasini_qoy(_koag_rows, test.get('tahlil_id'), test_name)
                             for sub_n, sub_k, sub_nr, sub_u in _koag_rows:
                                 sub_v = kd.get(sub_k)
                                 if sub_v is None:
@@ -6353,6 +6455,7 @@ def create_results_table(doc: Document, tests: list, group: str, order_info: dic
                     try:
                         rd = json.loads(raw_val)
                         if isinstance(rd, dict):
+                            _KOAG_ROWS_DEF = _shablon_normasini_qoy(_KOAG_ROWS_DEF, test.get('tahlil_id'), test_name)
                             _sub_rows = [(n, rd.get(k), nr, u, k) for n, k, nr, u in _KOAG_ROWS_DEF if rd.get(k) is not None]
                             if _sub_rows:
                                 # Header qator
@@ -24352,6 +24455,13 @@ Sana: {_sana_fmt}"""
                        'gtt': _nom_gtt, 'hav_combo': _nom_hav_combo, 'revmo_avto': _nom_revmo_avto,
                        'revmo_qolda': _nom_revmo_qolda, 'qondan_mazok': _nom_qondan_mazok})
                    ).pack(anchor="w")
+        ttk.Label(tab_tt, justify=tk.LEFT, wraplength=620, text=(
+            "\nMaxsus jadvallar (Nechiporenko, Spermogramma, Najas, Urologik surtma, GTT, "
+            "Pepsinogen, Brutsellez, TORCH ...) — qator nomi, normasi, tartibi va ko'rinishi. "
+            "Koagulogramma va Bilirubin normalari «Tahlil Qo'shish» oynasidagi sub-normalardan "
+            "olinadi.")).pack(anchor="w", pady=(6, 6))
+        ttk.Button(tab_tt, text="📋 Maxsus jadvallar (nomlar, normalar)...",
+                   command=lambda: _mj.ochish_oyna(dialog)).pack(anchor="w")
 
         # ───────────────────────── PAPKALAR ─────────────────────────────
         # Analizatordan kelgan RAW/TXT fayllar qayerga tushadi (natija_papka.py).
