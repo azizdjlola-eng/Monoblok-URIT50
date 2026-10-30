@@ -938,6 +938,13 @@ def xizmat_main() -> int:
     To'xtatish/qayta ishga tushirish: BUYRUQ_FAYL ga "stop" / "restart"."""
     global _mode, _cfg_live
     _mode = "xizmat"
+    try:   # litsenziya paketida bioximiya analizatori moduli bo'lmasa — xizmat ishlamaydi
+        import funksiya_paketlari as _pkt
+        if not _pkt.yoqilganmi("bio_analizator"):
+            _log("[XIZMAT] Bioximiya analizatori litsenziya paketida yoqilmagan — chiqildi")
+            return 0
+    except Exception:
+        pass
     if not _mutex_ol():
         _log("[XIZMAT] Boshqa nusxa allaqachon ishlayapti — bu nusxa chiqdi")
         return 0

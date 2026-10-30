@@ -196,6 +196,7 @@ TEST_GROUPS = ['GEM', 'BIO', 'IFA', 'URINE', 'TEST', 'COAG']
 # HDL=124; Mochevina=42, Kreatinin=41, Albumin=35, Siydik kislota=50).
 import bio_blanka as _bb
 import maxsus_jadval as _mj   # maxsus jadvallar (Nechiporenko, Spermogramma ...) nom/norma sozlamasi
+import funksiya_paketlari as _pkt   # litsenziya paketi (Start/Standart/Pro) — modul yoqilganmi
 LIPID_PANEL_MEMBER_IDS = set(_bb.panel_azolari('lipid'))
 BUYRAK_PANEL_MEMBER_IDS = set(_bb.panel_azolari('buyrak'))
 
@@ -6195,7 +6196,9 @@ def _oldingi_topish(order_info, tahlil_id=None, nomi=None, kalit=None, azo_tahli
 
 
 def _oldingi_yoqilganmi(group) -> bool:
-    return str(group or '').upper() in _oldingi_sozlama()['guruhlar']
+    # «Oldingi natija» ustuni — Standart paket moduli (funksiya_paketlari)
+    return (str(group or '').upper() in _oldingi_sozlama()['guruhlar']
+            and _pkt.yoqilganmi("oldingi_natija"))
 
 
 def _oldingi_sana_str(sana) -> str:
@@ -7670,6 +7673,14 @@ def _pdf_elektron_muhr_qoy(pdf_path):
 
 
 def save_pdf_to_onedrive(docx_path, date_str=None):
+    # Natija PDF bulutga — Standart paket moduli; yopiq bo'lsa PDF yaratilmaydi (Word qoladi)
+    if not _pkt.yoqilganmi("bulut_pdf"):
+        print("[PAKET] Natija PDF bulutga — litsenziyada yoqilmagan, PDF yaratilmadi")
+        return None
+    return _save_pdf_to_onedrive(docx_path, date_str)
+
+
+def _save_pdf_to_onedrive(docx_path, date_str=None):
     """DOCX faylni ixcham PDF ga aylantirib OneDrive\\Natijalar\\DD.MM.YYYY papkaga saqlaydi.
     Eski PDF mavjud bo'lsa ustiga yozadi.
     DOCX ni vaqtinchalik nusxalab ishlaydi — original faylni blokirovka qilmaydi.
@@ -11512,6 +11523,9 @@ class MonoblokApp:
     
     def start_urit50_service(self):
         """URIT-50 siydik analizatori dasturini ishga tushirish"""
+        if not _pkt.yoqilganmi("siydik_analizator"):
+            print("[PAKET] Siydik analizatori ulanishi litsenziyada yoqilmagan — natija qo'lda kiritiladi")
+            return False
         # Sozlamalarda o'chirilgan bo'lsa — ishga tushirmaymiz
         try:
             if not get_analyzer("siydik").get("enabled", True):
@@ -11677,6 +11691,9 @@ class MonoblokApp:
     
     def start_bk280_listener(self):
         """BK-280 HL7 Listener ni ishga tushirish"""
+        if not _pkt.yoqilganmi("bio_analizator"):
+            print("[PAKET] Bioximiya analizatori ulanishi litsenziyada yoqilmagan — natija qo'lda kiritiladi")
+            return False
         if not BK280_AVAILABLE:
             print("[OGOHLANTIRISH] BK-280 listener mavjud emas")
             return False
@@ -11745,6 +11762,8 @@ class MonoblokApp:
     def start_bk280_lis_server(self):
         """Shtrix-kod so'rovi (QRY/ORM/ASTM Q) endi universal bioximiya listener ichida
         (bk280_listener → lis_port). Alohida server kerak emas — moslik uchun qoldirilgan."""
+        if not _pkt.yoqilganmi("bio_analizator"):
+            return False
         if getattr(self, "_bio_rejim", None):
             # Fon xizmati yoki ichki listener lis_port ni allaqachon tinglaydi. Eski
             # asus_lis_server bu yerda ochilsa o'sha portni ikkinchi marta egallardi.
@@ -11798,6 +11817,8 @@ class MonoblokApp:
                         yoqilgan = get_analyzer("bioximiya").get("enabled", True)
                     except Exception:
                         yoqilgan = True
+                    # Litsenziyada bio analizator moduli yo'q — ogohlantirma / qayta urinma
+                    yoqilgan = yoqilgan and _pkt.yoqilganmi("bio_analizator")
                     if yoqilgan:
                         self._bio_tugma_yangila("ochiq")
                         if self._bio_holat_turi != "ochiq":
@@ -12006,6 +12027,9 @@ class MonoblokApp:
 
     def start_bc20s_listener(self) -> bool:
         """BC-20S Gematologiya analizatoriga TCP CLIENT sifatida ulanish"""
+        if not _pkt.yoqilganmi("gemo_analizator"):
+            print("[PAKET] Gemotologiya analizatori ulanishi litsenziyada yoqilmagan — natija qo'lda kiritiladi")
+            return False
         if not BC20S_AVAILABLE:
             print("[OGOHLANTIRISH] BC-20S listener moduli mavjud emas (bc20s_listener.py)")
             return False
@@ -12994,6 +13018,15 @@ class MonoblokApp:
         self._search_nb.add(tab_list, text="  👥 Bemorlar / buyurtmalar  ")
         self._search_nb.add(tab_stat, text="  📊 Tahlillar statistikasi  ")
 
+        # Tahlillar statistikasi — Standart paket moduli: yopiq bo'lsa xabar va ro'yxatga qaytish
+        def _stat_paket(_e=None, _nb=self._search_nb, _tab=tab_stat):
+            try:
+                if _nb.select() == str(_tab) and not _pkt.tekshir("statistika", _nb.winfo_toplevel()):
+                    _nb.select(0)
+            except Exception:
+                pass
+        self._search_nb.bind("<<NotebookTabChanged>>", _stat_paket, add="+")
+
         self.search_results_tree = ttk.Treeview(tab_list, show="headings", height=12)
         self._search_row_meta = {}
         self._search_set_columns("patient")
@@ -13083,6 +13116,8 @@ class MonoblokApp:
     
     def open_qc_window(self):
         """Sifat nazorati oynasini ochish"""
+        if not _pkt.tekshir("qc", self.root):
+            return
         if QC_AVAILABLE and _open_qc_window:
             _open_qc_window(self.root)
         else:
@@ -14100,6 +14135,9 @@ class MonoblokApp:
     def open_immuno_window(self, banner=None):
         """IFA kuzatuv oynasi. banner berilsa — avtomatik ochilish (yangi IFA)."""
         avto = banner is not None
+        # IFA kuzatuv — Pro paket moduli: avtomatik ochilish jim o'tkaziladi
+        if not (_pkt.yoqilganmi("ifa_kuzatuv") if avto else _pkt.tekshir("ifa_kuzatuv", self.root)):
+            return
         if not avto:
             self._immuno_blink = False      # laborant o'zi ochdi — ko'rdi
         # Avtomatik ochilganda hamshira yozayotgan joydan fokusni tortib olmaymiz
@@ -24625,6 +24663,10 @@ Sana: {_sana_fmt}"""
             lic_status_lbl = tk.Label(tab_lic, text="", justify=tk.LEFT,
                                       font=("Consolas", 9), bg="#f5f5fa", anchor="w")
             lic_status_lbl.grid(row=1, column=0, sticky="ew", padx=8, ipady=6, ipadx=10, pady=(0, 10))
+            # Funksiya paketi (Start / Standart / Pro) va yoqilgan modullar
+            lic_paket_lbl = tk.Label(tab_lic, text="", justify=tk.LEFT,
+                                     font=("Consolas", 9), bg="#f0f7f0", anchor="w")
+            lic_paket_lbl.grid(row=6, column=0, sticky="ew", padx=8, ipady=6, ipadx=10, pady=(10, 4))
 
             ttk.Label(tab_lic, text="Ushbu kompyuter ID (administratorga yuboring):",
                       font=("Arial", 9, "bold")).grid(row=2, column=0, sticky=tk.W, padx=8)
@@ -24668,6 +24710,10 @@ Sana: {_sana_fmt}"""
                     f"   Izoh:       {n.xabar}\n"
                     f"   Tugash:     {exp_txt}"))
                 lic_id_var.set(n.machine_id)
+                try:
+                    lic_paket_lbl.config(text=_pkt.holat_matni())
+                except Exception as _pe:
+                    lic_paket_lbl.config(text=f"Paket holati o'qilmadi: {_pe}")
 
             def lic_import():
                 from tkinter import filedialog
@@ -26419,7 +26465,8 @@ Sana: {_sana_fmt}"""
         `lab_quality.json` -> "delta" bo'limida.
         Xato bo'lsa bo'sh ro'yxat — saqlash hech qachon shu sababdan to'xtamaydi.
         """
-        if lab_quality is None or not rows:
+        # delta_check — Pro paket moduli (funksiya_paketlari)
+        if lab_quality is None or not rows or not _pkt.yoqilganmi("delta_check"):
             return []
         conn = None
         try:
@@ -26488,7 +26535,8 @@ Sana: {_sana_fmt}"""
             if answer is None:
                 return
 
-            if cfg["panic"].get("log_enabled", True):
+            # Signal (oyna) har paketda; jurnalga yozish — "kritik_jurnal" moduli (Pro)
+            if cfg["panic"].get("log_enabled", True) and _pkt.yoqilganmi("kritik_jurnal"):
                 conn = self._create_fresh_connection()
                 if conn:
                     lab_quality.log_panic(
@@ -26872,6 +26920,8 @@ Sana: {_sana_fmt}"""
     def open_hematology_raw(self):
         """Gematologiya (BC-20S) RAW ma'lumotlar oynasini ochish.
         Agar joriy bemor tanlangan bo'lsa, 'Natijani qo'shish' tugmasi aktiv bo'ladi."""
+        if not _pkt.tekshir("gemo_analizator", self.root):
+            return
         try:
             if HEMATOLOGY_AVAILABLE and open_hematology_window:
                 # Callback faqat bemor tanlangan bo'lsa uzatiladi
@@ -27087,6 +27137,8 @@ Sana: {_sana_fmt}"""
     def open_biochemistry_raw(self):
         """Bioximiya RAW ma'lumotlar oynasini ochish.
         Agar joriy bemor tanlangan bo'lsa, 'Natijani qo'shish' tugmasi aktiv bo'ladi."""
+        if not _pkt.tekshir("bio_analizator", self.root):
+            return
         try:
             if BIOCHEMISTRY_AVAILABLE and open_biochemistry_window:
                 callback = self.on_biochemistry_import if self.current_order_id else None
@@ -27540,6 +27592,8 @@ Sana: {_sana_fmt}"""
     def open_urine_raw(self):
         """Siydik (URIT-50) RAW ma'lumotlar oynasini ochish.
         Agar joriy bemor tanlangan bo'lsa, 'Natijani qo'shish' tugmasi aktiv bo'ladi."""
+        if not _pkt.tekshir("siydik_analizator", self.root):
+            return
         try:
             if URINE_WINDOW_AVAILABLE and open_urine_window:
                 callback = self.on_urine_import if self.current_order_id else None
