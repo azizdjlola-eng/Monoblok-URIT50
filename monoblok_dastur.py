@@ -3379,53 +3379,17 @@ def _create_blood_group_table(doc, raw_value):
         _set_para_spacing(p_soz, 0, 0, line_spacing=1)
         _add_run_tnr(p_soz, soz, 11, bold=True)
 
-# Umumiy qon tahlili (BC-20S) — Ko'rsatkich, Qisqa nom, Birlik, Norma, Natija (jami 19 sm)
-# Umumiy qon tahlili blankasi qatorlari. 3-diff (Mid/Gran) va 5-diff (Neu/Mon/Eos/Bas)
-# analizatorlar uchun umumiy: CBC_HEMA_OPTIONAL_ROWS dagi kodlar faqat natijada bo'lsa chiqadi
-# (Mindray BC-20S 3-diff → Mid/Gran; Genrui KT-6610 / Edan H60 5-diff → Neu/Mon/Eos/Bas).
-CBC_HEMA_ROWS = [
-    ("Leykotsitlar soni", "WBC", "10⁹/L", "4.0 – 9.0"),
-    ("Neytrofillar soni", "Neu#", "10⁹/L", "2.0 – 7.0"),
-    ("Limfotsitlar soni", "Lymph#", "10⁹/L", "0.8 – 4.0"),
-    ("Monotsitlar soni", "Mon#", "10⁹/L", "0.1 – 1.0"),
-    ("Eozinofillar soni", "Eos#", "10⁹/L", "0.02 – 0.5"),
-    ("Bazofillar soni", "Bas#", "10⁹/L", "0 – 0.1"),
-    ("Monotsit + Eozinofil + Bazofil soni", "Mid#", "10⁹/L", "0.1 – 1.5"),
-    ("Neytrofillar soni", "Gran#", "10⁹/L", "2.0 – 7.0"),
-    ("Neytrofillar ulushi", "Neu%", "%", "50 – 70"),
-    ("Limfotsitlar ulushi", "Lymph%", "%", "20 – 40"),
-    ("Monotsitlar ulushi", "Mon%", "%", "3 – 10"),
-    ("Eozinofillar ulushi", "Eos%", "%", "0.5 – 5"),
-    ("Bazofillar ulushi", "Bas%", "%", "0 – 1"),
-    ("Monotsit + Eozinofil + Bazofil ulushi", "Mid%", "%", "3 – 15"),
-    ("Neytrofillar ulushi", "Gran%", "%", "40 – 70"),
-    ("Eritrotsitlar soni", "RBC", "10¹²/L", "3.8 – 5.5"),
-    ("Gemoglobin", "HGB", "g/L", "120 – 160"),
-    ("Gematokrit", "HCT", "%", "36 – 48"),
-    ("Eritrotsitlarning o'rtacha hajmi", "MCV", "fL", "80 – 100"),
-    ("Eritrotsitdagi o'rtacha gemoglobin", "MCH", "pg", "27 – 34"),
-    ("Eritrotsitdagi gemoglobin konsentratsiyasi", "MCHC", "g/L", "310 – 360"),
-    ("Eritrotsitlar hajmi variatsiyasi", "RDW-CV", "%", "11 – 16"),
-    ("Eritrotsitlar hajmi tarqalish kengligi", "RDW-SD", "fL", "35 – 56"),
-    ("Trombotsitlar soni", "PLT", "10⁹/L", "100 – 400"),
-    ("Trombotsitlarning o'rtacha hajmi", "MPV", "fL", "7 – 12"),
-    ("Trombotsitlar hajmi variatsiyasi", "PDW", "%", "9 – 17"),
-    ("Trombokrit", "PCT", "%", "0.10 – 0.28"),
-    ("Neytrofil / Limfotsit nisbati", "NLR", "—", "1 – 3"),
-    ("Trombotsit / Limfotsit nisbati", "PLR", "—", "100 – 300"),
-]
-# Faqat natijada mavjud bo'lsa chiqadigan qatorlar (analizator turiga qarab)
-CBC_HEMA_OPTIONAL_ROWS = {"Neu#", "Neu%", "Mon#", "Mon%", "Eos#", "Eos%", "Bas#", "Bas%",
-                          "Mid#", "Mid%", "Gran#", "Gran%"}
-# Mid/Gran (3-diff) qatorlari: 5-diff natija bo'lsa ham, natijasi bo'lmasa ham ko'rsatilmaydi;
-# 3-diff natijada (5-diff kalitlar yo'q) — eski blanka ko'rinishi saqlanadi ("-" bilan ham)
-CBC_HEMA_3DIFF_ROWS = {"Mid#", "Mid%", "Gran#", "Gran%"}
-CBC_HEMA_5DIFF_KEYS = {"Neu#", "Neu%", "Mon#", "Mon%", "Eos#", "Eos%", "Bas#", "Bas%"}
+# Umumiy qon tahlili blankasi qatorlari — endi SOZLANADI (gemo_blanka.py):
+# nomlar, tartib, ko'rinish (auto/doim/natija bo'lsa/yashirin), qo'shimcha parametrlar,
+# gistogramma. Tizim Sozlamalari → 🔵 Gemotologiya → «🧾 Blanka ko'rinishi».
+# Quyidagi nomlar — standart qiymatlar (eski kod bilan moslik uchun).
+import gemo_blanka as _gb
+CBC_HEMA_ROWS = [(q["nom"], q["kod"], q["birlik"], q["norma"]) for q in _gb.DEFAULT_QATORLAR]
+CBC_HEMA_3DIFF_ROWS = _gb.DIFF3_KODLAR
+CBC_HEMA_5DIFF_KEYS = _gb.DIFF5_KODLAR
+CBC_HEMA_OPTIONAL_ROWS = _gb.DIFF5_KODLAR | _gb.DIFF3_KODLAR
 # CBC JSON kaliti (blanka kodi) → muqobil kalit / multi-ref (HL7) kaliti
-CBC_HEMA_KOD_ALIAS = {'Lymph#': 'LYM#', 'Lymph%': 'LYM%', 'Mid#': 'MID#', 'Mid%': 'MID%',
-                      'Gran#': 'GRAN#', 'Gran%': 'GRAN%',
-                      'Neu#': 'NEU#', 'Neu%': 'NEU%', 'Mon#': 'MON#', 'Mon%': 'MON%',
-                      'Eos#': 'EOS#', 'Eos%': 'EOS%', 'Bas#': 'BAS#', 'Bas%': 'BAS%'}
+CBC_HEMA_KOD_ALIAS = _gb.KOD_ALIAS
 
 def _parse_norma_to_min_max(norma_str):
     """Norma matnidan (masalan '4.0 – 9.0') min, max olish. 'manfiy' -> 0, 0."""
@@ -3503,12 +3467,15 @@ def _hema_analyzer_label() -> str:
 
 
 def create_hematology_cbc_table_in_doc(doc: Document, result_data, order_info: dict,
-                                       subsection=False):
+                                       subsection=False, blanka_sozlama=None):
     """Umumiy qon tahlili (BC-20S) jadvali — Ko'rsatkich, Qisqa nom, Birlik, Norma, Natija.
     Multi-ref norma: yosh va jinsga qarab norma aniqlanadi.
     Normadan yuqori: qizil + ↑, past: ko'k + ↓.
     subsection=True — boshqa bo'lim ichida (qondan mazok): kichik sarlavha.
+    Qatorlar/nomlar/gistogramma — gemo_blanka sozlamasidan (blanka_sozlama — namuna
+    uchun saqlanmagan sozlama).
     """
+    _gs = blanka_sozlama or _gb.sozlama()
     rd = {}
     if result_data:
         if isinstance(result_data, dict):
@@ -3534,18 +3501,17 @@ def create_hematology_cbc_table_in_doc(doc: Document, result_data, order_info: d
         _add_run_tnr(heading, "Umumiy qon tahlili ko'rsatkichlari", 11, bold=True)
     else:
         _set_para_spacing(heading, 0, 0, line_spacing=1.0)
-        _add_run_tnr(heading, "UMUMIY QON TAHLILI", 14, bold=True,
+        _add_run_tnr(heading, _gs.get("sarlavha") or "UMUMIY QON TAHLILI", 14, bold=True,
                      color_rgb=_group_title_rgb())
     sample_no = rd.get('sid') or rd.get('sno') or order_info.get('sample_id', '') or ''
-    _hema_model = rd.get('analyzer') or _hema_analyzer_label()
+    _hema_model = _gs.get("analizator_nomi") or rd.get('analyzer') or _hema_analyzer_label()
     meta = f"Avtomatik gematologik analizator: {_hema_model} namuna sample № {sample_no}".strip()
-    if meta:
+    if meta and _gs.get("meta_qatori", True):
         p_meta = doc.add_paragraph()
         p_meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_para_spacing(p_meta, 0, 0, line_spacing=1.0)
         _add_run_tnr(p_meta, meta, 9)
     KOD_ALIAS = CBC_HEMA_KOD_ALIAS
-    _has_5diff = any((vals.get(k) or vals.get(KOD_ALIAS.get(k, ''))) for k in CBC_HEMA_5DIFF_KEYS)
 
     def _rang_strelka(val_str, lo, hi, norma):
         """(rang, strelka): multi-ref lo/hi bo'lsa shu, aks holda norma matni bo'yicha."""
@@ -3577,17 +3543,12 @@ def create_hematology_cbc_table_in_doc(doc: Document, result_data, order_info: d
                     pass
         return color, arrow
 
-    qatorlar = []   # (ko'rsatkich, kod, natija_str, norma, birlik, lo, hi)
-    for koorsatkich, kod, birlik, default_norma in CBC_HEMA_ROWS:
-        natija = vals.get(kod) or vals.get(KOD_ALIAS.get(kod, ''))
-        if natija is None:
-            natija = ''
-        # Analizator turiga mos qatorlar: 5-diff qatorlar faqat natija bo'lsa;
-        # 3-diff (Mid/Gran) qatorlar 5-diff natijada yashiriladi
-        if kod in CBC_HEMA_OPTIONAL_ROWS and not str(natija).strip():
-            if kod in CBC_HEMA_5DIFF_KEYS or (kod in CBC_HEMA_3DIFF_ROWS and _has_5diff):
-                continue
-        natija_str = str(natija).strip() if natija else '-'
+    qatorlar = []   # (ko'rsatkich, kod, natija_str, norma, birlik, lo, hi, qisqa_nom)
+    # Qaysi qator, qaysi nom bilan, qaysi tartibda — gemo_blanka sozlamasi
+    # (auto: 5-diff qatorlar faqat natija bo'lsa; 3-diff Mid/Gran 5-diff natijada yashiriladi)
+    for _gq in _gb.korinadigan_qatorlar(vals, _gs):
+        koorsatkich, kod, birlik, default_norma = _gq["nom"], _gq["kod"], _gq["birlik"], _gq["norma"]
+        natija_str = _gq["natija"] or '-'
 
         # Multi-ref norma: yosh va jinsga qarab norma aniqlash
         # (get_multi_ref HL7 param_key ishlatadi — topilmasa alias: Lymph# -> LYM#)
@@ -3602,7 +3563,7 @@ def create_hematology_cbc_table_in_doc(doc: Document, result_data, order_info: d
                 norma = ref_str
             else:
                 lo = hi = None
-        qatorlar.append((koorsatkich, kod, natija_str, norma, birlik, lo, hi))
+        qatorlar.append((koorsatkich, kod, natija_str, norma, birlik, lo, hi, _gq["qisqa"]))
 
     # Oldingi natija ustuni — sozlamada GEM yoqilgan va kamida bitta ko'rsatkich
     # bo'yicha oldingi tashrif natijasi bo'lsa (aks holda jadval 5 ustunli qoladi)
@@ -3615,15 +3576,20 @@ def create_hematology_cbc_table_in_doc(doc: Document, result_data, order_info: d
     _prev_sana = _oldingi_umumiy_sana(_prev) if _prev else None
 
     HEADER_COLOR = TABLE_HEADER_HEX
-    table = doc.add_table(rows=1, cols=6 if _prev else 5)
-    table.style = 'Table Grid'
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _qisqa_ust = bool(_gs.get("qisqa_nom_ustuni", True))   # «Qisqa nom» ustuni (sozlamada o'chirilishi mumkin)
     if _prev:
-        _apply_table_widths(table, [5.9, 2.3, 2.5, 2.9, 3.2, 2.2])
+        _widths = [5.9, 2.3, 2.5, 2.9, 3.2, 2.2] if _qisqa_ust else [8.2, 2.5, 2.9, 3.2, 2.2]
         headers = ["Ko'rsatkich", "Qisqa nom", "Natija", None, "Norma", "Birlik"]
     else:
-        _apply_table_widths(table, [7.0, 2.0, 3.5, 3.5, 3.0])
+        _widths = [7.0, 2.0, 3.5, 3.5, 3.0] if _qisqa_ust else [9.0, 3.5, 3.5, 3.0]
         headers = ["Ko'rsatkich", "Qisqa nom", "Natija", "Norma", "Birlik"]
+    if not _qisqa_ust:
+        headers.pop(1)
+    _nat_i = headers.index("Natija")
+    table = doc.add_table(rows=1, cols=len(headers))
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _apply_table_widths(table, _widths)
     for cell, hdr in zip(table.rows[0].cells, headers):
         _set_cell_shading(cell, HEADER_COLOR)
         if hdr is None:
@@ -3634,7 +3600,7 @@ def create_hematology_cbc_table_in_doc(doc: Document, result_data, order_info: d
         _set_para_spacing(ph, 0, 0, line_spacing=1)
         _add_run_tnr(ph, hdr, 11, bold=True)
 
-    for _qi, (koorsatkich, kod, natija_str, norma, birlik, lo, hi) in enumerate(qatorlar):
+    for _qi, (koorsatkich, kod, natija_str, norma, birlik, lo, hi, qisqa) in enumerate(qatorlar):
         color, arrow = _rang_strelka(natija_str, lo, hi, norma)
         # Natija display: qiymat + strelka
         display_natija = (natija_str + arrow) if natija_str and natija_str != '-' else '-'
@@ -3642,9 +3608,11 @@ def create_hematology_cbc_table_in_doc(doc: Document, result_data, order_info: d
         row = table.add_row()
         _keep_row_together(row)
         cells = row.cells
-        matnlar = [koorsatkich, kod, display_natija, norma, birlik]
+        matnlar = [koorsatkich, qisqa, display_natija, norma, birlik]
         if _prev:
             matnlar.insert(3, None)
+        if not _qisqa_ust:
+            matnlar.pop(1)
         for i, txt in enumerate(matnlar):
             if txt is None:
                 _oldingi_katak_yoz(cells[i], _prev[_qi], _prev_sana,
@@ -3653,10 +3621,11 @@ def create_hematology_cbc_table_in_doc(doc: Document, result_data, order_info: d
             p = cells[i].paragraphs[0]
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER if i > 0 else WD_ALIGN_PARAGRAPH.LEFT
             _set_para_spacing(p, 0, 0, line_spacing=1)
-            _add_run_tnr(p, txt, 11, bold=(i == 2 and natija_str != '-' and bool(natija_str)),
-                         color_rgb=color if i == 2 else None)
+            _add_run_tnr(p, txt, 11, bold=(i == _nat_i and natija_str != '-' and bool(natija_str)),
+                         color_rgb=color if i == _nat_i else None)
 
-    _add_hema_histograms_to_doc(doc, rd, rd.get('sid') or rd.get('sno') or order_info.get('sample_id', ''))
+    if _gs.get("gistogramma", True):
+        _add_hema_histograms_to_doc(doc, rd, rd.get('sid') or rd.get('sno') or order_info.get('sample_id', ''))
 
 
 # Blankadagi gistogramma o'lchami (sm). Balandlikni o'zgartirish uchun faqat shu qatorni tahrirlang.
@@ -8190,7 +8159,7 @@ def generate_unified_blank(order_id):
                     pass
         
         if not hema_done:
-            HEMA_PARAM_NAMES = {kod for _, kod, _, _ in CBC_HEMA_ROWS}
+            HEMA_PARAM_NAMES = set(_gb.barcha_kodlar())
             hema_aggregated = {}
             hema_sample_id = None
             for r in results_without_template:
@@ -17847,15 +17816,11 @@ Sana: {_sana_fmt}"""
         model  = rd.get('analyzer') or rd.get('source') or _hema_analyzer_label()
 
         # ── Qatorlar (create_hematology_cbc_table_in_doc bilan bir xil qoida) ──
-        has_5diff = any((rd.get(k) or rd.get(CBC_HEMA_KOD_ALIAS.get(k, '')))
-                        for k in CBC_HEMA_5DIFF_KEYS)
-        rows = []   # (ko'rsatkich, kod, natija, birlik, norma, lo, hi)
-        for nom, kod, birlik, default_norma in CBC_HEMA_ROWS:
+        rows = []   # (ko'rsatkich, qisqa_nom, natija, birlik, norma, lo, hi, kod)
+        for _gq in _gb.korinadigan_qatorlar(rd):
+            nom, kod, birlik, default_norma = _gq["nom"], _gq["kod"], _gq["birlik"], _gq["norma"]
             alias  = CBC_HEMA_KOD_ALIAS.get(kod, '')
-            natija = str(rd.get(kod) or rd.get(alias) or '').strip()
-            if kod in CBC_HEMA_OPTIONAL_ROWS and not natija:
-                if kod in CBC_HEMA_5DIFF_KEYS or (kod in CBC_HEMA_3DIFF_ROWS and has_5diff):
-                    continue
+            natija = _gq["natija"]
             norma, lo, hi = default_norma, None, None
             if _hema_get_multi_ref and age:
                 lo, hi, ref = _hema_get_multi_ref(kod, age, gender)
@@ -17867,7 +17832,7 @@ Sana: {_sana_fmt}"""
                     lo = hi = None
             if lo is None or hi is None:
                 lo, hi = _parse_norma_to_min_max(norma)
-            rows.append((nom, kod, natija, birlik, norma, lo, hi))
+            rows.append((nom, _gq["qisqa"] or kod, natija, birlik, norma, lo, hi, kod))
 
         # Kritik qiymatlar (gemotologiya oynasidagi kabi qizil fon)
         crit_keys = set()
@@ -17953,7 +17918,7 @@ Sana: {_sana_fmt}"""
         tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         sb.pack(side=tk.RIGHT, fill=tk.Y)
 
-        for no, (nom, kod, natija, birlik, norma, lo, hi) in enumerate(rows, 1):
+        for no, (nom, qisqa, natija, birlik, norma, lo, hi, kod) in enumerate(rows, 1):
             disp, tag, flag = (natija or '-'), "normal_res", ""
             if natija and lo is not None and hi is not None:
                 try:
@@ -17968,7 +17933,7 @@ Sana: {_sana_fmt}"""
                     pass
             if kod in crit_keys:
                 tag = "critical"
-            tree.insert("", tk.END, values=(no, nom, kod, disp, birlik, norma, flag), tags=(tag,))
+            tree.insert("", tk.END, values=(no, nom, qisqa, disp, birlik, norma, flag), tags=(tag,))
 
         # Eski natijalarda JSON ichida gistogramma yo'q — TXT fayldan qidiramiz
         # (oyna ochilgandan keyin, ochilish sekinlashmasin)
@@ -23167,6 +23132,49 @@ Sana: {_sana_fmt}"""
         result_window = tk.Toplevel(self.root)
         NatijaKiritish(result_window, self.current_order_id)
     
+    def _gemo_blanka_namuna(self, sozlama):
+        """Blanka ko'rinishi oynasidan: saqlanmagan sozlama bilan namuna Word blanka.
+        Ma'lumot — bazadagi eng so'nggi umumiy qon tahlili (gistogramma bilan), bo'lmasa
+        namunaviy raqamlar."""
+        import tempfile
+        rd = None
+        try:
+            conn = db_conn()
+            cur = conn.cursor(dictionary=True)
+            cur.execute("""SELECT result_data FROM test_results
+                           WHERE test_type = 'hematology_cbc' AND result_data LIKE '%histograms%'
+                           ORDER BY updated_at DESC LIMIT 1""")
+            row = cur.fetchone()
+            conn.close()
+            if row and row.get('result_data'):
+                rd = json.loads(row['result_data'])
+        except Exception as e:
+            print(f"[ma'lumot] namuna uchun CBC topilmadi: {e}")
+        if not isinstance(rd, dict):
+            rd = {'type': 'hematology_cbc', 'sid': 'NAMUNA', 'patient_age': '33', 'patient_gender': 'Ayol',
+                  'WBC': '7.4', 'Lymph#': '2.2', 'Mid#': '0.4', 'Gran#': '4.8', 'Lymph%': '29.6',
+                  'Mid%': '5.1', 'Gran%': '65.3', 'RBC': '3.87', 'HGB': '112', 'HCT': '32.4',
+                  'MCV': '83.8', 'MCH': '28.9', 'MCHC': '344', 'RDW-CV': '13.0', 'RDW-SD': '39.1',
+                  'PLT': '298', 'MPV': '8.9', 'PDW': '16.1', 'PCT': '0.266', 'NLR': '2.21', 'PLR': '135.57'}
+        doc = Document()
+        try:
+            sec = doc.sections[0]
+            sec.left_margin = sec.right_margin = Cm(1.0)
+            sec.top_margin = sec.bottom_margin = Cm(1.0)
+        except Exception:
+            pass
+        create_hematology_cbc_table_in_doc(
+            doc, rd, {'yosh': rd.get('patient_age', ''), 'jins': rd.get('patient_gender', ''),
+                      'sample_id': rd.get('sid', '')},
+            blanka_sozlama=sozlama)
+        yol = os.path.join(tempfile.gettempdir(), "gemo_blanka_namuna.docx")
+        try:
+            doc.save(yol)
+        except PermissionError:
+            yol = os.path.join(tempfile.gettempdir(), f"gemo_blanka_namuna_{datetime.now():%H%M%S}.docx")
+            doc.save(yol)
+        os.startfile(yol)
+
     def open_system_settings(self):
         """Tizim sozlamalari oynasi — baza va analizatorlarning ulanishini
         kodga tegmasdan o'zgartirish (IP, port, COM, parol va h.k.).
@@ -23570,6 +23578,12 @@ Sana: {_sana_fmt}"""
 
         ttk.Button(tab_g, text="Ulanishni tekshirish", command=test_gemo).grid(
             row=9, column=0, columnspan=2, pady=8)
+
+        # Blanka ko'rinishi: ko'rsatkich nomlari, tartib, qo'shimcha parametrlar,
+        # gistogramma — har mijozning analizatori/odatiga moslash (gemo_blanka.py)
+        ttk.Button(tab_g, text="🧾 Blanka ko'rinishi (nomlar, tartib, gistogramma)...",
+                   command=lambda: _gb.ochish_oyna(dialog, namuna_fn=self._gemo_blanka_namuna)
+                   ).grid(row=10, column=0, columnspan=2, pady=(0, 8))
 
 
         # ───────────── BIOXIMIYA (universal: Biobase BK / Mindray BS / Zybio / Erba / Human ...) ────

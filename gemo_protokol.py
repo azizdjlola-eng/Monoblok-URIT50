@@ -113,8 +113,31 @@ _BASE_ALIASES = {
 _DIFF_BASES = {"LYM", "MID", "GRAN", "NEU", "MON", "EOS", "BAS"}
 
 
+_DB_TO_CANON = {v: k for k, v in DB_NAME_MAP.items()}
+
+
+def _foydalanuvchi_kodi(code: str, name: str):
+    """Blanka sozlamasidagi "Analizator kodlari" (gemo_blanka) — boshqa analizator
+    o'z nomi bilan yuborgan yoki qo'shimcha parametr (IG#, NRBC% ...). Topilmasa None."""
+    try:
+        import gemo_blanka as _gb
+        m = _gb.analizator_kod_xaritasi()
+    except Exception:
+        return None
+    if not m:
+        return None
+    for cand in (code, name):
+        kod = m.get(str(cand or "").strip().upper().replace(" ", ""))
+        if kod:
+            return _DB_TO_CANON.get(kod, kod)
+    return None
+
+
 def normalize_param(code: str = "", name: str = ""):
     """OBX-3 / ASTM R-3 dagi kod va nomdan kanonik parametrni topadi. Topilmasa None."""
+    uk = _foydalanuvchi_kodi(code, name)
+    if uk:
+        return uk
     for cand in (code, name):
         if not cand:
             continue

@@ -295,6 +295,20 @@ HL7_TO_DB_NAME = dict(_gp.DB_NAME_MAP)
 CLINICAL_PARAMETERS = {k: k for k in _gp.CANONICAL}
 
 
+def _qoshimcha_parametrlar():
+    """Blanka sozlamasida foydalanuvchi qo'shgan parametrlar (IG#, NRBC% ...) ham
+    olinsin — CLINICAL_PARAMETERS ga joyida qo'shiladi (gemo_blanka)."""
+    try:
+        import gemo_blanka as _gbl
+        for k in _gbl.qoshimcha_kodlar():
+            CLINICAL_PARAMETERS.setdefault(k, k)
+    except Exception:
+        pass
+
+
+_qoshimcha_parametrlar()
+
+
 def _center_on_work_area(window, want_w, want_h):
     """Oynani ekranning ISH maydoni (vazifalar paneli chiqarib tashlangan) markaziga joylash;
     ekran kichik bo'lsa o'lchamni moslaydi — pastki qismi vazifalar paneli ostida qolmaydi."""
@@ -1577,6 +1591,7 @@ def parse_hl7_file(file_path):
         if not patient.get('time'):
             patient['time'] = fallback_time
         # Faqat klinik ko'rsatkichlar (CLINICAL_PARAMETERS tartibida) — gistogramma va h.k. tashlanadi
+        _qoshimcha_parametrlar()
         patient['tests'] = {k: v for k, v in patient['tests'].items() if k in CLINICAL_PARAMETERS}
         patient.pop('_extra', None)
         patient['file_path'] = file_path  # Qaysi fayldan kelganini saqlash
