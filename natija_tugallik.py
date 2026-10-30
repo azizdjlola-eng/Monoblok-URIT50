@@ -55,6 +55,19 @@ import re
 # hisobga olinmaydi.
 LAB_BO_LMAGAN_SOHALAR = ("uzi", "ambulator", "muolaja", "statsionar", "korik")
 
+
+def lab_emas_sohalar(cur):
+    """Laboratoriya BO'LMAGAN soha kodlari: yuqoridagi ro'yxat + `sohalar.tur`
+    bo'yicha (2026-10-31). Mijoz qo'shgan MRT, stomatologiya kabi bo'limlar ham
+    natija tugalligiga kirmaydi. `tur` ustuni hali yo'q bo'lsa — faqat ro'yxat."""
+    kodlar = set(LAB_BO_LMAGAN_SOHALAR)
+    try:
+        cur.execute("SELECT kod FROM sohalar WHERE tur IS NOT NULL AND tur <> '' AND tur <> 'lab'")
+        kodlar.update(str(k).strip().lower() for k in _bir_ustun(cur) if k)
+    except Exception:
+        pass
+    return kodlar
+
 # PANEL TAHLILLARI (2026-09-29 da topildi): registratsiya "BUYRAK PANELI"
 # bilan birga uning a'zolarini (Mochevina, Kreatinin...) ham ALOHIDA qator
 # qilib qo'shadi. Natija esa bitta panel JSON ida saqlanadi — a'zolar nomi
@@ -144,11 +157,13 @@ def buyurtma_tugallik(cur, order_id):
         LEFT JOIN tahlillar t ON t.id = oi.tahlil_id
         WHERE oi.order_id = %s
     """, (order_id,))
+    qatorlar = _qatorlar(cur)
+    lab_emas = lab_emas_sohalar(cur)
     buyurtma = []                         # [(nomi, tahlil_id)]
-    for nomi, soha, tahlil_id in _qatorlar(cur):
+    for nomi, soha, tahlil_id in qatorlar:
         if not nomi or not str(nomi).strip():
             continue
-        if soha and str(soha).strip().lower() in LAB_BO_LMAGAN_SOHALAR:
+        if soha and str(soha).strip().lower() in lab_emas:
             continue                      # UZI / vrach qabuli — blankaga kirmaydi
         buyurtma.append((str(nomi).strip(), tahlil_id))
 
