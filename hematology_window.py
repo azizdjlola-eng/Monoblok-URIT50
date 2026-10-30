@@ -227,8 +227,13 @@ def get_multi_ref(param: str, age_str, gender: str) -> tuple:
     """
     Yosh va jinsga qarab norma oralig'ini qaytaradi.
     Qaytaradi: (low, high, ref_str) yoki (None, None, '') agar topilmasa.
+    Laboratoriya o'zgartirgan normasi (gemo_normalar, bazada) standartdan ustun.
     """
-    norms = MULTI_REF_NORMALS.get(param)
+    try:
+        import gemo_normalar as _gn
+        norms = _gn.ol(param) or MULTI_REF_NORMALS.get(param)
+    except Exception:
+        norms = MULTI_REF_NORMALS.get(param)
     if not norms:
         return None, None, ""
 

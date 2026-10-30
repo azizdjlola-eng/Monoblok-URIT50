@@ -330,6 +330,18 @@ def ochish_oyna(parent, namuna_fn=None):
               font=("Arial", 10, "bold"), padx=16, pady=4, cursor="hand2").pack(side=tk.RIGHT, padx=4)
     ttk.Button(bot, text="Bekor qilish", command=win.destroy).pack(side=tk.RIGHT, padx=4)
     ttk.Button(bot, text="↺ Standart", command=_standart).pack(side=tk.RIGHT, padx=4)
+
+    def _normalar():
+        try:
+            from hematology_window import MULTI_REF_NORMALS
+            import gemo_normalar
+            gemo_normalar.ochish_oyna(win, MULTI_REF_NORMALS,
+                                      qoshimcha_parametrlar=[q["kod"] for q in jad.qatorlar
+                                                             if q["kod"] not in DEFAULT_KODLAR])
+        except Exception as e:
+            messagebox.showerror("Normalar", f"Normalar oynasi ochilmadi:\n{e}", parent=win)
+
+    ttk.Button(bot, text="📏 Normalar (yosh × jins)...", command=_normalar).pack(side=tk.LEFT, padx=4)
     if namuna_fn is not None:
         ttk.Button(bot, text="👁 Namuna blanka (Word)", command=_namuna).pack(side=tk.LEFT, padx=4)
 
