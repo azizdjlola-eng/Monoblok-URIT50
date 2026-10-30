@@ -761,6 +761,8 @@ def replace_text_in_doc(doc: Document, old: str, new: str):
 
 # Helper: get_test_norma() - DB-first, hardcoded fallback
 def is_categorical_test(test_name: str):
+    if _tt.turi(test_name):
+        return False   # maxsus turga (Umumiy qon ...) bog'langan — qon guruhi emas
     test_name_lower = test_name.lower()
     categorical_keywords = [
         'qon guruhi', 'qon guruh', 'rezus', 'резус', 'guruh', 'группа',
@@ -4838,30 +4840,47 @@ def insert_blanka_ustuni_header(doc: Document, order_info: dict, qr_link_overrid
         insert_simple_header(doc, order_info)
 
 # [12] create_results_table() va create_simple_table_for_tests()
+# Maxsus tahlil turlari: avval katalog ID bog'lanishi (tahlil_turlari, Tizim
+# Sozlamalari \u2192 \ud83e\udde9 Maxsus tahlillar), bog'lanmagan tahlil \u2014 avvalgidek nom bo'yicha.
+import tahlil_turlari as _tt
+
+
+def _nom_qondan_mazok(test_name):
+    tl = (test_name or '').lower()
+    return 'qondan' in tl and 'mazok' in tl
+
 def _is_qondan_mazok_test(test_name: str) -> bool:
     """Qondan mazok (morfologiya) testimi tekshiradi."""
-    tl = test_name.lower()
-    return 'qondan' in tl and 'mazok' in tl
+    return _tt.tekshir('qondan_mazok', test_name, _nom_qondan_mazok)
 
 def _is_ginekologik_test(test_name: str) -> bool:
     """Test ginekologik/urologik surtmami yoki yo'qmi tekshiradi."""
-    if _is_qondan_mazok_test(test_name):
-        return False
+    if _is_qondan_mazok_test(test_name) or _tt.turi(test_name):
+        return False   # boshqa maxsus turga bog'langan tahlil surtma emas
     tl = test_name.lower()
     return any(k in tl for k in ['ginekolog', 'surtma', 'mazok', 'urologik'])
 
-def _is_hematology_cbc_test(test_name: str) -> bool:
+def _nom_cbc(test_name):
     tn = (test_name or '').lower()
     return any(x in tn for x in ['qonning umumiy tahlili', 'umumiy qon tahlili', 'umumiy qon']) and \
            not any(x in tn for x in ['qon guruhi', 'rezus', 'ivish', 'qib', 'echt'])
 
-def _is_urine_umumiy_test(test_name: str) -> bool:
+def _is_hematology_cbc_test(test_name: str) -> bool:
+    return _tt.tekshir('gemo_cbc', test_name, _nom_cbc)
+
+def _nom_siydik_umumiy(test_name):
     tn = (test_name or '').lower()
     return any(x in tn for x in ['siydikning umumiy tahlili', 'umumiy siydik tahlili', 'umumiy siydik'])
 
-def _is_bilirubin_test(test_name: str) -> bool:
+def _is_urine_umumiy_test(test_name: str) -> bool:
+    return _tt.tekshir('siydik_umumiy', test_name, _nom_siydik_umumiy)
+
+def _nom_bilirubin(test_name):
     tn = (test_name or '').lower()
     return 'bilirubin' in tn or '\u0431\u0438\u043b\u0438\u0440\u0443\u0431\u0438\u043d' in tn
+
+def _is_bilirubin_test(test_name: str) -> bool:
+    return _tt.tekshir('bilirubin', test_name, _nom_bilirubin)
 
 # ── GEPATIT A (IgM va IgG, ekspress) — bitta kassetada ikki natija ────────
 # Natija JSON: {"igm": "Manfiy (-)", "igg": "Musbat (+)"}. Oynada, ro'yxatda
@@ -4873,11 +4892,15 @@ HAV_KOMPONENTLAR = [
 HAV_JAVOBLAR = ['Manfiy (-)', 'Musbat (+)']
 
 
-def _is_hav_combo_test(test_name: str) -> bool:
-    """'Gepatit A (IgM va IgG, ekspress)' — IFA dagi 'Gepatit A (IgG, IFA)' EMAS."""
+def _nom_hav_combo(test_name):
     tn = (test_name or '').lower()
     return ('gepatit a' in tn and 'igm' in tn and 'igg' in tn
             and 'ifa' not in tn and 'ифа' not in tn)
+
+
+def _is_hav_combo_test(test_name: str) -> bool:
+    """'Gepatit A (IgM va IgG, ekspress)' — IFA dagi 'Gepatit A (IgG, IFA)' EMAS."""
+    return _tt.tekshir('hav_combo', test_name, _nom_hav_combo)
 
 
 def _hav_result_template(db_template=None) -> dict:
@@ -4919,14 +4942,20 @@ def _hav_xulosa(igm, igg) -> str:
     return "Gepatit A ga antitelalar aniqlanmadi"
 
 
-def _is_lipid_spektri_test(test_name: str) -> bool:
+def _nom_lipid(test_name):
     tn = (test_name or '').lower()
     return ('lipid spektri' in tn or 'lipid paneli' in tn
             or 'lipidlar spektori' in tn or 'lipidlar paneli' in tn)
 
-def _is_buyrak_paneli_test(test_name: str) -> bool:
+def _is_lipid_spektri_test(test_name: str) -> bool:
+    return _tt.tekshir('lipid', test_name, _nom_lipid)
+
+def _nom_buyrak(test_name):
     tn = (test_name or '').lower()
     return 'buyrak paneli' in tn or 'buyrak panel' in tn
+
+def _is_buyrak_paneli_test(test_name: str) -> bool:
+    return _tt.tekshir('buyrak', test_name, _nom_buyrak)
 
 
 # Panel natija oynasi shablonlari — bazada (tahlillar_norma.result_template)
@@ -4984,10 +5013,13 @@ def _ichki_natija_qiymati(raw):
         s = '' if d.get('result', d.get('value')) is None else str(d.get('result', d.get('value')))
     return s
 
-def _is_gtt_test(test_name: str) -> bool:
-    """Glyukozaga tolerantlik testi (GTT) ekanligini tekshirish."""
+def _nom_gtt(test_name):
     tn = (test_name or '').lower()
     return 'tolerantlik' in tn or 'gtt' in tn
+
+def _is_gtt_test(test_name: str) -> bool:
+    """Glyukozaga tolerantlik testi (GTT) ekanligini tekshirish."""
+    return _tt.tekshir('gtt', test_name, _nom_gtt)
 
 def _get_revmoproba_component_normas(test_name: str) -> dict:
     """tahlillar_norma.result_template dan RF/CRP/ASLO normalari uchun {key: norma} lug'at qaytaradi."""
@@ -5017,9 +5049,12 @@ def _get_revmoproba_component_normas(test_name: str) -> dict:
         except: pass
         # conn.close() QILMAYMIZ — umumiy (global) db_conn() ulanishi
 
-def _is_revmoproba_qolda_test(test_name: str) -> bool:
+def _nom_revmo_qolda(test_name):
     tn = (test_name or '').lower()
     return ('revmoproba' in tn or ('revmo' in tn and 'proba' in tn)) and 'avtomat' not in tn
+
+def _is_revmoproba_qolda_test(test_name: str) -> bool:
+    return _tt.tekshir('revmo_qolda', test_name, _nom_revmo_qolda)
 
 def _is_revmoproba_auto_test(test_name: str) -> bool:
     tn = (test_name or '').lower()
@@ -5033,10 +5068,13 @@ def _is_revmoproba_auto_test(test_name: str) -> bool:
         return True
     return False
 
-def _is_revmoproba_full_auto_test(test_name: str) -> bool:
-    """Faqat 'REVMOPROBA to'liq (avtomat)' — RF+CRP+ASLO birlashtirilgan test."""
+def _nom_revmo_avto(test_name):
     tn = (test_name or '').lower()
     return 'revmoproba' in tn and 'avtomat' in tn
+
+def _is_revmoproba_full_auto_test(test_name: str) -> bool:
+    """Faqat 'REVMOPROBA to'liq (avtomat)' — RF+CRP+ASLO birlashtirilgan test."""
+    return _tt.tekshir('revmo_avto', test_name, _nom_revmo_avto)
 
 
 # ── QUYI O'LCHASH CHEGARASI: "0" o'rniga "5 dan kam" (2026-09-29) ─────────
@@ -24294,6 +24332,27 @@ Sana: {_sana_fmt}"""
             foreground="#555", justify=tk.LEFT, wraplength=620).grid(
             row=7, column=0, columnspan=3, sticky=tk.W, padx=8, pady=(6, 8))
 
+        # ─────────────────── MAXSUS TAHLILLAR (katalog bog'lash) ─────────────
+        # Umumiy qon / siydik / panellar katalog nomi boshqacha bo'lsa ham tanilsin
+        # (tahlil_turlari.py). Yangi mijozga o'rnatishda birinchi tekshiriladigan joy.
+        tab_tt = ttk.Frame(nb, padding=12)
+        nb.add(tab_tt, text="🧩 Maxsus tahlillar")
+        ttk.Label(tab_tt, justify=tk.LEFT, wraplength=620, text=(
+            "Dastur Umumiy qon tahlili, Umumiy siydik tahlili, Bilirubin / Lipid / Buyrak "
+            "panellari, GTT, Revmoproba kabi tahlillarni maxsus ishlaydi: analizator natijasi "
+            "shu tahlilga tushadi, blankada alohida jadval chiqadi.\n\n"
+            "Ular katalogdagi NOMI bo'yicha taniladi («umumiy qon», «lipid spektri» ...). "
+            "Katalogingizda boshqacha nomlangan bo'lsa (masalan «OAK», «Общий анализ крови») — "
+            "analizator natijasi bemorga tushmaydi. Buni oldini olish uchun tahlilni shu yerda "
+            "katalog bo'yicha bog'lang.")).pack(anchor="w", pady=(0, 10))
+        ttk.Button(tab_tt, text="🧩 Maxsus tahlillarni katalogga bog'lash...",
+                   command=lambda: _tt.ochish_oyna(dialog, eski_qoidalar={
+                       'gemo_cbc': _nom_cbc, 'siydik_umumiy': _nom_siydik_umumiy,
+                       'bilirubin': _nom_bilirubin, 'lipid': _nom_lipid, 'buyrak': _nom_buyrak,
+                       'gtt': _nom_gtt, 'hav_combo': _nom_hav_combo, 'revmo_avto': _nom_revmo_avto,
+                       'revmo_qolda': _nom_revmo_qolda, 'qondan_mazok': _nom_qondan_mazok})
+                   ).pack(anchor="w")
+
         # ───────────────────────── PAPKALAR ─────────────────────────────
         # Analizatordan kelgan RAW/TXT fayllar qayerga tushadi (natija_papka.py).
         # Mijozda G: disk yo'q — papka shu yerdan tanlanadi (2026-10-11).
@@ -26503,9 +26562,11 @@ Sana: {_sana_fmt}"""
 
         has_cbc_test = False
         for test in self.current_tests:
-            tname_low = test.get('nomi', '').lower()
-            is_cbc = (any(exact in tname_low for exact in CBC_EXACT_NAMES)
-                      and not any(ex in tname_low for ex in CBC_EXCLUDE))
+            # Katalogda «Umumiy qon tahlili» turiga bog'langan bo'lsa — shu (nomi «OAK» bo'lsa ham)
+            is_cbc = _tt.tekshir(
+                'gemo_cbc', test.get('nomi', ''),
+                lambda n: (any(exact in n.lower() for exact in CBC_EXACT_NAMES)
+                           and not any(ex in n.lower() for ex in CBC_EXCLUDE)))
             has_cbc_test = has_cbc_test or is_cbc
             # DIQQAT: ilgari bu yerda "natijasi yo'q bo'lsa" sharti bor edi va
             # shu sababli XATO natijani analizatordan QAYTA import qilib
@@ -27089,8 +27150,10 @@ Sana: {_sana_fmt}"""
         urine_tests = []
         for t in self.current_tests:
             tt = (t.get('test_type') or '').strip().upper()
-            nm = (t.get('nomi') or '').strip().upper()
-            is_umumiy_siydik = any(ex in nm for ex in URINE_EXACT)
+            # Katalogda «Siydikning umumiy tahlili» turiga bog'langan bo'lsa — shu (nomi boshqacha bo'lsa ham)
+            is_umumiy_siydik = _tt.tekshir(
+                'siydik_umumiy', t.get('nomi') or '',
+                lambda n: any(ex in n.strip().upper() for ex in URINE_EXACT))
             if (tt == 'URINE' and is_umumiy_siydik) or is_umumiy_siydik:
                 urine_tests.append(t)
 

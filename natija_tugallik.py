@@ -77,6 +77,14 @@ def panel_azolari(nom) -> set:
     Monoblokda ID lar bio_blanka sozlamasidan (katalog boshqa bo'lsa); u yo'q joyda
     (masalan LIMS) — yuqoridagi standart."""
     n = _norm(nom)
+    try:   # katalogda panel turiga bog'langan bo'lsa (nomi boshqacha bo'lsa ham) — monoblokda
+        import tahlil_turlari as _ttl
+        import bio_blanka as _bbl
+        _t = _ttl.turi(nom)
+        if _t in ("lipid", "buyrak"):
+            return set(_bbl.panel_azolari(_t))
+    except Exception:
+        pass
     for kalit, azolar in PANEL_AZOLARI.items():
         if kalit in n:
             try:

@@ -2061,10 +2061,15 @@ def _do_save_patient(patient_info, status_var, silent=False):
             _CBC_EXACT   = ('qonning umumiy tahlili', 'umumiy qon tahlili', 'umumiy qon')
             _CBC_EXCLUDE = ('qon guruhi', 'qon guruh', 'rezus', 'ivish', 'qib', 'echt')
             cbc_names = []
+            try:
+                import tahlil_turlari as _ttl   # katalogda «Umumiy qon tahlili» ga bog'langan nom
+            except Exception:
+                _ttl = None
             for _r in cursor.fetchall():
                 _nm  = (_r.get('nomi') or '')
-                _low = _nm.lower()
-                if any(e in _low for e in _CBC_EXACT) and not any(x in _low for x in _CBC_EXCLUDE):
+                _eski = (lambda n: any(e in n.lower() for e in _CBC_EXACT)
+                         and not any(x in n.lower() for x in _CBC_EXCLUDE))
+                if (_ttl.tekshir('gemo_cbc', _nm, _eski) if _ttl else _eski(_nm)):
                     cbc_names.append(_nm)
 
             if cbc_names:
