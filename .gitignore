@@ -27,3 +27,28 @@ litsenziya/berilgan_litsenziyalar.json
 
 # Analizator/baza lokal sozlama (har kompyuterda alohida)
 analizator.json
+
+# Analizator xom natijalari / bemor ma'lumoti (har kompyuterda o'zi, GitHub'ga chiqmasin)
+BC-20s/
+BK280/
+Urit/
+QC_REPORTS/
+Malumotnoma_*.docx
+docs/*.zip
+
+# Zaxira nusxalar
+_MERGE_BACKUP_*/
+_PULL_BACKUP_*/
+_SYNC_BACKUP_*/
+_zaxira_*/
+_eski/
+*.bak
+*.bak_*
+*.LOCAL_BEFORE_MERGE_*
+
+# Qo'llanma chiqishlari (qollanma_yasash.py yasaydi)
+docs/qollanmalar/*.docx
+docs/qollanmalar/*.pdf
+
+# Lokal sozlama
+bio_kod_xarita.json
