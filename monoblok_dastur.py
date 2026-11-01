@@ -259,7 +259,9 @@ STANDART_SHABLON_MAPPING = {
     'revmoprob': 'REVMOPROBA.docx',
     'pepsinogen': 'Pepsinogen 1 va Pepsinogen 2   IFA usulida aniqlash.docx',
     'insulin': 'INSULIN VA HOMA INDEKSINI ANIQLASH.docx',
-    'homa': 'INSULIN VA HOMA INDEKSINI ANIQLASH.docx',
+    # 'homa' yolg'iz emas — «Chlamydia trac-HOMA-tis» ham shu shablonga tushardi
+    'homa-ir': 'INSULIN VA HOMA INDEKSINI ANIQLASH.docx',
+    'homa indeks': 'INSULIN VA HOMA INDEKSINI ANIQLASH.docx',
     'siydikning umumiy': 'SIYDIKNING UMUMIY TAXLILI.docx',
     'umumiy siydik': 'SIYDIKNING UMUMIY TAXLILI.docx',
 }
@@ -1461,7 +1463,12 @@ def get_test_norma(test_name: str, jins: str = "", guruh: str = "", yosh: int = 
             if result:
                 test_type = result.get('type', 'numeric')
                 if test_type == 'categorical' or is_categorical_test(test_name_clean):
-                    return {"norma": "Har qanday qiymat norma hisoblanadi", "unit": result.get('birlik', ''), "type": "categorical"}
+                    # Matnli norma («Steril», «Patogen flora o'smadi» — katalogdan) blankada
+                    # ko'rinsin; bo'sh yoki «-» bo'lsa — avvalgidek umumiy yozuv.
+                    _matn_norma = str(result.get('norma') or '').strip()
+                    if _matn_norma in ('', '-') or is_categorical_test(test_name_clean):
+                        _matn_norma = "Har qanday qiymat norma hisoblanadi"
+                    return {"norma": _matn_norma, "unit": result.get('birlik', ''), "type": "categorical"}
                 norma_text = result.get('norma', '-')
 
                 # BARCHA NORMALAR TO'LIQ KO'RSATILADI — faqat bemorga mos kelgan qator qalin bo'ladi.
@@ -2412,6 +2419,8 @@ def create_pepsinogen_table_in_doc(doc, result_json, order_info):
     try:
         data = json.loads(result_json) if result_json else {}
     except Exception:
+        data = {}
+    if not isinstance(data, dict):   # oddiy son ("5") — butun blanka yiqilmasin
         data = {}
 
     # Yashil sarlavha (revmoproba uslubida)
@@ -16274,7 +16283,8 @@ Sana: {_sana_fmt}"""
                 if _row:
                     _tt = ((_row.get('type') or 'numeric')).strip().lower()
                     if _tt == 'categorical':
-                        return {"norma": "Har qanday qiymat norma hisoblanadi",
+                        _mn = str(_row.get('norma') or '').strip()
+                        return {"norma": _mn if _mn not in ('', '-') else "Har qanday qiymat norma hisoblanadi",
                                 "unit": _row.get('birlik', ''), "type": "categorical"}
                     _norma_text = _row.get('norma') or '-'
                     if _norma_text and _norma_text != '-' and (jins or yosh_int is not None):
