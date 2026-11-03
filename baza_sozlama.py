@@ -1439,6 +1439,17 @@ def sozlama_oynasi(parent=None, bolim: str = "baza") -> bool:
 
 if __name__ == "__main__":
     import sys as _s
+    if "--qoriqchi" in _s.argv:
+        # «AzizMed Qo'riqchi» Windows vazifasi (har 5 daqiqa): oynasiz bitta
+        # aylanish — buzilgan xizmatni (TV, Vrach kabineti, skaner...) qayta yoqadi
+        try:
+            import xizmat_jurnali
+            xizmat_jurnali.sozla("Qoriqchi")
+        except Exception:
+            pass
+        import tizim_nazorati
+        tizim_nazorati.qoriqchi_bir_aylanish(log=lambda m: None)
+        _s.exit(0)
     _b = "baza"
     if "--litsenziya" in _s.argv:
         _b = "litsenziya"

@@ -26,6 +26,7 @@ Qoidalar:
 import os
 import re
 import sys
+import json
 import socket
 import logging
 import platform
@@ -76,6 +77,74 @@ def telefonni_yashir(matn: str) -> str:
     for r in _TELEFON_RE:
         matn = r.sub("***TELEFON***", matn)
     return matn
+
+
+# ───────────────────────── Hodisalar jurnali ─────────────────────────
+# jurnal\hodisalar.log — bir qator = bir hodisa (JSON). Tizim nazoratchisi va
+# tuzatuvchi yozadi: nima buzildi, nega (texnik sabab), kim/nima tuzatdi,
+# natija, necha vaqt ishlamadi. Bir nechta jarayon (Registratsiya, Qo'riqchi)
+# yozadi — shuning uchun RotatingFileHandler emas, qisqa ochib-yopish + o'z
+# aylantirish (5 MB × 3).
+HODISA_FAYL = "hodisalar.log"
+_hodisa_qulf = threading.Lock()
+
+
+def _hodisa_yoli() -> str:
+    return os.path.join(jurnal_papka(), HODISA_FAYL)
+
+
+def _hodisa_aylantir(yol: str):
+    try:
+        if os.path.getsize(yol) < _FAYL_HAJM:
+            return
+        for i in range(_FAYL_SONI - 1, 0, -1):
+            a, b = f"{yol}.{i}", f"{yol}.{i + 1}"
+            if os.path.exists(a):
+                os.replace(a, b)
+        os.replace(yol, yol + ".1")
+    except Exception:
+        pass
+
+
+def hodisa_yoz(xizmat: str, nom: str, hodisa: str, sabab: str = "", kim: str = "",
+               natija: str = "", davom_sek: int = None, vaqt: datetime.datetime = None):
+    """Bitta hodisa: hodisa = buzildi | tuzaldi | ogohlantirish | o'qildi |
+    tuzatish | avto tuzatish. Hech qachon istisno otmaydi."""
+    try:
+        d = {"vaqt": (vaqt or datetime.datetime.now()).strftime("%Y-%m-%d %H:%M:%S"),
+             "kompyuter": socket.gethostname(), "dastur": _dastur or "", "xizmat": xizmat,
+             "nom": nom, "hodisa": hodisa, "sabab": telefonni_yashir(str(sabab or ""))[:400],
+             "kim": kim or "", "natija": natija or ""}
+        if davom_sek is not None:
+            d["davom_sek"] = int(davom_sek)
+        yol = _hodisa_yoli()
+        with _hodisa_qulf:
+            os.makedirs(os.path.dirname(yol), exist_ok=True)
+            _hodisa_aylantir(yol)
+            with open(yol, "a", encoding="utf-8") as f:
+                f.write(json.dumps(d, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def hodisalar_oqi(kun: int = 30, xizmat: str = "", eng_kop: int = 5000) -> list:
+    """Oxirgi `kun` kunlik hodisalar (yangisi oxirida). Aylantirilgan fayllar ham o'qiladi."""
+    chegara = (datetime.datetime.now() - datetime.timedelta(days=kun)).strftime("%Y-%m-%d %H:%M:%S")
+    yol = _hodisa_yoli()
+    out = []
+    for f in [f"{yol}.{i}" for i in range(_FAYL_SONI, 0, -1)] + [yol]:
+        try:
+            with open(f, encoding="utf-8", errors="replace") as fh:
+                for q in fh:
+                    try:
+                        d = json.loads(q)
+                    except Exception:
+                        continue
+                    if d.get("vaqt", "") >= chegara and (not xizmat or d.get("xizmat") == xizmat):
+                        out.append(d)
+        except Exception:
+            pass
+    return out[-eng_kop:]
 
 
 class _Formatlovchi(logging.Formatter):
@@ -346,6 +415,21 @@ def holat_matni(dastur: str = "") -> str:
         q.extend("  " + x for x in xatolar)
     else:
         q.append("  (yo'q)")
+    q.append("")
+    # Tizim nazoratchisi: nima buzildi / kim-nima tuzatdi (hodisalar.log)
+    q.append("Oxirgi hodisalar (🛡 Tizim nazorati, 7 kun):")
+    try:
+        hod = hodisalar_oqi(7)
+        avto = sum(1 for h in hod if h.get("hodisa") == "avto tuzatish")
+        qolda = sum(1 for h in hod if h.get("hodisa") == "tuzatish")
+        for h in hod[-8:]:
+            q.append(f"  {h.get('vaqt', '')}  {h.get('nom', '')}: {h.get('hodisa', '')}"
+                     f"{(' (' + h['kim'] + ')') if h.get('kim') else ''} — {str(h.get('sabab', ''))[:120]}")
+        if not hod:
+            q.append("  (yo'q)")
+        q.append(f"  Tuzatishlar 7 kunda: avto {avto}, qo'lda {qolda}")
+    except Exception as e:
+        q.append(f"  tekshirib bo'lmadi ({e})")
     q.append("")
     q.append(f"To'liq jurnal: {jurnal_papka()}")
     return telefonni_yashir("\n".join(q)) + "\n"

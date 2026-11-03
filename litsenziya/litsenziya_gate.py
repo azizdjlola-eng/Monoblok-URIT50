@@ -124,6 +124,77 @@ def darvoza(app_nomi: str = "AzizMedLine", parent=None) -> bool:
     return _faollashtirish_oyna(n, app_nomi, parent)
 
 
+def _klinika_taxmin() -> str:
+    """Brend sozlamasidagi klinika nomi (bo'lsa) — formani oldindan to'ldirish uchun."""
+    try:
+        import masofa_agent
+        return masofa_agent._klinika_nomi()
+    except Exception:
+        return ""
+
+
+def sorov_oynasi(parent, natija):
+    """«📨 Litsenziya so'rash»: klinika, telefon, Telegram → VPS → egasiga Telegram xabari.
+    Internet bo'lmasa — so'rov matni nusxalanadi (Telegram'da qo'lda yuborish uchun)."""
+    import tkinter as tk
+    from tkinter import messagebox
+    w = tk.Toplevel(parent)
+    w.title("📨 Litsenziya so'rash")
+    w.configure(bg="#0f1422")
+    w.resizable(False, False)
+    tk.Label(w, text="Litsenziya so'rovi", bg="#0f1422", fg="#e6e9f2",
+             font=("Segoe UI Semibold", 13)).pack(pady=(14, 2))
+    tk.Label(w, text="Ma'lumot AzizMedLine'ga yuboriladi, siz bilan bog'lanishadi.", bg="#0f1422",
+             fg="#9aa3bd", font=("Segoe UI", 9)).pack()
+    f = tk.Frame(w, bg="#0f1422")
+    f.pack(padx=22, pady=10)
+    maydon = {}
+    for i, (k, nom, std) in enumerate((("klinika", "Klinika / laboratoriya nomi *", _klinika_taxmin()),
+                                       ("telefon", "Telefon raqami *", ""),
+                                       ("telegram", "Telegram (raqam yoki @nom)", ""),
+                                       ("izoh", "Izoh (nechta kompyuter, muddat...)", ""))):
+        tk.Label(f, text=nom, bg="#0f1422", fg="#cfd6ea", font=("Segoe UI", 9)).grid(row=i, column=0, sticky="w", pady=3)
+        v = tk.StringVar(value=std)
+        tk.Entry(f, textvariable=v, width=34, font=("Segoe UI", 10)).grid(row=i, column=1, padx=(8, 0), pady=3)
+        maydon[k] = v
+    v_roz = tk.BooleanVar(value=False)
+    tk.Checkbutton(w, text="Ma'lumotlarim AzizMedLine'ga yuborilishiga roziman", variable=v_roz,
+                   bg="#0f1422", fg="#cfd6ea", selectcolor="#1a2236", activebackground="#0f1422",
+                   font=("Segoe UI", 9)).pack(anchor="w", padx=22)
+
+    def _matn():
+        return (f"Litsenziya so'rovi\nKlinika: {maydon['klinika'].get()}\nTelefon: {maydon['telefon'].get()}\n"
+                f"Telegram: {maydon['telegram'].get()}\nKompyuter ID: {natija.machine_id}\n"
+                f"Holat: {natija.xabar}\nIzoh: {maydon['izoh'].get()}")
+
+    def _yubor():
+        if not maydon["klinika"].get().strip() or not maydon["telefon"].get().strip():
+            messagebox.showwarning("To'ldiring", "Klinika nomi va telefon raqami kerak.", parent=w)
+            return
+        if not v_roz.get():
+            messagebox.showwarning("Rozilik", "Yuborish uchun rozilik belgisini qo'ying.", parent=w)
+            return
+        ok, xabar = lm.sorov_yubor(maydon["klinika"].get().strip(), maydon["telefon"].get().strip(),
+                                   maydon["telegram"].get().strip(), maydon["izoh"].get().strip(), natija.xabar)
+        if ok:
+            messagebox.showinfo("Yuborildi", xabar, parent=w)
+            w.destroy()
+            return
+        try:
+            w.clipboard_clear()
+            w.clipboard_append(_matn())
+        except Exception:
+            pass
+        messagebox.showwarning("Yuborilmadi", f"{xabar}\n\nSo'rov matni NUSXALANDI — uni Telegram'da "
+                               f"{ALOQA_TELEGRAM} ga yuboring (Ctrl+V)\nyoki qo'ng'iroq qiling: {ALOQA_TELEFON}",
+                               parent=w)
+    tk.Button(w, text="📨 Yuborish", command=_yubor, bg="#1f8a4c", fg="white", relief="flat",
+              font=("Segoe UI Semibold", 11), cursor="hand2").pack(fill="x", padx=22, pady=(8, 14), ipady=6)
+    w.transient(parent)
+    w.grab_set()
+    return w
+
+
 def _faollashtirish_oyna(natija, app_nomi, parent=None) -> bool:
     try:
         import tkinter as tk
@@ -137,7 +208,7 @@ def _faollashtirish_oyna(natija, app_nomi, parent=None) -> bool:
     oyna = tk.Toplevel(parent) if parent else tk.Tk()
     oyna.title(f"{app_nomi} — Litsenziya kerak")
     oyna.configure(bg="#0f1422")
-    en, bo = 520, 460
+    en, bo = 520, 510
     oyna.geometry(f"{en}x{bo}")
     oyna.resizable(False, False)
     try:
@@ -191,6 +262,9 @@ def _faollashtirish_oyna(natija, app_nomi, parent=None) -> bool:
     tk.Button(oyna, text="📂 Litsenziya faylini tanlash (.azlic)", command=fayl_tanla,
               bg="#1f8a4c", fg="white", relief="flat", font=("Segoe UI Semibold", 10),
               cursor="hand2").pack(fill="x", padx=26, pady=4, ipady=7)
+    tk.Button(oyna, text="📨 Litsenziya so'rash (internet orqali)",
+              command=lambda: sorov_oynasi(oyna, natija), bg="#8a5a1f", fg="white", relief="flat",
+              font=("Segoe UI Semibold", 10), cursor="hand2").pack(fill="x", padx=26, pady=4, ipady=7)
 
     def qayta():
         natija2 = lm.holatni_tekshir()

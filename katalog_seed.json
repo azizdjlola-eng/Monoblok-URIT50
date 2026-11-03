@@ -1005,7 +1005,7 @@
   "sample": "",
   "turi": "test",
   "soha": "ambulator",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 149,
@@ -1132,5 +1132,194 @@
   "turi": "test",
   "soha": "lab",
   "aktiv": 1
+ },
+ {
+  "id": 167,
+  "nomi": "Stomatolog ko'rigi va konsultatsiya",
+  "narxi": 50000,
+  "sample": "",
+  "turi": "test",
+  "soha": "stomatologiya",
+  "aktiv": 0
+ },
+ {
+  "id": 168,
+  "nomi": "Tish rentgeni (prisel)",
+  "narxi": 40000,
+  "sample": "",
+  "turi": "test",
+  "soha": "stomatologiya",
+  "aktiv": 0
+ },
+ {
+  "id": 169,
+  "nomi": "Ortopantomogramma (OPTG)",
+  "narxi": 100000,
+  "sample": "",
+  "turi": "test",
+  "soha": "stomatologiya",
+  "aktiv": 0
+ },
+ {
+  "id": 170,
+  "nomi": "Anesteziya (og'riqsizlantirish)",
+  "narxi": 50000,
+  "sample": "",
+  "turi": "test",
+  "soha": "stomatologiya",
+  "aktiv": 0
+ },
+ {
+  "id": 171,
+  "nomi": "Karies davolash + plomba (fotopolimer)",
+  "narxi": 350000,
+  "sample": "",
+  "turi": "test",
+  "soha": "stomatologiya",
+  "aktiv": 0
+ },
+ {
+  "id": 172,
+  "nomi": "Vaqtinchalik plomba",
+  "narxi": 80000,
+  "sample": "",
+  "turi": "test",
+  "soha": "stomatologiya",
+  "aktiv": 0
+ },
+ {
+  "id": 173,
+  "nomi": "Kanal davolash (1 kanal)",
+  "narxi": 300000,
+  "sample": "",
+  "turi": "test",
+  "soha": "stomatologiya",
+  "aktiv": 0
+ },
+ {
+  "id": 174,
+  "nomi": "Tish olish (oddiy)",
+  "narxi": 150000,
+  "sample": "",
+  "turi": "test",
+  "soha": "stomatologiya",
+  "aktiv": 0
+ },
+ {
+  "id": 175,
+  "nomi": "Tish olish (murakkab)",
+  "narxi": 300000,
+  "sample": "",
+  "turi": "test",
+  "soha": "stomatologiya",
+  "aktiv": 0
+ },
+ {
+  "id": 176,
+  "nomi": "Sut tishini olish",
+  "narxi": 80000,
+  "sample": "",
+  "turi": "test",
+  "soha": "stomatologiya",
+  "aktiv": 0
+ },
+ {
+  "id": 177,
+  "nomi": "Fissura germetizatsiyasi (silant)",
+  "narxi": 120000,
+  "sample": "",
+  "turi": "test",
+  "soha": "stomatologiya",
+  "aktiv": 0
+ },
+ {
+  "id": 178,
+  "nomi": "Professional gigiyena (tish tozalash)",
+  "narxi": 300000,
+  "sample": "",
+  "turi": "test",
+  "soha": "stomatologiya",
+  "aktiv": 0
+ },
+ {
+  "id": 179,
+  "nomi": "Tish oqartirish",
+  "narxi": 1200000,
+  "sample": "",
+  "turi": "test",
+  "soha": "stomatologiya",
+  "aktiv": 0
+ },
+ {
+  "id": 180,
+  "nomi": "Metallokeramik toj",
+  "narxi": 900000,
+  "sample": "",
+  "turi": "test",
+  "soha": "stomatologiya",
+  "aktiv": 0
+ },
+ {
+  "id": 181,
+  "nomi": "Sirkoniy toj",
+  "narxi": 2000000,
+  "sample": "",
+  "turi": "test",
+  "soha": "stomatologiya",
+  "aktiv": 0
+ },
+ {
+  "id": 182,
+  "nomi": "Implant o'rnatish",
+  "narxi": 5000000,
+  "sample": "",
+  "turi": "test",
+  "soha": "stomatologiya",
+  "aktiv": 0
+ },
+ {
+  "id": 183,
+  "nomi": "Homila UZI (skrining)",
+  "narxi": 120000,
+  "sample": "",
+  "turi": "test",
+  "soha": "uzi",
+  "aktiv": 0
+ },
+ {
+  "id": 184,
+  "nomi": "Prostata UZI",
+  "narxi": 60000,
+  "sample": "",
+  "turi": "test",
+  "soha": "uzi",
+  "aktiv": 0
+ },
+ {
+  "id": 185,
+  "nomi": "Qon tomirlari doppleri",
+  "narxi": 120000,
+  "sample": "",
+  "turi": "test",
+  "soha": "uzi",
+  "aktiv": 0
+ },
+ {
+  "id": 186,
+  "nomi": "Bo'g'imlar UZI",
+  "narxi": 80000,
+  "sample": "",
+  "turi": "test",
+  "soha": "uzi",
+  "aktiv": 0
+ },
+ {
+  "id": 187,
+  "nomi": "EKG (12 tarmoqli, tavsif bilan)",
+  "narxi": 40000,
+  "sample": "",
+  "turi": "test",
+  "soha": "funksional",
+  "aktiv": 0
  }
 ]

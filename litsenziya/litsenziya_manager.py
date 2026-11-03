@@ -134,8 +134,20 @@ def _online_tekshir(mid: str):
         s.close()
     except Exception:
         return None
+    # Egalik isboti: qo'limizdagi litsenziya imzosining sha256 i. Server to'liq
+    # paketni (ichida data_key bor) faqat shu isbot bilan beradi — Kompyuter ID
+    # ni bilgan begona odam kalitni ololmasin (blok — isbotsiz ham keladi).
+    egalik = ""
     try:
-        r = requests.get(url + "/litsenziya/holat", params={"mid": mid}, timeout=3)
+        fayl = faylni_top()
+        if fayl:
+            with open(fayl, "r", encoding="utf-8") as f:
+                egalik = hashlib.sha256(str(json.load(f).get("imzo", "")).strip().lower()
+                                        .encode("ascii")).hexdigest()
+    except Exception:
+        egalik = ""
+    try:
+        r = requests.get(url + "/litsenziya/holat", params={"mid": mid, "egalik": egalik}, timeout=3)
         if r.status_code != 200:
             return None
         paket = r.json()
@@ -168,6 +180,39 @@ def _online_tekshir(mid: str):
         except Exception:
             return None
     return None
+
+
+def sorov_yubor(klinika: str, telefon: str, telegram: str = "", izoh: str = "", holat: str = ""):
+    """«📨 Litsenziya so'rash» — VPS ga so'rov (egasiga Telegram xabari boradi).
+    Qaytaradi: (ok, xabar). Internet yo'q bo'lsa (False, sabab) — chaqiruvchi
+    matnni nusxalab Telegram orqali yuborishni taklif qiladi."""
+    import socket
+    import urllib.request
+    import urllib.error
+    from . import server_config
+    versiya = ""
+    try:
+        import xizmat_jurnali
+        versiya = xizmat_jurnali.versiya()
+    except Exception:
+        pass
+    d = {"mid": _mid.mashina_id(), "klinika": klinika, "telefon": telefon, "telegram": telegram,
+         "izoh": izoh, "kompyuter": socket.gethostname(), "versiya": versiya, "holat": holat}
+    req = urllib.request.Request(server_config.vps_url() + "/litsenziya/sorov",
+                                 data=json.dumps(d, ensure_ascii=False).encode("utf-8"),
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            j = json.loads(r.read().decode("utf-8") or "{}")
+        return (True, f"So'rov yuborildi (№{j.get('id')}). AzizMedLine siz bilan bog'lanadi.") if j.get("ok") \
+            else (False, j.get("xato") or "server rad etdi")
+    except urllib.error.HTTPError as e:
+        try:
+            return False, json.loads(e.read().decode("utf-8")).get("xato") or f"HTTP {e.code}"
+        except Exception:
+            return False, f"HTTP {e.code}"
+    except Exception as e:
+        return False, f"Internet/server bilan aloqa yo'q ({e})"
 
 
 def holatni_tekshir(online: bool = True) -> Natija:
