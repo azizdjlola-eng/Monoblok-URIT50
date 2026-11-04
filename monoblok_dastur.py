@@ -28290,7 +28290,14 @@ def main():
         print("=" * 60)
         print("Oyna ochilishi kerak. Agar ko'rinmasa, Alt+Tab bilan toping.")
         print("=" * 60)
-        
+
+        # Demo: sarlavhada «N kun qoldi», oxirgi 3 kunda har soatda ogohlantirish
+        try:
+            from litsenziya import litsenziya_gate as _lg_demo
+            _lg_demo.demo_kuzat(root)
+        except Exception as _dm_err:
+            print(f"Demo kuzatuvi ulanmadi: {_dm_err}")
+
         root.mainloop()
         
         print("[OK] Dastur to'xtatildi")

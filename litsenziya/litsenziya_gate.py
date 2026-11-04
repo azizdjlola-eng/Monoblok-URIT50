@@ -17,6 +17,7 @@ import os
 import sys
 
 from . import litsenziya_manager as lm
+from . import demo
 
 # Aloqa ma'lumotlari (faollashtirish oynasida ko'rsatiladi)
 ALOQA_TELEFON = "+998 99 673 13 42"
@@ -97,7 +98,7 @@ def darvoza_xizmat(app_nomi: str = "AzizMed xizmati", jim: bool = False) -> bool
     """
     if not getattr(sys, "frozen", False):
         return True
-    n = lm.holatni_tekshir()
+    n = _demo_tenglab_tekshir()
     if n.yaroqli:
         return True
     if jim:
@@ -118,10 +119,24 @@ def darvoza(app_nomi: str = "AzizMedLine", parent=None) -> bool:
     """
     if not getattr(sys, "frozen", False):
         return True
-    n = lm.holatni_tekshir()
+    n = _demo_tenglab_tekshir()
     if n.yaroqli:
         return True
     return _faollashtirish_oyna(n, app_nomi, parent)
+
+
+def _demo_tenglab_tekshir():
+    """holatni_tekshir + demo/litsenziyasiz holatda umumiy baza bilan tenglash: klinikada
+    demo ketayotgan bo'lsa yangi kompyuter O'SHA sanani oladi (hammasi bir kunda tugaydi),
+    klinika sotib olgan bo'lsa — 3 kunlik muhlat. Baza 3 s da javob bermasa — o'tkaziladi."""
+    n = lm.holatni_tekshir()
+    if n.holat == lm.Holat.YOQ or (n.payload or {}).get("tarif") == "DEMO":
+        try:
+            demo.baza_bilan_tenglash(n.machine_id)
+            n = lm.holatni_tekshir(online=False)
+        except Exception:
+            pass
+    return n
 
 
 def _klinika_taxmin() -> str:
@@ -195,6 +210,156 @@ def sorov_oynasi(parent, natija):
     return w
 
 
+def demo_oynasi(parent) -> bool:
+    """«🎁 30 kunlik sinov» formasi. Forma ma'lumoti klinika profiliga (chek, TV, Vrach) va
+    internet bo'lganda AzizMedLine'ga boradi. True — demo boshlandi va hali yaroqli."""
+    import tkinter as tk
+    from tkinter import ttk, messagebox
+    natija = {"ok": False}
+    w = tk.Toplevel(parent)
+    w.title("🎁 30 kunlik sinovni boshlash")
+    w.configure(bg="#0f1422")
+    w.resizable(False, False)
+    tk.Label(w, text=f"{demo.DEMO_KUN} kunlik bepul sinov", bg="#0f1422", fg="#e6e9f2",
+             font=("Segoe UI Semibold", 14)).pack(pady=(14, 2))
+    tk.Label(w, text="Barcha imkoniyatlar ochiq. Bu ma'lumotlar chek, blanka va TV'da ham ishlatiladi.",
+             bg="#0f1422", fg="#9aa3bd", font=("Segoe UI", 9)).pack(padx=20)
+    f = tk.Frame(w, bg="#0f1422")
+    f.pack(padx=22, pady=10)
+    maydon = {}
+    qatorlar = (("nomi", "Klinika / laboratoriya nomi *"), ("turi", "Turi *"), ("telefon", "Telefon raqami *"),
+                ("telegram", "Telegram (raqam yoki @nom)"), ("manzil", "Manzil (viloyat, tuman, ko'cha) *"),
+                ("masul", "Mas'ul shaxs"))
+    for i, (k, nom) in enumerate(qatorlar):
+        tk.Label(f, text=nom, bg="#0f1422", fg="#cfd6ea", font=("Segoe UI", 9)).grid(row=i, column=0, sticky="w", pady=3)
+        v = tk.StringVar()
+        if k == "turi":
+            v.set(demo.TURLAR[0])
+            ttk.Combobox(f, textvariable=v, values=demo.TURLAR, state="readonly", width=32).grid(
+                row=i, column=1, padx=(8, 0), pady=3)
+        else:
+            tk.Entry(f, textvariable=v, width=35, font=("Segoe UI", 10)).grid(row=i, column=1, padx=(8, 0), pady=3)
+        maydon[k] = v
+    v_roz = tk.BooleanVar(value=False)
+    tk.Checkbutton(w, text="Ma'lumotlarim AzizMedLine'ga yuborilishiga roziman (internet bo'lganda)",
+                   variable=v_roz, bg="#0f1422", fg="#cfd6ea", selectcolor="#1a2236", activebackground="#0f1422",
+                   font=("Segoe UI", 9)).pack(anchor="w", padx=22)
+
+    def _boshla():
+        forma = {k: v.get().strip() for k, v in maydon.items()}
+        if not forma["nomi"] or not forma["telefon"] or not forma["manzil"]:
+            messagebox.showwarning("To'ldiring", "Klinika nomi, telefon va manzil kerak.", parent=w)
+            return
+        if not v_roz.get():
+            messagebox.showwarning("Rozilik", "Boshlash uchun rozilik belgisini qo'ying.", parent=w)
+            return
+        d = demo.boshlat(forma)
+        if d and not d["tugagan"]:
+            natija["ok"] = True
+            messagebox.showinfo("Tayyor", f"Sinov boshlandi: {max(1, d['qolgan_sek'] // 86400)} kun.\n"
+                                "Dastur ochiladi.", parent=w)
+            w.destroy()
+        else:
+            messagebox.showerror("Sinov tugagan", "Bu kompyuterda sinov muddati ILGARI ishlatilgan.\n"
+                                 f"Litsenziya uchun: {ALOQA_TELEFON}  {ALOQA_TELEGRAM}", parent=w)
+            w.destroy()
+    tk.Button(w, text="🎁 Sinovni boshlash", command=_boshla, bg="#1f8a4c", fg="white", relief="flat",
+              font=("Segoe UI Semibold", 11), cursor="hand2").pack(fill="x", padx=22, pady=(8, 14), ipady=6)
+    w.transient(parent)
+    w.grab_set()
+    w.wait_window()
+    return natija["ok"]
+
+
+def _zaxira_ol(parent):
+    """Demo/litsenziya tugagach ham mijoz o'z ma'lumotini saqlab qola oladi (egasi qarori)."""
+    import threading
+    from tkinter import messagebox
+    try:
+        import baza_zaxira
+    except Exception:
+        messagebox.showwarning("Zaxira", "Zaxira moduli bu dasturda yo'q — Registratsiya orqali oling.", parent=parent)
+        return
+    natija = {}
+
+    def _ish():
+        try:
+            natija.update(baza_zaxira.eksport(sabab="litsenziya tugagan") or {})
+        except Exception as e:
+            natija.update({"ok": False, "xabar": str(e)})
+    t = threading.Thread(target=_ish, daemon=True)
+    t.start()
+
+    def _kut():
+        if t.is_alive():
+            parent.after(500, _kut)
+        elif natija.get("ok"):
+            messagebox.showinfo("💾 Zaxira olindi", f"{natija.get('fayl', '')}\n\nFaylni saqlab qo'ying.", parent=parent)
+        else:
+            messagebox.showerror("Zaxira olinmadi", str(natija.get("xabar") or "noma'lum xato"), parent=parent)
+    _kut()
+
+
+def demo_kuzat(root):
+    """Oyna ochilgach chaqiriladi (Registratsiya, Natija). Demo: sarlavhada «N kun qoldi»,
+    oxirgi 3 kunda HAR SOATDA ogohlantirish. Pullik litsenziya: bazaga belgi (keyin qo'shilgan
+    kompyuter 3 kunlik muhlat olsin). Faqat EXE da; xato dasturga ta'sir qilmaydi."""
+    if not getattr(sys, "frozen", False):
+        return
+    import threading
+    import time as _t
+    holat = {"oxirgi_xabar": 0.0, "fon": False, "belgi": False, "tugadi": False}
+
+    def _xabar(matn, sarlavha):
+        import tkinter as tk
+        w = tk.Toplevel(root)
+        w.title(sarlavha)
+        w.configure(bg="#fff3e0")
+        w.resizable(False, False)
+        tk.Label(w, text=matn, bg="#fff3e0", fg="#b71c1c", font=("Segoe UI Semibold", 11), justify="left",
+                 wraplength=460).pack(padx=18, pady=(14, 6))
+        tk.Label(w, text=f"{ALOQA_TELEFON}   {ALOQA_TELEGRAM}", bg="#fff3e0", fg="#333",
+                 font=("Segoe UI", 10)).pack()
+        r = tk.Frame(w, bg="#fff3e0")
+        r.pack(pady=12)
+        tk.Button(r, text="📨 Litsenziya so'rash", bg="#1f8a4c", fg="white", font=("Segoe UI Semibold", 10),
+                  command=lambda: sorov_oynasi(w, lm.holatni_tekshir(online=False))).pack(side="left", padx=6)
+        tk.Button(r, text="Yopish", command=w.destroy).pack(side="left", padx=6)
+        w.attributes("-topmost", True)
+        w.after(1500, lambda: w.attributes("-topmost", False))
+
+    def _tick():
+        try:
+            n = lm.holatni_tekshir(online=False)
+            p = n.payload or {}
+            if p.get("tarif") == "DEMO":
+                if not holat["fon"]:
+                    holat["fon"] = True
+                    demo.fon_ishga_tushir()
+                sek = max(0, int(p.get("expires_at", 0)) - int(_t.time()))
+                kun = sek // 86400 + (1 if sek % 86400 else 0)
+                sarlavha = root.title().split("  —  DEMO")[0]
+                root.title(f"{sarlavha}  —  DEMO: {kun} kun qoldi" if n.yaroqli else f"{sarlavha}  —  DEMO TUGAGAN")
+                if not n.yaroqli and not holat["tugadi"]:
+                    holat["tugadi"] = True
+                    _xabar("Sinov muddati tugadi. Dastur keyingi ochilishda ishlamaydi — ma'lumotlaringiz "
+                           "saqlanadi. Litsenziya oling.", "Sinov muddati tugadi")
+                elif n.yaroqli and sek <= 3 * 86400 and _t.time() - holat["oxirgi_xabar"] >= 3600:
+                    holat["oxirgi_xabar"] = _t.time()
+                    _xabar(f"Sinov muddati tugashiga {kun} kun qoldi!\nTugagach dastur ishlamaydi. "
+                           "Ma'lumotlar saqlanadi — litsenziya oling.", "⚠ Sinov tugayapti")
+            elif n.yaroqli and not holat["belgi"]:
+                holat["belgi"] = True
+                threading.Thread(target=demo.pullik_belgila, daemon=True, name="pullik_belgi").start()
+        except Exception:
+            pass
+        try:
+            root.after(60_000, _tick)
+        except Exception:
+            pass
+    root.after(5000, _tick)
+
+
 def _faollashtirish_oyna(natija, app_nomi, parent=None) -> bool:
     try:
         import tkinter as tk
@@ -208,7 +373,7 @@ def _faollashtirish_oyna(natija, app_nomi, parent=None) -> bool:
     oyna = tk.Toplevel(parent) if parent else tk.Tk()
     oyna.title(f"{app_nomi} — Litsenziya kerak")
     oyna.configure(bg="#0f1422")
-    en, bo = 520, 510
+    en, bo = 520, 610
     oyna.geometry(f"{en}x{bo}")
     oyna.resizable(False, False)
     try:
@@ -221,9 +386,26 @@ def _faollashtirish_oyna(natija, app_nomi, parent=None) -> bool:
         d.update(kw)
         return tk.Label(oyna, text=txt, **d)
 
-    lbl("🔒", font=("Segoe UI", 34)).pack(pady=(22, 4))
-    lbl("Dastur faollashtirilmagan", font=("Segoe UI Semibold", 15)).pack()
-    lbl(natija.xabar, fg="#ff9a9a", font=("Segoe UI", 10), wraplength=460).pack(pady=(6, 14))
+    # Birinchi marta (izi yo'q kompyuter) — eng avval BEPUL sinov: kompyuterni yaxshi
+    # bilmaydigan odam birinchi tugmani bosadi
+    sinov_mumkin = natija.holat == lm.Holat.YOQ and demo.boshlash_mumkinmi(natija.machine_id)
+    if sinov_mumkin:
+        lbl("👋", font=("Segoe UI", 30)).pack(pady=(16, 2))
+        lbl("Xush kelibsiz!", font=("Segoe UI Semibold", 15)).pack()
+        lbl(f"Dasturni {demo.DEMO_KUN} kun bepul sinab ko'ring yoki litsenziya o'rnating.", fg="#9fe0b8",
+            font=("Segoe UI", 10), wraplength=460).pack(pady=(4, 8))
+
+        def _demo_bosh():
+            if demo_oynasi(oyna):
+                holat["ok"] = True
+                oyna.destroy()
+        tk.Button(oyna, text=f"🎁 {demo.DEMO_KUN} kunlik BEPUL sinovni boshlash", command=_demo_bosh, bg="#0e9f6e",
+                  fg="white", relief="flat", font=("Segoe UI Semibold", 12), cursor="hand2"
+                  ).pack(fill="x", padx=26, pady=(0, 8), ipady=10)
+    else:
+        lbl("🔒", font=("Segoe UI", 34)).pack(pady=(22, 4))
+        lbl("Dastur faollashtirilmagan", font=("Segoe UI Semibold", 15)).pack()
+        lbl(natija.xabar, fg="#ff9a9a", font=("Segoe UI", 10), wraplength=460).pack(pady=(6, 14))
 
     ramka = tk.Frame(oyna, bg="#1a2236")
     ramka.pack(fill="x", padx=26, pady=4)
@@ -265,6 +447,11 @@ def _faollashtirish_oyna(natija, app_nomi, parent=None) -> bool:
     tk.Button(oyna, text="📨 Litsenziya so'rash (internet orqali)",
               command=lambda: sorov_oynasi(oyna, natija), bg="#8a5a1f", fg="white", relief="flat",
               font=("Segoe UI Semibold", 10), cursor="hand2").pack(fill="x", padx=26, pady=4, ipady=7)
+    if natija.holat == lm.Holat.MUDDATI_TUGAGAN:
+        # Ish to'xtaydi, lekin mijoz o'z ma'lumotini saqlab qola oladi (egasi qarori)
+        tk.Button(oyna, text="💾 Zaxira olish (ma'lumotlarim)", command=lambda: _zaxira_ol(oyna), bg="#2a3350",
+                  fg="#e6e9f2", relief="flat", font=("Segoe UI Semibold", 10), cursor="hand2"
+                  ).pack(fill="x", padx=26, pady=4, ipady=7)
 
     def qayta():
         natija2 = lm.holatni_tekshir()

@@ -24,6 +24,7 @@ from cryptography.exceptions import InvalidSignature
 from . import mashina_id as _mid
 from . import vaqt_himoya
 from . import yollar
+from . import demo
 
 try:
     from .ochiq_kalit import OCHIQ_KALIT_HEX
@@ -144,6 +145,11 @@ def _online_tekshir(mid: str):
             with open(fayl, "r", encoding="utf-8") as f:
                 egalik = hashlib.sha256(str(json.load(f).get("imzo", "")).strip().lower()
                                         .encode("ascii")).hexdigest()
+        else:
+            # Demo / birinchi litsenziya: fayl hali yo'q — VPS bergan egalik belgisi
+            _sir = demo.sir_oqi()
+            if _sir:
+                egalik = hashlib.sha256(_sir.lower().encode("ascii")).hexdigest()
     except Exception:
         egalik = ""
     try:
@@ -204,6 +210,8 @@ def sorov_yubor(klinika: str, telefon: str, telegram: str = "", izoh: str = "", 
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
             j = json.loads(r.read().decode("utf-8") or "{}")
+        if j.get("sir"):
+            demo.sir_saqla(j["sir"])       # litsenziya kelganda o'zi tortib olishi uchun
         return (True, f"So'rov yuborildi (№{j.get('id')}). AzizMedLine siz bilan bog'lanadi.") if j.get("ok") \
             else (False, j.get("xato") or "server rad etdi")
     except urllib.error.HTTPError as e:
@@ -213,6 +221,32 @@ def sorov_yubor(klinika: str, telefon: str, telegram: str = "", izoh: str = "", 
             return False, f"HTTP {e.code}"
     except Exception as e:
         return False, f"Internet/server bilan aloqa yo'q ({e})"
+
+
+def _demo_natija(mid: str) -> Natija:
+    """Litsenziya fayli YO'Q kompyuter: demo izi bo'lsa — demo holati, aks holda YOQ.
+    Faqat fayl yo'q bo'lganda chaqiriladi: muddati tugagan pullik litsenziya egasi
+    (fayl bor) tekin demoga o'tolmaydi. Kalit (data_key) yo'q — baza_shifr shifrlamaydi."""
+    try:
+        d = demo.holat(mid=mid)
+    except Exception:
+        d = None
+    if not d:
+        return Natija(Holat.YOQ, "Litsenziya topilmadi. Dastur faollashtirilmagan.",
+                      machine_id=mid)
+    nom = f"{demo.MUHLAT_KUN} kunlik muhlat" if d["muhlat"] else f"{demo.DEMO_KUN} kunlik demo"
+    payload = {"tarif": "DEMO", "machine_id": mid, "expires_at": d["tugash"], "issued_at": d["boshlangan"],
+               "muhlat": d["muhlat"], "filial": ""}
+    vaqt_ok, ishonchli_hozir = vaqt_himoya.tekshir_va_yangila(mid)
+    if not vaqt_ok:
+        return Natija(Holat.VAQT_ORQAGA, "Tizim vaqti orqaga qaytarilgan — demo bloklandi.",
+                      payload=payload, machine_id=mid)
+    if ishonchli_hozir > d["tugash"]:
+        return Natija(Holat.MUDDATI_TUGAGAN, f"{nom} muddati tugagan. Davom etish uchun litsenziya oling — "
+                      "ma'lumotlaringiz saqlanadi.", payload=payload, machine_id=mid)
+    sek = d["tugash"] - ishonchli_hozir
+    return Natija(Holat.OK, f"{nom}: {max(1, int(sek // 86400) + (1 if sek % 86400 else 0))} kun qoldi.",
+                  payload=payload, qolgan_kun=int(sek // 86400), machine_id=mid)
 
 
 def holatni_tekshir(online: bool = True) -> Natija:
@@ -230,8 +264,7 @@ def holatni_tekshir(online: bool = True) -> Natija:
 
     fayl = faylni_top()
     if not fayl:
-        return Natija(Holat.YOQ, "Litsenziya topilmadi. Dastur faollashtirilmagan.",
-                      machine_id=mid)
+        return _demo_natija(mid)
     try:
         with open(fayl, "r", encoding="utf-8") as f:
             paket = json.load(f)

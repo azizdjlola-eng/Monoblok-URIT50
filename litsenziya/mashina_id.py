@@ -105,6 +105,32 @@ def mashina_id() -> str:
     return _KESH_ID
 
 
+_KESH_TEMIR = None
+# Ishlab chiqaruvchi qoldirgan «soxta» seriyalar: ko'p kompyuterda BIR XIL — temir ID
+# uchun yaroqsiz (aks holda boshqa mijozga demo noto'g'ri rad etilardi)
+_SOXTA_SERIYA = {"123456789", "1234567890", "12345678", "base board serial number",
+                 "default string", "none", "invalid", "oem", "o.e.m."}
+
+
+def temir_id() -> str:
+    """Faqat temir (protsessor + ona plata seriyasi), MachineGuid siz — Windows qayta
+    o'rnatilsa ham O'ZGARMAYDI. Bir kompyuterga bir marta demo berish uchun (VPS).
+
+    Protsessor ID bir xil modelda BIR XIL, shuning uchun ona plata seriyasi ishonchli
+    bo'lmasa "" qaytadi: VPS bunda faqat mashina_id ga tayanadi. Demo noto'g'ri berilishi
+    (Windows qayta o'rnatilgan oflayn holat) begona mijozga rad etishdan yaxshiroq."""
+    global _KESH_TEMIR
+    if _KESH_TEMIR is not None:
+        return _KESH_TEMIR
+    seriya = _baseboard_serial()
+    if not seriya or seriya.lower() in _SOXTA_SERIYA or len(set(seriya)) < 3:
+        _KESH_TEMIR = ""
+        return _KESH_TEMIR
+    xom = "TEMIR::" + _processor_id() + "||" + seriya
+    _KESH_TEMIR = hashlib.sha256(xom.encode("utf-8")).hexdigest()[:24].upper()
+    return _KESH_TEMIR
+
+
 if __name__ == "__main__":
     print("Machine ID :", mashina_id())
     print("Tafsilot   :")
