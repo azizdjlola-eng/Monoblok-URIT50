@@ -25299,6 +25299,18 @@ Sana: {_sana_fmt}"""
             "Sariq-jigarrang (C tejash)": {"table_header_bg": "FCE4A6", "group_title_color": "B8860B"},
             "To'q sariq (C tejash)":    {"table_header_bg": "FBD7B5", "group_title_color": "C76E00"},
             "Pushti-magenta (LM/M)":    {"table_header_bg": "F4C7DC", "group_title_color": "B5179E"},
+            # C (ko'k) ko'p qolsa — barcha rang maydonlari ko'k/havorang (C, LC sarflanadi)
+            "Ko'k (C ko'p qolsa)":      {"klinika_rang": "1F5FA8", "header_bg_color": "2E75B6",
+                                         "bemor_row_color": "DDEBF7", "table_header_bg": "9DC3E6",
+                                         "group_title_color": "1F4E9C"},
+            # Barcha ranglar balansda (qora tashqari): C + M + Y teng ishlaydi
+            "Balans A (C+M+Y teng)":    {"klinika_rang": "1F6FB5", "header_bg_color": "9C3FA8",
+                                         "bemor_row_color": "FCE4A6", "table_header_bg": "F4C7DC",
+                                         "group_title_color": "2E8B57"},
+            # Balans B — och ranglar (LC/LM) ham ishlaydi
+            "Balans B (C+M+Y+LC+LM)":   {"klinika_rang": "2A9D8F", "header_bg_color": "8E6BBF",
+                                         "bemor_row_color": "FBE3C8", "table_header_bg": "DCD0F0",
+                                         "group_title_color": "C76E00"},
         }
 
         preset_row = len(color_labels)
@@ -25307,7 +25319,7 @@ Sana: {_sana_fmt}"""
         preset_var = tk.StringVar(value="")
         preset_combo = ttk.Combobox(rang_lf, textvariable=preset_var,
                                      values=list(presets.keys()),
-                                     state="readonly", width=24)
+                                     state="readonly", width=26)
         preset_combo.grid(row=preset_row, column=1, columnspan=2, sticky=tk.W, pady=(8, 3))
 
         def _apply_preset(event=None):
