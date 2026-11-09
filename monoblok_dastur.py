@@ -14716,8 +14716,12 @@ class MonoblokApp:
             if not snap or snap[0] != self.current_order_id:
                 return True  # aniqlab bo'lmadi — xavfsiz tomonga
             persisted = snap[1]
+            # Faqat JORIY buyurtma tahlillari: self.test_results da avval
+            # ko'rilgan boshqa buyurtmalarning natijalari ham qolib ketadi —
+            # ular "saqlanmagan" deb noto'g'ri sanalmasin.
+            cur_ids = {t.get('id') for t in (self.current_tests or [])}
             for tid, val in (self.test_results or {}).items():
-                if tid in persisted:
+                if tid not in cur_ids or tid in persisted:
                     continue
                 if val not in (None, '', {}, []):
                     return True
@@ -14728,15 +14732,17 @@ class MonoblokApp:
     def load_order_data(self, order_data):
         """Buyurtma ma'lumotlarini yuklash"""
         # Agar oldingi buyurtmada saqlanmagan ma'lumotlar bo'lsa, so'roq chiqarish
-        if (self.previous_order_id and 
-            self.previous_order_id != order_data['order_id'] and 
+        # (Ilgari bu yerda previous_order_id — ya'ni ikki qadam oldingi
+        # buyurtma — tekshirilardi va xabarda noto'g'ri ID chiqardi.)
+        if (self.current_order_id and
+            self.current_order_id != order_data['order_id'] and
             self.test_results and
             not self.is_saved and
             self._has_truly_unsaved_results()):
             # Saqlanmagan ma'lumotlar bor (faqat HAQIQATAN DB ga tushmagan natija bo'lsa so'raymiz)
             response = messagebox.askyesno(
                 "Diqqat",
-                f"Oldingi buyurtma (ID: {self.previous_order_id}) uchun saqlanmagan natijalar bor.\n\n"
+                f"Oldingi buyurtma (ID: {self.current_order_id}) uchun saqlanmagan natijalar bor.\n\n"
                 "Bazaga saqlashni xohlaysizmi?",
                 icon="warning"
             )
@@ -14744,7 +14750,12 @@ class MonoblokApp:
                 # Saqlash
                 self.save_to_db()
             # Agar "Yo'q" bosilsa, oldingi natijalar bekor qilinadi
-        
+
+        if self.current_order_id != order_data['order_id']:
+            # Boshqa buyurtmaga o'tildi — eski buyurtma natijalari xotirada
+            # qolib, keyingi tekshiruvlarni chalg'itmasin.
+            self.test_results = {}
+
         # Yangi buyurtma ma'lumotlarini yuklash
         self.previous_order_id = self.current_order_id
         self.current_order_id = order_data['order_id']
