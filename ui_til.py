@@ -501,6 +501,35 @@ def _yamoq():
     ttk.Notebook.tab = _tab
 
 
+def pdf_canvas(c):
+    """Registratsiya qog'ozlari (yo'llanma, chek): kirill tanlangan bo'lsa reportlab
+    canvas'ga yoziladigan matn ham kirillga o'giriladi. FAQAT shu canvas nusxasiga
+    ta'sir qiladi — Natija blankasi o'zining «🌐 Blanka tili» sozlamasi bilan qoladi.
+    Lotin rejimida canvas'ga tegilmaydi."""
+    if not _YOQILGAN or c is None:
+        return c
+    try:
+        def _ogir(t):
+            return kirillga(t) if isinstance(t, str) else t
+
+        for nom in ("drawString", "drawRightString", "drawCentredString", "drawAlignedString"):
+            asl_f = getattr(c, nom, None)
+            if asl_f is None:
+                continue
+
+            def _yoz(x, y, text, *a, _asl=asl_f, **k):
+                return _asl(x, y, _ogir(text), *a, **k)
+            setattr(c, nom, _yoz)
+        asl_sw = c.stringWidth
+
+        def _sw(text, *a, **k):
+            return asl_sw(_ogir(text), *a, **k)
+        c.stringWidth = _sw
+    except Exception:
+        pass
+    return c
+
+
 def xom(widget, matn, kalit="text"):
     """Yozuvni filtrsiz qo'yish — kirill rejimida ham AYNAN shunday ko'rinadi
     (masalan «Lotin» tanlovi). Lotin rejimida oddiy configure bilan bir xil."""
