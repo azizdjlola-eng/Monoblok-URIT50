@@ -14701,14 +14701,37 @@ class MonoblokApp:
         finally:
             cursor.close()
     
+    def _has_truly_unsaved_results(self):
+        """Joriy buyurtmada DB ga tushmagan natija bormi?
+
+        Oldingi tashriflarni shunchaki ko'rish (natijalar bazadan yuklangan,
+        o'zgartirilmagan) uchun so'rov chiqmasligi kerak.
+        """
+        try:
+            if self._get_pending_results():
+                return True
+            snap = getattr(self, '_persisted_ids_snapshot', None)
+            if not snap or snap[0] != self.current_order_id:
+                return True  # aniqlab bo'lmadi — xavfsiz tomonga
+            persisted = snap[1]
+            for tid, val in (self.test_results or {}).items():
+                if tid in persisted:
+                    continue
+                if val not in (None, '', {}, []):
+                    return True
+            return False
+        except Exception:
+            return True
+
     def load_order_data(self, order_data):
         """Buyurtma ma'lumotlarini yuklash"""
         # Agar oldingi buyurtmada saqlanmagan ma'lumotlar bo'lsa, so'roq chiqarish
         if (self.previous_order_id and 
             self.previous_order_id != order_data['order_id'] and 
-            self.test_results and 
-            not self.is_saved):
-            # Saqlanmagan ma'lumotlar bor
+            self.test_results and
+            not self.is_saved and
+            self._has_truly_unsaved_results()):
+            # Saqlanmagan ma'lumotlar bor (faqat HAQIQATAN DB ga tushmagan natija bo'lsa so'raymiz)
             response = messagebox.askyesno(
                 "Diqqat",
                 f"Oldingi buyurtma (ID: {self.previous_order_id}) uchun saqlanmagan natijalar bor.\n\n"
@@ -16157,6 +16180,8 @@ Sana: {_sana_fmt}"""
             # qo'lda kiritish) va F2 hali bosilmagan bo'lsa — bazadagi ESKI
             # qiymat yangisini bosib ketmasligi kerak. Aks holda tuzatish
             # jimgina yo'qoladi va "baza o'zgarmayapti" bo'lib ko'rinadi.
+            # "Saqlanmagan natija bor" so'rovi uchun: DB da allaqachon bor test id lar
+            self._persisted_ids_snapshot = (self.current_order_id, set(_persisted_result_ids))
             if not history_mode:
                 _pending = self._get_pending_results()
                 if _pending:
