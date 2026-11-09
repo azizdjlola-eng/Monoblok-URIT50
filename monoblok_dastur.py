@@ -14708,9 +14708,11 @@ class MonoblokApp:
         o'zgartirilmagan) uchun so'rov chiqmasligi kerak.
         """
         try:
+            if getattr(self, '_history_mode', False):
+                return False  # tarix ko'rinishi — faqat o'qish, natijalar bazadan
             if self._get_pending_results():
                 return True
-            snap = getattr(self, '_persisted_ids_snapshot', None)
+            snap =getattr(self, '_persisted_ids_snapshot', None)
             if not snap or snap[0] != self.current_order_id:
                 return True  # aniqlab bo'lmadi — xavfsiz tomonga
             persisted = snap[1]
