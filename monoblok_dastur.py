@@ -14708,10 +14708,13 @@ class MonoblokApp:
         o'zgartirilmagan) uchun so'rov chiqmasligi kerak.
         """
         try:
-            if getattr(self, '_history_mode', False):
-                return False  # tarix ko'rinishi — faqat o'qish, natijalar bazadan
             if self._get_pending_results():
-                return True
+                return True  # qo'lda/analizatordan o'zgargan, F2 bosilmagan
+            if (getattr(self, '_history_mode', False)
+                    or getattr(self, '_history_frozen', False)):
+                # «Tarixni ko'rish» ko'rinishi: test_results da BARCHA
+                # tashriflar natijasi bazadan yuklangan — saqlanmagan emas.
+                return False
             snap =getattr(self, '_persisted_ids_snapshot', None)
             if not snap or snap[0] != self.current_order_id:
                 return True  # aniqlab bo'lmadi — xavfsiz tomonga
@@ -14755,6 +14758,12 @@ class MonoblokApp:
             # Boshqa buyurtmaga o'tildi — eski buyurtma natijalari xotirada
             # qolib, keyingi tekshiruvlarni chalg'itmasin.
             self.test_results = {}
+
+        # Oddiy (barkod/tashrif) yuklash — «Tarixni ko'rish» qotgan rejimidan
+        # chiqamiz. Aks holda yangi bemorda «Oldingi tashriflar» ga bosish
+        # eski bemor tarixidan qidirib, hech narsa ko'rsatmay qolardi.
+        self._history_frozen = False
+        self._history_all_tests = []
 
         # Yangi buyurtma ma'lumotlarini yuklash
         self.previous_order_id = self.current_order_id
