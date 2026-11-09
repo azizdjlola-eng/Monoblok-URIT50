@@ -126,7 +126,9 @@ OZBEK_KATTA = {
     "PUL", "FOYDA", "OLDIN", "OYGA", "FAYL", "NAJAS", "QAYTA", "HAR", "XIL", "MKB", "FISH", "SH",
     "HA", "ISM", "NARX", "BUGUN", "KIRIM", "HAMMA", "YOPIQ", "BOSH", "SHART", "KERAK", "EKG",
     "IFA", "OAK", "DIQQAT", "TAYYOR", "VRACH", "KASSA", "CHEK", "TO'LOV", "YO'Q", "O'ZI", "KO'P",
-    "QO'LDA",
+    "QO'LDA", "MUHIM", "FAOL", "SINOV", "PAST", "HOLAT", "TANLOV", "HOZIR", "KECHA", "DASTUR",
+    "IKKI", "KIM", "YOKI", "BEKOR", "YETDI", "NIMA", "RANG", "DEMO", "REJIM", "YURAK", "SOHA",
+    "HAYZ", "OYLIK", "SEF", "BREND",
 }
 # Katta harfli, lekin Q harfi bo'lsa ham kod bo'lib qoladiganlar
 KOD_KATTA = {"SQL", "QR", "QC", "QA"}
@@ -294,6 +296,20 @@ _MAXSUS = re.compile(r"https?://[^\s«»\"'()]+|www\.[^\s«»\"'()]+|t\.me/[^\s�
 def _gapni_ogir(matn):
     matn = _BIRLIK_RE.sub(lambda m: _BIRLIK_MAP[m.group(0)], matn)
     return _TOKEN.sub(lambda m: _token(m.group(0)), matn)
+
+
+def js_jadval():
+    """Vrach kabineti (brauzer) uchun — o'sha lug'at va qoidalar JSON ko'rinishida.
+    vrach_web/static/ui_til.js shu jadval bilan AYNAN kirillga() dek o'giradi
+    (ikki joyda alohida lug'at saqlanmasin)."""
+    return {
+        "apos": APOS, "super": _SUPER, "harf": HARF, "qosh": QOSH,
+        "ozak": [[k, v] for k, v in OZAK.items()],      # tartib muhim
+        "qoshimcha": _QOSHIMCHA.pattern,
+        "ozbek_katta": sorted(OZBEK_KATTA), "kod_katta": sorted(KOD_KATTA),
+        "brendlar": sorted(BRENDLAR), "birlik": [list(x) for x in BIRLIK],
+        "maxsus": _MAXSUS.pattern, "qoldir": QOLDIR,
+    }
 
 
 @lru_cache(maxsize=40000)
