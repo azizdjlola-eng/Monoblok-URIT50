@@ -25444,7 +25444,7 @@ Sana: {_sana_fmt}"""
         # Dastur OYNALARI yozuvi (blankadan alohida) — shu kompyuter, ui_til.py
         _uy_fr = ttk.Frame(til_lf)
         _uy_fr.pack(anchor=tk.W, pady=(8, 0))
-        ttk.Label(_uy_fr, text="Dastur oynalari yozuvi (lotin / kirill):").pack(side=tk.LEFT)
+        ttk.Label(_uy_fr, text="Dastur oynalari yozuvi (lotin / kirill / rus):").pack(side=tk.LEFT)
 
         def _ui_yozuv_och():
             try:

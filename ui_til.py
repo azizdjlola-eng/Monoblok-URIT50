@@ -36,11 +36,13 @@ import os
 import re
 from functools import lru_cache
 
-YOZUVLAR = ("lotin", "kirill")
+YOZUVLAR = ("lotin", "kirill", "rus")
+NOMLAR = {"lotin": "Lotin — O'zbek", "kirill": "Кирилл — Ўзбек", "rus": "Русский"}
 QOLDIR = "\u2060"          # matn boshida bo'lsa — o'girilmaydi (ko'rinmaydi)
 _FAYL = "interfeys.json"
 
 _YOQILGAN = False
+_REJIM = "lotin"          # yoq() dan keyin: "kirill" yoki "rus"
 XATO = None                # yoq() da xato bo'lsa — matni (dastur yiqilmaydi)
 
 
@@ -408,6 +410,176 @@ def fish_like(ustun, soz):
     return ("(" + " OR ".join(f"{ustun} LIKE %s" for _ in v) + ")", [f"%{x}%" for x in v])
 
 
+# ─────────────────────────── ruscha (lug'at) ───────────────────────────
+# Ruschani harfma-harf o'girib bo'lmaydi — LUG'AT: ui_ruscha.json {"Saqlash": "Сохранить"}.
+# Kalit — yozuvning «yadrosi»: chetdagi emoji/belgi ("💾 ", ":", "…") olib tashlanadi,
+# raqamlar {} ga almashadi ("Jami: 5 ta" → "Jami: {} ta"), tutuqlar bir xil (').
+# Lug'atda yo'q yozuv O'ZBEKCHA (lotin) qoladi va jurnalga yoziladi:
+#   %ProgramData%\AzizMedLine\jurnal\ruscha_yoq.txt  — shundan keyingi tarjima to'ldiriladi.
+# Mijozning o'z tuzatishlari (build'siz): %ProgramData%\AzizMedLine\ui_ruscha_qoshimcha.json
+RUS_FAYL = "ui_ruscha.json"
+_SON = re.compile(r"\d+(?:[.,:]\d+)*")
+_TUTUQ = str.maketrans({"‘": "'", "’": "'", "ʻ": "'", "ʼ": "'", "`": "'"})
+_LUGAT = None
+_ANDOZA = []               # [(regex, rus, kalit)] — {} o'rnida MATN ham kelishi mumkin
+_RUS_KESH = {}
+_YOQ_KORILGAN = set()
+
+
+def _ajrat(matn):
+    """(old, kalit, sonlar, oxir). Yadroda lotin harf bo'lmasa — kalit None."""
+    m = re.match(r"^(\W*)(.*?)(\W*)$", matn, re.S)
+    old, yadro, oxir = m.group(1), m.group(2), m.group(3)
+    if not re.search(r"[A-Za-z]", yadro):
+        return old, None, [], oxir
+    sonlar = _SON.findall(yadro)
+    kalit = _SON.sub("{}", yadro).translate(_TUTUQ)
+    kalit = re.sub(r"[ \t]+", " ", kalit)
+    return old, kalit, sonlar, oxir
+
+
+def ruscha_kalit(matn):
+    """Lug'at kaliti (tools/ui_matn_yig.py ham shuni ishlatadi)."""
+    if not isinstance(matn, str):
+        return None
+    return _ajrat(matn.strip())[1]
+
+
+def _lugat_yollari():
+    import sys
+    papkalar = [os.path.dirname(os.path.abspath(__file__))]
+    if getattr(sys, "_MEIPASS", None):
+        papkalar.insert(0, sys._MEIPASS)
+    if getattr(sys, "frozen", False):
+        papkalar.append(os.path.dirname(sys.executable))
+    return [os.path.join(p, RUS_FAYL) for p in papkalar], \
+        os.path.join(_papka(), "ui_ruscha_qoshimcha.json")
+
+
+def _json_oqi(yol, lug):
+    with open(yol, encoding="utf-8") as f:
+        d = json.load(f) or {}
+    for k, v in d.items():
+        if k.startswith("_") or not isinstance(v, str) or not v.strip():
+            continue
+        kk = ruscha_kalit(k.replace("{}", "0"))     # {} — son o'rni (chetdagi belgi emas)
+        if kk:
+            lug[kk] = v
+
+
+def ruscha_lugat(qayta=False):
+    """{kalit: ruscha} — dastur bilan keladigan lug'at + mijozning qo'shimchasi."""
+    global _LUGAT, _ANDOZA
+    if _LUGAT is not None and not qayta:
+        return _LUGAT
+    lug = {}
+    asosiylar, qoshimcha = _lugat_yollari()
+    for yol in asosiylar:                      # birinchi topilgani
+        if os.path.isfile(yol):
+            try:
+                _json_oqi(yol, lug)
+                break
+            except Exception:
+                pass
+    if os.path.isfile(qoshimcha):
+        try:
+            _json_oqi(qoshimcha, lug)
+        except Exception:
+            pass
+    _LUGAT = lug
+    _RUS_KESH.clear()
+    andoza = []
+    for k, v in lug.items():
+        if "{}" in k and re.search(r"[A-Za-z]", k.replace("{}", "")):
+            qism = [re.escape(x) for x in k.split("{}")]
+            try:
+                andoza.append((re.compile("^" + "(.+?)".join(qism) + "$", re.S), v, k))
+            except re.error:
+                pass
+    andoza.sort(key=lambda x: -len(x[2]))      # uzunroq (aniqroq) andoza oldin
+    _ANDOZA = andoza
+    return _LUGAT
+
+
+def _toldir(rus, qiymatlar):
+    q = iter(qiymatlar)
+    return re.sub(r"\{\}", lambda _m: next(q, ""), rus)
+
+
+def _yoq_yoz(kalit):
+    if kalit in _YOQ_KORILGAN or len(_YOQ_KORILGAN) > 20000:
+        return
+    _YOQ_KORILGAN.add(kalit)
+    try:
+        papka = os.path.join(_papka(), "jurnal")
+        os.makedirs(papka, exist_ok=True)
+        yol = os.path.join(papka, "ruscha_yoq.txt")
+        if os.path.isfile(yol) and os.path.getsize(yol) > 2_000_000:
+            return
+        with open(yol, "a", encoding="utf-8") as f:
+            f.write(kalit.replace("\n", " ") + "\n")
+    except Exception:
+        pass
+
+
+def _bir_qator(matn, jurnal=True):
+    lug = ruscha_lugat()
+    old, kalit, sonlar, oxir = _ajrat(matn)
+    if kalit is None:
+        return matn
+    t = lug.get(kalit)
+    if t is not None:
+        return old + _toldir(t, sonlar) + oxir
+    yadro = matn[len(old):len(matn) - len(oxir)]
+    yadro_n = re.sub(r"[ \t]+", " ", yadro.translate(_TUTUQ))
+    for rx, rus, _k in _ANDOZA:
+        m = rx.match(yadro_n)
+        if m:
+            return old + _toldir(rus, [ruschaga(g, jurnal=False) for g in m.groups()]) + oxir
+    # «Tizimga kirish - AzizMedLine LIMS», «A • B», «A · B» — bo'laklari alohida
+    m = re.split(r"( [-—–•·|] )", yadro)
+    if len(m) > 1:
+        yangi = [q if i % 2 else _bir_qator(q, False) for i, q in enumerate(m)]
+        if yangi != m:
+            if jurnal and any(q == y and kirillga(q) != q          # tarjimasi yo'q (brend emas)
+                              for i, (q, y) in enumerate(zip(m, yangi)) if not i % 2):
+                _yoq_yoz(kalit)
+            return old + "".join(yangi) + oxir
+    # «Sarlavha: qiymat» — ikki qismi alohida
+    if ": " in yadro:
+        a, b = yadro.split(": ", 1)
+        ta = _bir_qator(a, False)
+        if ta != a:
+            return old + ta + ": " + _bir_qator(b, jurnal) + oxir
+    if kirillga(kalit) == kalit:
+        return matn                            # faqat brend/kod (AzizMedLine LIMS, admin) — tarjima kerak emas
+    if jurnal:
+        _yoq_yoz(kalit)
+    return matn
+
+
+def ruschaga(matn, jurnal=True):
+    """Bitta oyna yozuvini ruschaga (lug'atda yo'q bo'lsa — o'zgarmaydi, jurnalga yoziladi)."""
+    if not matn or not isinstance(matn, str) or not re.search(r"[A-Za-z]", matn):
+        return matn
+    if matn.startswith(QOLDIR):
+        return matn[len(QOLDIR):]
+    r = _RUS_KESH.get(matn)
+    if r is not None:
+        return r
+    try:
+        if "\n" in matn:
+            r = "\n".join(_bir_qator(q, jurnal) for q in matn.split("\n"))
+        else:
+            r = _bir_qator(matn, jurnal)
+    except Exception:
+        r = matn
+    if len(_RUS_KESH) > 40000:
+        _RUS_KESH.clear()
+    _RUS_KESH[matn] = r
+    return r
+
+
 # ────────────────────────── tkinter filtri ──────────────────────────────
 _KALITLAR = ("text", "label", "title", "message", "detail")
 _KORSATKICH = {"label", "button", "checkbutton", "radiobutton", "menubutton", "labelframe",
@@ -417,11 +589,18 @@ _TESKARI = {}              # kirill → asl lotin (kod qayta o'qisa)
 _KORSATISH_VAR = set()     # faqat yorliqqa bog'langan StringVar nomlari
 
 
-def ogir(matn):
-    """Yoqilgan bo'lsa kirillga o'giradi va aslini eslab qoladi; aks holda o'zi."""
+def korsat(matn):
+    """Tanlangan yozuvdagi ko'rinishi (kirill yoki ruscha); lotinda — o'zi."""
     if not _YOQILGAN or not isinstance(matn, str) or not matn:
         return matn
-    k = kirillga(matn)
+    return ruschaga(matn) if _REJIM == "rus" else kirillga(matn)
+
+
+def ogir(matn):
+    """Yoqilgan bo'lsa kirillga/ruschaga o'giradi va aslini eslab qoladi; aks holda o'zi."""
+    if not _YOQILGAN or not isinstance(matn, str) or not matn:
+        return matn
+    k = korsat(matn)
     if k != matn:
         if len(_TESKARI) > 120000:
             _TESKARI.clear()
@@ -430,7 +609,7 @@ def ogir(matn):
 
 
 def asl(matn):
-    """Ekrandagi (kirill) matndan asl lotin matnni qaytaradi."""
+    """Ekrandagi (kirill/rus) matndan asl lotin matnni qaytaradi."""
     if isinstance(matn, str):
         return _TESKARI.get(matn, matn)
     return matn
@@ -587,7 +766,7 @@ def pdf_canvas(c):
         return c
     try:
         def _ogir(t):
-            return kirillga(t) if isinstance(t, str) else t
+            return korsat(t) if isinstance(t, str) else t
 
         for nom in ("drawString", "drawRightString", "drawCentredString", "drawAlignedString"):
             asl_f = getattr(c, nom, None)
@@ -617,12 +796,14 @@ def yoq(majburiy=None):
     """Dastur BOSHIDA (birinchi oyna yaratilishidan oldin) chaqiriladi.
     Kirill tanlangan bo'lsa tkinter filtrini qo'yadi. Hech qachon xato otmaydi.
     majburiy='kirill' — sinov uchun sozlamaga qaramay yoqish."""
-    global _YOQILGAN, XATO
+    global _YOQILGAN, XATO, _REJIM
     if _YOQILGAN:
         return True
     try:
-        if (majburiy or yozuv()) != "kirill":
+        rejim = majburiy or yozuv()
+        if rejim not in ("kirill", "rus"):
             return False
+        _REJIM = rejim
         _yamoq()
         _YOQILGAN = True
         return True
@@ -657,20 +838,30 @@ def sozlama_oynasi(parent=None):
     rb_lotin.pack(anchor=tk.W, pady=(10, 2))
     ttk.Radiobutton(fr, text="Кирилл — Ўзбек", value="kirill",
                     variable=v).pack(anchor=tk.W, pady=2)
+    rb_rus = ttk.Radiobutton(fr, value="rus", variable=v)
+    xom(rb_rus, "Русский (бета: часть надписей пока на узбекском)")
+    rb_rus.pack(anchor=tk.W, pady=2)
     ttk.Label(fr, foreground="#555", justify=tk.LEFT, text=(
         "• Tugma, yorliq, menyu, jadval sarlavhalari va xabarlar o'giriladi.\n"
         "• Bemor ma'lumoti (ism, manzil, natija) qanday kiritilgan bo'lsa, shunday qoladi.\n"
         "• Tahlil kodlari (WBC, HGB, ALT …) va brendlar lotincha qoladi.\n"
+        "• Ruscha: tarjimasi hali yo'q yozuv o'zbekcha qoladi (jurnalga yoziladi).\n"
         "• Blanka yozuvi alohida: Natija → Sozlamalar → «🌐 Blanka tili».\n"
         "• O'zgarish Registratsiya va Natija QAYTA OCHILGANDA kuchga kiradi.")
               ).pack(anchor=tk.W, pady=(10, 0))
     namuna = ttk.Label(fr, foreground="#1f6f8b")
     namuna.pack(anchor=tk.W, pady=(10, 0))
     _misol = "Bemorni ro'yxatga olish · To'lov · Natijani chop etish · Yo'q"
+    _misol_rus = "Регистрация пациента · Оплата · Печать результата · Нет"
 
     def _yangila(*_):
-        k = kirillga(_misol) if v.get() == "kirill" else _misol
-        xom(namuna, ("Намуна: " if v.get() == "kirill" else "Namuna: ") + k)
+        tan = v.get()
+        if tan == "rus":
+            xom(namuna, "Пример: " + _misol_rus)
+        elif tan == "kirill":
+            xom(namuna, "Намуна: " + kirillga(_misol))
+        else:
+            xom(namuna, "Namuna: " + _misol)
 
     v.trace_add("write", _yangila)
     _yangila()
