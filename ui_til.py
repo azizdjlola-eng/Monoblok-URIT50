@@ -311,6 +311,7 @@ def js_jadval():
         "ozbek_katta": sorted(OZBEK_KATTA), "kod_katta": sorted(KOD_KATTA),
         "brendlar": sorted(BRENDLAR), "birlik": [list(x) for x in BIRLIK],
         "maxsus": _MAXSUS.pattern, "qoldir": QOLDIR,
+        "rus": dict(ruscha_lugat()),                       # ruscha lug'at (kalit → tarjima)
     }
 
 
