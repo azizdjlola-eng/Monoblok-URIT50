@@ -14701,17 +14701,51 @@ class MonoblokApp:
         finally:
             cursor.close()
     
+    def _has_truly_unsaved_results(self):
+        """Joriy buyurtmada DB ga tushmagan natija bormi?
+
+        Oldingi tashriflarni shunchaki ko'rish (natijalar bazadan yuklangan,
+        o'zgartirilmagan) uchun so'rov chiqmasligi kerak.
+        """
+        try:
+            if self._get_pending_results():
+                return True  # qo'lda/analizatordan o'zgargan, F2 bosilmagan
+            if (getattr(self, '_history_mode', False)
+                    or getattr(self, '_history_frozen', False)):
+                # «Tarixni ko'rish» ko'rinishi: test_results da BARCHA
+                # tashriflar natijasi bazadan yuklangan — saqlanmagan emas.
+                return False
+            snap =getattr(self, '_persisted_ids_snapshot', None)
+            if not snap or snap[0] != self.current_order_id:
+                return True  # aniqlab bo'lmadi — xavfsiz tomonga
+            persisted = snap[1]
+            # Faqat JORIY buyurtma tahlillari: self.test_results da avval
+            # ko'rilgan boshqa buyurtmalarning natijalari ham qolib ketadi —
+            # ular "saqlanmagan" deb noto'g'ri sanalmasin.
+            cur_ids = {t.get('id') for t in (self.current_tests or [])}
+            for tid, val in (self.test_results or {}).items():
+                if tid not in cur_ids or tid in persisted:
+                    continue
+                if val not in (None, '', {}, []):
+                    return True
+            return False
+        except Exception:
+            return True
+
     def load_order_data(self, order_data):
         """Buyurtma ma'lumotlarini yuklash"""
         # Agar oldingi buyurtmada saqlanmagan ma'lumotlar bo'lsa, so'roq chiqarish
-        if (self.previous_order_id and 
-            self.previous_order_id != order_data['order_id'] and 
-            self.test_results and 
-            not self.is_saved):
-            # Saqlanmagan ma'lumotlar bor
+        # (Ilgari bu yerda previous_order_id — ya'ni ikki qadam oldingi
+        # buyurtma — tekshirilardi va xabarda noto'g'ri ID chiqardi.)
+        if (self.current_order_id and
+            self.current_order_id != order_data['order_id'] and
+            self.test_results and
+            not self.is_saved and
+            self._has_truly_unsaved_results()):
+            # Saqlanmagan ma'lumotlar bor (faqat HAQIQATAN DB ga tushmagan natija bo'lsa so'raymiz)
             response = messagebox.askyesno(
                 "Diqqat",
-                f"Oldingi buyurtma (ID: {self.previous_order_id}) uchun saqlanmagan natijalar bor.\n\n"
+                f"Oldingi buyurtma (ID: {self.current_order_id}) uchun saqlanmagan natijalar bor.\n\n"
                 "Bazaga saqlashni xohlaysizmi?",
                 icon="warning"
             )
@@ -14719,7 +14753,18 @@ class MonoblokApp:
                 # Saqlash
                 self.save_to_db()
             # Agar "Yo'q" bosilsa, oldingi natijalar bekor qilinadi
-        
+
+        if self.current_order_id != order_data['order_id']:
+            # Boshqa buyurtmaga o'tildi — eski buyurtma natijalari xotirada
+            # qolib, keyingi tekshiruvlarni chalg'itmasin.
+            self.test_results = {}
+
+        # Oddiy (barkod/tashrif) yuklash — «Tarixni ko'rish» qotgan rejimidan
+        # chiqamiz. Aks holda yangi bemorda «Oldingi tashriflar» ga bosish
+        # eski bemor tarixidan qidirib, hech narsa ko'rsatmay qolardi.
+        self._history_frozen = False
+        self._history_all_tests = []
+
         # Yangi buyurtma ma'lumotlarini yuklash
         self.previous_order_id = self.current_order_id
         self.current_order_id = order_data['order_id']
@@ -16157,6 +16202,8 @@ Sana: {_sana_fmt}"""
             # qo'lda kiritish) va F2 hali bosilmagan bo'lsa — bazadagi ESKI
             # qiymat yangisini bosib ketmasligi kerak. Aks holda tuzatish
             # jimgina yo'qoladi va "baza o'zgarmayapti" bo'lib ko'rinadi.
+            # "Saqlanmagan natija bor" so'rovi uchun: DB da allaqachon bor test id lar
+            self._persisted_ids_snapshot = (self.current_order_id, set(_persisted_result_ids))
             if not history_mode:
                 _pending = self._get_pending_results()
                 if _pending:
