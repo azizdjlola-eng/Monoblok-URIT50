@@ -25390,6 +25390,19 @@ Sana: {_sana_fmt}"""
                        "  raqamli belgilar (10⁹/L, Lymph#) va analizator brendlari lotincha qoladi.\n"
                        "• Lotincha qoladigan so'zlar — vergul bilan (masalan klinika brendi: MEDLINE).",
                   foreground="#555", justify=tk.LEFT).pack(anchor=tk.W, pady=(4, 0))
+        # Dastur OYNALARI yozuvi (blankadan alohida) — shu kompyuter, ui_til.py
+        _uy_fr = ttk.Frame(til_lf)
+        _uy_fr.pack(anchor=tk.W, pady=(8, 0))
+        ttk.Label(_uy_fr, text="Dastur oynalari yozuvi (lotin / kirill):").pack(side=tk.LEFT)
+
+        def _ui_yozuv_och():
+            try:
+                import ui_til
+                ui_til.sozlama_oynasi(dialog)
+            except Exception as _e:
+                messagebox.showerror("Dastur yozuvi", f"Oyna ochilmadi: {_e}", parent=dialog)
+
+        ttk.Button(_uy_fr, text="🔤 Sozlash…", command=_ui_yozuv_och).pack(side=tk.LEFT, padx=6)
 
         # ══════════════════════════════════════════════════════════════
         # 6.55. OLDINGI NATIJA USTUNI — doimiy bemorlar uchun dinamika
@@ -28323,6 +28336,14 @@ def main():
 
 if __name__ == "__main__":
     import sys as _sys
+    # Dastur yozuvi (lotin / kirill) — birinchi oynadan OLDIN; lotin bo'lsa hech narsa
+    # o'zgarmaydi. ui_til.py ni build_panel D: dan shu papkaga ko'chiradi.
+    if "--urit-service" not in _sys.argv:
+        try:
+            import ui_til
+            ui_til.yoq()
+        except Exception:
+            pass
     # Muammolar jurnali — %ProgramData%\AzizMedLine\jurnal\Natija.log (URIT xizmati
     # alohida jarayon → NatijaURIT.log: bir faylga ikki jarayon yozmasin).
     # xizmat_jurnali.py ni build_panel D: dan shu papkaga ko'chiradi.
