@@ -201,6 +201,15 @@ LIPID_PANEL_MEMBER_IDS = set(_bb.panel_azolari('lipid'))
 BUYRAK_PANEL_MEMBER_IDS = set(_bb.panel_azolari('buyrak'))
 
 
+def _fish_like(ustun, soz):
+    """Bemor ismi bo'yicha LIKE: lotin va kirill shakli birga (ui_til.fish_like)."""
+    try:
+        import ui_til
+        return ui_til.fish_like(ustun, soz)
+    except Exception:
+        return f"{ustun} LIKE %s", [f"%{soz}%"]
+
+
 def _bio_panel_idlarini_yangila():
     """Bioximiya blanka sozlamasi saqlangach — panel a'zolari ID lari joyida yangilanadi
     (qayta ishga tushirmasdan)."""
@@ -13236,18 +13245,12 @@ class MonoblokApp:
                             params = []
 
                             # Ism va Familiya bo'yicha qidirish (fish maydonida)
-                            if ism or fam:
-                                if ism and fam:
-                                    # Ikkalasi ham bo'lsa, ikki so'zni qidiramiz
-                                    query += " AND (b.fish LIKE %s AND b.fish LIKE %s)"
-                                    params.append(f"%{ism}%")
-                                    params.append(f"%{fam}%")
-                                elif ism:
-                                    query += " AND b.fish LIKE %s"
-                                    params.append(f"%{ism}%")
-                                elif fam:
-                                    query += " AND b.fish LIKE %s"
-                                    params.append(f"%{fam}%")
+                            # lotin = kirill: «Aliyev» «Алиев» ni ham topadi (ui_til)
+                            for _soz in (ism, fam):
+                                if _soz:
+                                    _fs, _fp = _fish_like("b.fish", _soz)
+                                    query += " AND " + _fs
+                                    params.extend(_fp)
 
                             # Telefon bo'yicha qidirish
                             if tel:
@@ -13718,8 +13721,9 @@ class MonoblokApp:
                     (p["gacha"] + timedelta(days=1)).strftime("%Y-%m-%d 00:00:00")]
             for word in (p.get("ism"), p.get("fam")):
                 if word:
-                    sql += " AND b.fish LIKE %s"
-                    args.append(f"%{word}%")
+                    _fs, _fp = _fish_like("b.fish", word)     # lotin = kirill
+                    sql += " AND " + _fs
+                    args.extend(_fp)
             if p.get("tel"):
                 sql += " AND b.telefon LIKE %s"
                 args.append(f"%{p['tel']}%")

@@ -331,6 +331,83 @@ def kirillga(matn):
         return matn
 
 
+# ─────────────────── bemor qidiruvi: lotin = kirill ────────────────────
+# Bir registrator «Aliyev», boshqasi «Алиев» deb yozsa — bazada ikkalasi bor.
+# Qidiruv so'zning IKKALA yozuvdagi shaklini ham izlaydi (bazadagi qiymat o'zgarmaydi).
+_KIR_LOT = {
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "ё": "yo", "ж": "j", "з": "z",
+    "и": "i", "й": "y", "к": "k", "л": "l", "м": "m", "н": "n", "о": "o", "п": "p",
+    "р": "r", "с": "s", "т": "t", "у": "u", "ф": "f", "х": "x", "ц": "ts", "ч": "ch",
+    "ш": "sh", "щ": "sh", "ъ": "'", "ь": "", "ы": "i", "э": "e", "ю": "yu", "я": "ya",
+    "ў": "o'", "қ": "q", "ғ": "g'", "ҳ": "h",
+}
+_UNLI_KIR = "аеёиоуўэюяыъь"
+
+
+def lotinga(matn):
+    """O'zbek kirill → lotin (rasmiy qoida: е so'z boshida va unlidan keyin — «ye»)."""
+    if not matn:
+        return matn
+    out = []
+    for i, ch in enumerate(matn):
+        lc = ch.lower()
+        if lc == "е":
+            old = matn[i - 1].lower() if i > 0 else ""
+            k = "ye" if (not old or not old.isalpha() or old in _UNLI_KIR) else "e"
+        elif lc in _KIR_LOT:
+            k = _KIR_LOT[lc]
+        else:
+            out.append(ch)
+            continue
+        if ch != lc and k:                         # katta harf
+            keyingi = matn[i + 1] if i + 1 < len(matn) else ""
+            k = k.upper() if (keyingi.isupper() and len(k) > 1) else k[:1].upper() + k[1:]
+        out.append(k)
+    return "".join(out)
+
+
+def _nom_kirill(matn):
+    """Ism-familiyani kirillga (kod/brend qoidalarisiz — har lotin so'z o'giriladi)."""
+    def _bir(m):
+        w, oxir = m.group(0), ""
+        while w and w[-1] in APOS and not (len(w) >= 2 and w[-2].lower() in "og"):
+            oxir, w = w[-1] + oxir, w[:-1]           # chekkadagi tutuq — so'zga tegishli emas
+        return _sozni_ogir(w) + oxir
+    return re.sub(r"[A-Za-z][A-Za-z" + APOS + r"]*", _bir, matn)
+
+
+def qidiruv_variantlar(soz):
+    """Qidiruv so'zining lotin va kirill shakllari (takrorsiz). Lotin shaklda
+    tutuq belgisi (o' / oʻ / o’) LIKE uchun «_» — har qanday tutuqni topadi."""
+    soz = (soz or "").strip()
+    if not soz:
+        return []
+    v = [soz]
+    if re.search(r"[А-Яа-яЁёЎўҚқҒғҲҳ]", soz):
+        v.append(lotinga(soz))
+    if re.search(r"[A-Za-z]", soz):
+        try:
+            v.append(_nom_kirill(soz))
+        except Exception:
+            pass
+    # Rus klaviaturasida yozilgan kirill: Ҳасанов → Хасанов, Қодиров → Кодиров
+    _rus = str.maketrans("ЎўҚқҒғҲҳ", "УуКкГгХх")
+    v += [x.translate(_rus) for x in list(v) if re.search(r"[ЎўҚқҒғҲҳ]", x)]
+    natija = []
+    for x in v:
+        x = re.sub("[" + APOS + "]", "_", x) if re.search(r"[A-Za-z]", x) else x
+        if x and x not in natija:
+            natija.append(x)
+    return natija
+
+
+def fish_like(ustun, soz):
+    """SQL bo'lagi: «(ustun LIKE %s OR ustun LIKE %s ...)» va parametrlari.
+    Misol: sql += " AND " + s;  params += p   (s, p = fish_like("b.fish", soz))"""
+    v = qidiruv_variantlar(soz) or [soz or ""]
+    return ("(" + " OR ".join(f"{ustun} LIKE %s" for _ in v) + ")", [f"%{x}%" for x in v])
+
+
 # ────────────────────────── tkinter filtri ──────────────────────────────
 _KALITLAR = ("text", "label", "title", "message", "detail")
 _KORSATKICH = {"label", "button", "checkbutton", "radiobutton", "menubutton", "labelframe",
