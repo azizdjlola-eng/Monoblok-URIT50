@@ -14,6 +14,7 @@ import os
 import sys
 import csv
 import json
+import re
 
 
 def _json_yol() -> str:
@@ -122,6 +123,21 @@ def _ensure_norma_table(conn):
         pass
 
 
+def _nom_kalit(nom) -> str:
+    """Seed nomini bazadagi bilan solishtirish kaliti: «ИФА»/«IFA» so'zlari,
+    ortiqcha bo'shliq va katta-kichik harf farqi hisobga olinmaydi.
+
+    Sabab (2026-11-11): katalogdagi IFA tahlillari nomidan kirillcha «ИФА»
+    olib tashlandi ('Askarida IgG IFA ИФА' -> 'Askarida IgG IFA'). Seed esa
+    har startda nomi bazada YO'Q tahlilni qo'shardi — eski nom yana yangi
+    tahlil bo'lib qaytib kelardi (qayta nomlangan 129-tahlil ham shunday)."""
+    s = re.sub(r"(?<!\w)(?:ИФА|IFA)(?!\w)", " ", str(nom or ""), flags=re.IGNORECASE)
+    s = re.sub(r"\s+([,)])", r"\1", s)
+    s = re.sub(r"\(\s*,?\s*\)", "", s)
+    s = re.sub(r",\s*\)", ")", s)
+    return re.sub(r"\s+", " ", s).strip(" ,").lower()
+
+
 def seed_normalar(conn, faqat_yoq: bool = True) -> int:
     """
     tahlillar_norma ga kod-lug'at normalarini qo'shadi.
@@ -144,10 +160,15 @@ def seed_normalar(conn, faqat_yoq: bool = True) -> int:
         mavjud = {}
         for _nom, _sh in cur.fetchall():
             mavjud[(_nom or "").strip()] = bool((_sh or "").strip())
+        mavjud_kalit = {_nom_kalit(n) for n in mavjud}
         qoshildi = 0
         for r in rows:
             nom = (r.get("tahlil_nomi") or "").strip()
             if not nom:
+                continue
+            # Nomi faqat «ИФА/IFA» bilan farq qiladigan norma bor — bu O'SHA tahlil
+            # (qayta nomlangan), yangisini qo'shmaymiz.
+            if faqat_yoq and nom not in mavjud and _nom_kalit(nom) in mavjud_kalit:
                 continue
             shablon = ((r.get("result_template") or "").strip() or None) if shablon_ustuni else None
             if faqat_yoq and nom in mavjud:
@@ -184,6 +205,7 @@ def seed_normalar(conn, faqat_yoq: bool = True) -> int:
                      r.get("min_val_m"), r.get("max_val_m"),
                      r.get("min_val_f"), r.get("max_val_f")))
             mavjud[nom] = bool(shablon)
+            mavjud_kalit.add(_nom_kalit(nom))
             qoshildi += 1
         conn.commit()
         return qoshildi
@@ -224,10 +246,15 @@ def seed_katalog(conn, faqat_yoq: bool = True) -> int:
     try:
         cur.execute("SELECT nomi FROM tahlillar")
         mavjud = set((r[0] or "").strip() for r in cur.fetchall())
+        mavjud_kalit = {_nom_kalit(n) for n in mavjud}
         qoshildi = 0
         for r in rows:
             nom = (r.get("nomi") or "").strip()
             if not nom or (faqat_yoq and nom in mavjud):
+                continue
+            # Nomi faqat «ИФА/IFA» bilan farq qiladi — tahlil bor, faqat qayta
+            # nomlangan. Eski nom bilan ikkinchi nusxa qo'shilmasin.
+            if faqat_yoq and _nom_kalit(nom) in mavjud_kalit:
                 continue
             # id — MASHINALARARO BIR XIL katalog ID (Natija oynasi natijani tahlil_id
             # bo'yicha bog'laydi). Seed'da id bo'lsa AYNAN o'sha id bilan qo'shamiz →
@@ -253,6 +280,7 @@ def seed_katalog(conn, faqat_yoq: bool = True) -> int:
                     cur.execute("INSERT INTO tahlillar(nomi, narxi) VALUES(%s,%s)",
                                 (nom, int(r.get("narxi") or 0)))
             mavjud.add(nom)
+            mavjud_kalit.add(_nom_kalit(nom))
             qoshildi += 1
         conn.commit()
         return qoshildi
