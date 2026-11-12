@@ -16,10 +16,16 @@ Standalone ishga tushirish (sozlash oynasi):
 import os
 import sys
 
+# ESKI o'rnatishlarning umumiy paroli (2026-11-09 gacha hamma mijozda bir xil).
+# Faqat eski bazalarni TANISH va ularga ulanish uchun qoldi. Yangi o'rnatishda
+# Baza ustasi tasodifiy parol yaratadi (klinika_seyf.py). Eski mijozlar
+# keyingi qadamda (ikki parolli o'tish) yangi parolga ko'chiriladi.
+ESKI_STANDART_PAROL = "azizmed2026"
+
 DEFAULT = {
     "host": "127.0.0.1",
     "user": "root",
-    "password": "azizmed2026",
+    "password": ESKI_STANDART_PAROL,
     "database": "lab_tizim",
     "port": 3306,
 }
@@ -104,15 +110,23 @@ def saqla(cfg: dict) -> str:
 
 
 # ── Sozlama master paroli (DB'siz — login oynasidan ulanish sozlash uchun) ──
-_SOZLAMA_PAROL_DEFAULT = "azizmed2026"
+_SOZLAMA_PAROL_DEFAULT = ESKI_STANDART_PAROL
 
 
 def sozlama_parol() -> str:
     """
     Ulanish sozlamalarini ochish uchun DOIMIY master parol (bazaga bog'liq emas).
-    %ProgramData%\\AzizMedLine\\sozlama_parol.txt bo'lsa — undan; bo'lmasa default.
+    Tartib: klinika sirlari (klinika_sirlar.json, DPAPI + bizdagi nusxa) →
+    eski %ProgramData%\\AzizMedLine\\sozlama_parol.txt → eski umumiy parol.
     Shu tarzda DB o'lik bo'lsa ham admin sozlamani ocha oladi.
     """
+    try:
+        import klinika_seyf
+        v = klinika_seyf.sir_ol("sozlama_parol")
+        if v:
+            return v
+    except Exception:
+        pass
     p = os.path.join(konfig_papka(), "sozlama_parol.txt")
     if os.path.exists(p):
         try:
@@ -125,13 +139,47 @@ def sozlama_parol() -> str:
     return _SOZLAMA_PAROL_DEFAULT
 
 
+SOZLAMA_PAROL_MIN = 6
+
+
+def sozlama_parol_standartmi() -> bool:
+    """Master parol hali hamma mijozda bir xil eski parolmi."""
+    return sozlama_parol() == _SOZLAMA_PAROL_DEFAULT
+
+
 def sozlama_parol_saqla(yangi: str) -> str:
-    """Master sozlama parolini o'zgartiradi (sozlama_parol.txt ga yozadi)."""
-    os.makedirs(konfig_papka(), exist_ok=True)
+    """Master sozlama parolini o'zgartiradi — klinika sirlariga (DPAPI + bizdagi
+    nusxa, unutilsa seyfdan tiklanadi). Eski ochiq matnli sozlama_parol.txt o'chadi."""
+    yangi = (yangi or "").strip()
+    if len(yangi) < SOZLAMA_PAROL_MIN:
+        raise ValueError(f"Parol kamida {SOZLAMA_PAROL_MIN} belgi bo'lsin.")
+    if yangi == _SOZLAMA_PAROL_DEFAULT:
+        raise ValueError("Bu eski umumiy parol — boshqasini tanlang.")
+    import klinika_seyf
+    klinika_seyf.sir_yoz("sozlama_parol", yangi)
     p = os.path.join(konfig_papka(), "sozlama_parol.txt")
-    with open(p, "w", encoding="utf-8") as f:
-        f.write((yangi or "").strip())
-    return p
+    try:
+        if os.path.exists(p):
+            os.remove(p)
+    except Exception:
+        pass
+    return klinika_seyf.sirlar_yol()
+
+
+def sozlama_parol_sora(parent=None, izoh: str = "") -> bool:
+    """Master parolni so'raydi. To'g'ri — True; bekor/xato — False (xabar bilan)."""
+    import hmac
+    from tkinter import simpledialog, messagebox
+    pw = simpledialog.askstring(
+        "Sozlama paroli",
+        (izoh + "\n\n" if izoh else "") + "Sozlama (master) parolini kiriting:",
+        show="*", parent=parent)
+    if pw is None:
+        return False
+    if not hmac.compare_digest(pw.strip().encode("utf-8"), sozlama_parol().encode("utf-8")):
+        messagebox.showerror("Xato", "Sozlama paroli noto'g'ri.", parent=parent)
+        return False
+    return True
 
 
 def ichki_tarmoqmi(host: str) -> bool:
@@ -950,19 +998,34 @@ def lan_ruxsat(cfg: dict):
     except Exception as e:
         qadamlar.append(f"⚠️ Fayrvol ochilmadi ({e}) — administrator huquqi kerak")
 
-    # 2) root@'%' grant
+    # 2) Tarmoq foydalanuvchisi.
+    # Klinika seyfi bor (2026-11-09 dan keyingi o'rnatish) — root tarmoqqa
+    # OCHILMAYDI: alohida azml_app, faqat lab_tizim bazasiga, o'z paroli bilan.
+    # Seyf yo'q (eski o'rnatish) — avvalgidek root@'%' (ikki parolli o'tish
+    # keyingi qadamda; hozir eski kompyuterlar ulanishi buzilmasin).
+    lan = None
+    try:
+        import klinika_seyf
+        lan = klinika_seyf.lan_ulanish()
+    except Exception:
+        lan = None
     try:
         import mysql.connector
         conn = mysql.connector.connect(
             host="127.0.0.1", port=port, user=cfg.get("user", "root"),
             password=cfg.get("password", ""), connection_timeout=6, use_pure=True)
         cur = conn.cursor()
-        parol = cfg.get("password", "")
-        cur.execute("CREATE USER IF NOT EXISTS 'root'@'%' "
-                    "IDENTIFIED WITH mysql_native_password BY %s", (parol,))
-        cur.execute("ALTER USER 'root'@'%' IDENTIFIED WITH mysql_native_password BY %s", (parol,))
-        cur.execute("GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION")
-        cur.execute("FLUSH PRIVILEGES")
+        if lan:
+            for sql, arg in lan_foydalanuvchi_sql(lan["user"], lan["password"],
+                                                  cfg.get("database") or "lab_tizim"):
+                cur.execute(sql, arg)
+        else:
+            parol = cfg.get("password", "")
+            cur.execute("CREATE USER IF NOT EXISTS 'root'@'%' "
+                        "IDENTIFIED WITH mysql_native_password BY %s", (parol,))
+            cur.execute("ALTER USER 'root'@'%' IDENTIFIED WITH mysql_native_password BY %s", (parol,))
+            cur.execute("GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION")
+            cur.execute("FLUSH PRIVILEGES")
         cur.close()
         conn.close()
         qadamlar.append("✅ Baza: boshqa kompyuterlarga ruxsat berildi")
@@ -972,7 +1035,24 @@ def lan_ruxsat(cfg: dict):
 
     iplar = ", ".join(barcha_iplar())
     qadamlar.append(f"\nBoshqa kompyuterlar shu IP ni tersin:  {iplar}")
+    if lan:
+        qadamlar.append(f"Foydalanuvchi: {lan['user']}   Parol: {lan['password']}")
     return True, "\n".join(qadamlar)
+
+
+def lan_foydalanuvchi_sql(user: str, parol: str, baza: str = "lab_tizim") -> list:
+    """Tarmoq (boshqa kabinet) foydalanuvchisi: faqat BITTA bazaga to'liq huquq,
+    global huquq (SUPER, boshqa bazalar, foydalanuvchi yaratish) YO'Q.
+    [(sql, parametrlar)] — Baza ustasi va lan_ruxsat bir xil ishlatadi."""
+    if not baza.replace("_", "").isalnum() or not user.replace("_", "").isalnum():
+        raise ValueError("Baza / foydalanuvchi nomi noto'g'ri")
+    return [
+        (f"CREATE USER IF NOT EXISTS '{user}'@'%' "
+         "IDENTIFIED WITH mysql_native_password BY %s", (parol,)),
+        (f"ALTER USER '{user}'@'%' IDENTIFIED WITH mysql_native_password BY %s", (parol,)),
+        (f"GRANT ALL PRIVILEGES ON `{baza}`.* TO '{user}'@'%'", ()),
+        ("FLUSH PRIVILEGES", ()),
+    ]
 
 
 # ─────────────────────────── Litsenziya ───────────────────────────
@@ -1050,7 +1130,7 @@ def sozlama_oynasi(parent=None, bolim: str = "baza") -> bool:
     oyna = tk.Toplevel(parent) if parent else tk.Tk()
     oyna.title("AzizMedLine — Sozlama")
     oyna.configure(bg=_BG)
-    oyna.geometry("620x710")
+    oyna.geometry("620x750")
     oyna.resizable(False, False)
 
     # ── Sarlavha ──
@@ -1147,6 +1227,37 @@ def sozlama_oynasi(parent=None, bolim: str = "baza") -> bool:
         natija_lbl.config(text=ulanish_diagnostika(_yig()) +
                           "\n\n«💾 Saqlash» ni bosing.", fg=_MATN)
 
+    def _kod_bilan():
+        """Server ekranidagi 6 xonali kod bilan ulanish (parol terilmaydi)."""
+        import ulanish_juftlash as uj
+        c = uj.kod_oynasi(oyna, maydon["host"].get().strip())
+        if not c:
+            return
+        for k in ("host", "port", "user", "password", "database"):
+            maydon[k].delete(0, "end")
+            maydon[k].insert(0, str(c[k]))
+        ok, msg = test_ulanish(_yig())
+        if not ok:
+            natija_lbl.config(text="Ma'lumot olindi, lekin bazaga ulanmadi:\n" + msg, fg=_QIZIL)
+            return
+        yol = saqla(_yig())
+        holat["saqlandi"] = True
+        try:
+            # Natija o'z sozlamasidan (analizator_config.json) ulanadi — u ham
+            # shu serverga va yangi parolga o'tsin.
+            import parol_kochirish
+            parol_kochirish.natija_db_yangila(_yig())
+        except Exception:
+            pass
+        natija_lbl.config(text=f"✅ Serverga ulandi va saqlandi ({c['host']}:{c['port']}).\n"
+                               "Registratsiya, Natija, Vrach va TV qayta ochilsin.", fg=_OK)
+        messagebox.showinfo("Ulandi", f"Server: {c['host']}:{c['port']}\nSaqlandi: {yol}",
+                            parent=oyna)
+
+    tk.Button(s1, text="🔗  Server KODI bilan ulanish (yangi kompyuter — tavsiya etiladi)",
+              relief="flat", bg=_YASHIL, fg="white", font=("Segoe UI Semibold", 10),
+              cursor="hand2", command=_kod_bilan
+              ).pack(fill="x", pady=(4, 0), ipady=6)
     tk.Button(s1, text="🔍  Serverni tarmoqdan AVTOMATIK topish (IP terish shart emas)",
               relief="flat", bg="#2b5cff", fg="white", font=("Segoe UI Semibold", 10),
               cursor="hand2", command=_avto_top

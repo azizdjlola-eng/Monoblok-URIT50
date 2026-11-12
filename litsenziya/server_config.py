@@ -10,8 +10,18 @@ VPS_URL ni rebuild qilmasdan o'zgartirish: ProgramData/AzizMedLine/vps_url.txt g
 
 import os
 
-# Standart VPS manzili (alohida port — litsenziya xizmati)
+# Standart VPS manzili. 2026-11-11 dan HTTPS (nginx 443 → 5679); eski Windows
+# sertifikatga ishonmasa — eski HTTP porti (vps_https.tanla).
+_DEFAULT_VPS_URL_HTTPS = "https://45-130-148-66.sslip.io/litsenziya-x"
 _DEFAULT_VPS_URL = "http://45.130.148.66:5679"
+
+
+def _standart() -> str:
+    try:
+        import vps_https
+        return vps_https.tanla(vps_https.LITSENZIYA_HTTPS, vps_https.LITSENZIYA_HTTP)
+    except Exception:
+        return _DEFAULT_VPS_URL_HTTPS
 
 
 def vps_url() -> str:
@@ -23,12 +33,14 @@ def vps_url() -> str:
             if os.path.exists(p):
                 with open(p, "r", encoding="utf-8") as f:
                     u = f.read().strip()
-                    if u:
+                    # Eski standart HTTP manzil qo'lda yozilgan bo'lsa — bu
+                    # «o'zgartirish» emas: HTTPS ga o'tkazamiz.
+                    if u and u.rstrip("/") != _DEFAULT_VPS_URL:
                         return u.rstrip("/")
     except Exception:
         pass
-    # 2) Standart
-    return _DEFAULT_VPS_URL.rstrip("/")
+    # 2) Standart (HTTPS, ishlamasa eski HTTP)
+    return _standart().rstrip("/")
 
 
 def admin_token() -> str:

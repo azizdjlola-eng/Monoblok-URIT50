@@ -106,45 +106,110 @@ def _hodisa_aylantir(yol: str):
         pass
 
 
+# Jurnal oynasi «nega bo'sh?» savoliga javob bera olsin (MED ISHONCH, 2026-11-07):
+# yozish xatosi endi jim yutilmaydi, buzuq qatorlar sanaladi.
+_holat = {"yozish_xato": "", "yozish_xato_vaqt": "", "oxirgi_yozuv": "",
+          "tashlangan": 0, "oqish_xato": ""}
+
+
 def hodisa_yoz(xizmat: str, nom: str, hodisa: str, sabab: str = "", kim: str = "",
                natija: str = "", davom_sek: int = None, vaqt: datetime.datetime = None):
     """Bitta hodisa: hodisa = buzildi | tuzaldi | ogohlantirish | o'qildi |
-    tuzatish | avto tuzatish. Hech qachon istisno otmaydi."""
+    tuzatish | avto tuzatish. Hech qachon istisno otmaydi — lekin xato
+    `jurnal_holati()` da ko'rinadi va dastur logiga yoziladi."""
     try:
         d = {"vaqt": (vaqt or datetime.datetime.now()).strftime("%Y-%m-%d %H:%M:%S"),
              "kompyuter": socket.gethostname(), "dastur": _dastur or "", "xizmat": xizmat,
              "nom": nom, "hodisa": hodisa, "sabab": telefonni_yashir(str(sabab or ""))[:400],
              "kim": kim or "", "natija": natija or ""}
         if davom_sek is not None:
-            d["davom_sek"] = int(davom_sek)
+            try:
+                d["davom_sek"] = int(float(davom_sek))
+            except (TypeError, ValueError):
+                pass
         yol = _hodisa_yoli()
         with _hodisa_qulf:
             os.makedirs(os.path.dirname(yol), exist_ok=True)
             _hodisa_aylantir(yol)
             with open(yol, "a", encoding="utf-8") as f:
                 f.write(json.dumps(d, ensure_ascii=False) + "\n")
+        _holat["oxirgi_yozuv"] = d["vaqt"]
+    except Exception as e:
+        _holat["yozish_xato"] = f"{type(e).__name__}: {e}"[:300]
+        _holat["yozish_xato_vaqt"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            logger().warning(f"hodisalar jurnaliga yozilmadi: {_holat['yozish_xato']}")
+        except Exception:
+            pass
+
+
+def _hodisa_qatori(q: str):
+    """Bitta qator → dict yoki None (buzuq: JSON emas, lug'at emas, vaqt matn emas)."""
+    q = q.strip().strip("\x00")
+    if not q:
+        return None
+    try:
+        d = json.loads(q)
     except Exception:
-        pass
+        return None
+    if not isinstance(d, dict) or not isinstance(d.get("vaqt"), str):
+        return None
+    return d
 
 
 def hodisalar_oqi(kun: int = 30, xizmat: str = "", eng_kop: int = 5000) -> list:
-    """Oxirgi `kun` kunlik hodisalar (yangisi oxirida). Aylantirilgan fayllar ham o'qiladi."""
+    """Oxirgi `kun` kunlik hodisalar (yangisi oxirida). Aylantirilgan fayllar ham o'qiladi.
+
+    Buzuq qator (tok o'chganda NUL baytlar, chala yozuv, qo'lda tahrir) faqat
+    O'ZI tashlanadi — ilgari `d.get` xatosi butun faylni o'qimay qoldirardi."""
     chegara = (datetime.datetime.now() - datetime.timedelta(days=kun)).strftime("%Y-%m-%d %H:%M:%S")
     yol = _hodisa_yoli()
     out = []
+    tashlangan = 0
+    xatolar = []
     for f in [f"{yol}.{i}" for i in range(_FAYL_SONI, 0, -1)] + [yol]:
         try:
             with open(f, encoding="utf-8", errors="replace") as fh:
                 for q in fh:
-                    try:
-                        d = json.loads(q)
-                    except Exception:
+                    d = _hodisa_qatori(q)
+                    if d is None:
+                        if q.strip().strip("\x00"):
+                            tashlangan += 1
                         continue
-                    if d.get("vaqt", "") >= chegara and (not xizmat or d.get("xizmat") == xizmat):
+                    if d["vaqt"] >= chegara and (not xizmat or d.get("xizmat") == xizmat):
                         out.append(d)
-        except Exception:
+        except FileNotFoundError:
             pass
+        except Exception as e:
+            xatolar.append(f"{os.path.basename(f)}: {type(e).__name__}: {e}"[:200])
+    _holat["tashlangan"] = tashlangan
+    _holat["oqish_xato"] = "; ".join(xatolar)
     return out[-eng_kop:]
+
+
+def jurnal_holati() -> dict:
+    """Jurnal oynasining pastki qatori uchun: fayl qayerda, bormi, hajmi, oxirgi
+    o'zgarishi, papkaga yozib bo'ladimi, oxirgi yozish/o'qish xatosi."""
+    yol = _hodisa_yoli()
+    h = dict(_holat)
+    h.update(fayl=yol, bor=os.path.isfile(yol), hajm=0, ozgargan="", yozsa_boladi=False)
+    try:
+        if h["bor"]:
+            st = os.stat(yol)
+            h["hajm"] = st.st_size
+            h["ozgargan"] = datetime.datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M")
+            h["yozsa_boladi"] = os.access(yol, os.W_OK)
+        else:
+            papka = os.path.dirname(yol)
+            for _ in range(6):                      # mavjud eng yaqin ota papka
+                if not papka or os.path.exists(papka):
+                    break
+                papka = os.path.dirname(papka)
+            # papka o'rnida FAYL turgan bo'lsa ham — yozib bo'lmaydi
+            h["yozsa_boladi"] = bool(papka) and os.path.isdir(papka) and os.access(papka, os.W_OK)
+    except Exception:
+        pass
+    return h
 
 
 class _Formatlovchi(logging.Formatter):
