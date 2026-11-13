@@ -489,14 +489,20 @@ def format_report(res):
     lines.append("Bulut: " + str(s.get("provider_nomi") or provider_nomi()))
     lines.append(str(s.get("exe") or "OneDrive.exe") + ": " +
                  ("ishlayapti" if s.get("process") else "ISHLAMAYAPTI"))
+    fod = bool(s.get("fod"))
     if s.get("folders"):
         lines.append("")
         lines.append("Kunlar bo'yicha:")
         for f in s["folders"]:
+            if not fod:
+                # Google Drive: fayl darajasida «bulutga chiqdimi» belgisi yo'q —
+                # «0/92 bulutda, 92 kutmoqda» deb yolg'on qo'rqitmaymiz.
+                lines.append("   {}:  {} ta PDF".format(f["kun"], f["jami"]))
+                continue
             mark = "OK" if f["kutmoqda"] == 0 else "{} kutmoqda".format(f["kutmoqda"])
             lines.append("   {}:  {}/{} bulutda   ({})".format(
                 f["kun"], f["sinxron"], f["jami"], mark))
-    if s.get("examples"):
+    if fod and s.get("examples"):
         lines.append("")
         lines.append("Chiqmagan natijalar (eng eskisi):")
         for e in s["examples"]:

@@ -7,7 +7,7 @@ Natija yetkazish zanjiri:
         -> nargi kompyuter / bot -> bemor (SMS, keyinchalik Telegram).
 
 Bulut Blanka Sozlamalarida tanlanadi (blanka_config.json):
-    "bulut_provayder": "onedrive" | "gdrive"   (bo'sh/yo'q = onedrive)
+    "bulut_provayder": endi e'tiborga olinmaydi — DOIM Google Drive (2026-11-13)
     "gdrive_root": ""   — Google Drive ildizi qo'lda (bo'sh = avtomatik topish)
     "pdf_save_dir": ""  — PDF papkasi qo'lda (eng ustun, bulutdan qat'i nazar)
 
@@ -72,10 +72,31 @@ def _blanka_config():
 
 
 def get_provider(cfg=None):
-    """Tanlangan bulut: 'onedrive' (standart) yoki 'gdrive'."""
-    cfg = cfg if cfg is not None else _blanka_config()
-    p = (cfg.get("bulut_provayder") or ONEDRIVE).strip().lower()
-    return p if p in PROVAYDERLAR else ONEDRIVE
+    """Natija buluti — DOIM Google Drive.
+
+    Egasi qarori (2026-11-13): OneDrive butunlay tashlandi. Microsoft Graph
+    2026-11-12 dan PDF yuklashda 401 beradi, bot esa natijani Google Drive'dan
+    oladi. blanka_config.json dagi eski "bulut_provayder": "onedrive" qiymati
+    e'tiborga olinmaydi — aks holda bir kompyuter OneDrive'da qolib, SMS/bot
+    natijani ko'rmay qolardi."""
+    return GDRIVE
+
+
+def _onedrive_yolimi(path):
+    """Qo'lda yozilgan papka OneDrive ichidami (eski sozlamadan qolgan)?"""
+    if not path:
+        return False
+    if "onedrive" in os.path.normcase(path):
+        return True
+    try:
+        root = get_onedrive_root()
+        if root:
+            a = os.path.normcase(os.path.abspath(path))
+            b = os.path.normcase(os.path.abspath(root))
+            return a == b or a.startswith(b.rstrip(os.sep) + os.sep)
+    except Exception:
+        pass
+    return False
 
 
 def provider_nomi(provider=None):
@@ -175,8 +196,10 @@ def get_natijalar_root(cfg=None):
     Bulut topilmasa '' qaytaradi."""
     cfg = cfg if cfg is not None else _blanka_config()
     qolda = (cfg.get("pdf_save_dir") or "").strip()
-    if qolda:
+    if qolda and not _onedrive_yolimi(qolda):
         return qolda
+    if qolda:
+        print(f"[Bulut] Eski OneDrive PDF papkasi e'tiborga olinmadi: {qolda}")
     root = get_cloud_root(cfg=cfg)
     return os.path.join(root, "Natijalar") if root else ""
 

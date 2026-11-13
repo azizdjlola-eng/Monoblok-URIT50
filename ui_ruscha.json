@@ -2852,5 +2852,6 @@
  "ℹ️ Bemor topilmadi. Yangi bemor ma'lumotini kiriting": "ℹ️ Пациент не найден. Введите данные нового пациента",
  "ℹ️ Bu tahlil {} ta buyurtmada ishlatilgan — eski buyurtmalar va cheklar o'zgarmaydi, faqat yangi buyurtmalarda ko'rsatilmaydi": "ℹ️ Этот анализ использован в {} заказах — старые заказы и чеки не изменятся, просто не будет показываться в новых",
  "ℹ️ Ma'lumot": "ℹ️ Информация",
- "ℹ️ SMS {} da yoqilgan — undan oldingi bemorlar SMS ga kirmaydi, shuning uchun marketing summasidan kam chiqishi tabiiy": "ℹ️ SMS включено с {} — более ранние пациенты в SMS не входят, поэтому естественно, что сумма меньше маркетинговой"
+ "ℹ️ SMS {} da yoqilgan — undan oldingi bemorlar SMS ga kirmaydi, shuning uchun marketing summasidan kam chiqishi tabiiy": "ℹ️ SMS включено с {} — более ранние пациенты в SMS не входят, поэтому естественно, что сумма меньше маркетинговой",
+ "Google Drive dan link olish": "Получить ссылку из Google Drive"
 }

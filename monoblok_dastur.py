@@ -7528,11 +7528,10 @@ def build_natija_filename(order_info: dict, order_id: int, ext: str = "docx") ->
     base = ' '.join(parts)
     return f"{base} - LAB natija #{order_id}.{ext}"
 
-# OneDrive PDF nusxa saqlash
-# Universal path: OneDrive muhit o'zgaruvchisidan yoki home papkadan topiladi
-# Har qanday foydalanuvchi nomida ishlaydi (alfatech.uz, User, yoki boshqa)
+# Natija PDF nusxasi — Google Drive «Мой диск\Natijalar» (2026-11-13 dan; nomi
+# tarixiy: _get_onedrive_natijalar). Har kompyuterda Google Drive diski o'zi topiladi.
 def _get_onedrive_natijalar(date_str=None):
-    """OneDrive\\Natijalar\\DD.MM.YYYY papkasini qaytaradi (universal, foydalanuvchi nomiga bog'liq emas).
+    """Google Drive\\Natijalar\\DD.MM.YYYY papkasini qaytaradi (foydalanuvchi nomi/disk harfiga bog'liq emas).
     date_str: 'DD.MM.YYYY' formatida, None bo'lsa bugungi sana ishlatiladi.
     """
     import datetime
@@ -7544,34 +7543,20 @@ def _get_onedrive_natijalar(date_str=None):
         _bcfg = load_blanka_config()
     except Exception:
         _bcfg = {}
-    _custom_pdf = (_bcfg.get('pdf_save_dir', '') or '').strip()
-    if _custom_pdf:
-        return os.path.join(_custom_pdf, date_str)
-    # Tanlangan bulut (OneDrive / Google Drive) — bulut_papka.py
+    # Google Drive «Мой диск\Natijalar» — bulut_papka.py (OneDrive 2026-11-13
+    # dan butunlay tashlangan; qo'lda yozilgan eski OneDrive yo'li ham
+    # get_natijalar_root ichida e'tiborga olinmaydi).
     try:
         import bulut_papka
         _root = bulut_papka.get_natijalar_root(_bcfg)
         if _root:
             return os.path.join(_root, date_str)
-        if bulut_papka.get_provider(_bcfg) == bulut_papka.GDRIVE:
-            # Google Drive diski ulanmagan (GoogleDriveFS to'xtagan) — PDF
-            # yo'qolmasin, mahalliy papkaga tushadi; nazorat signal beradi.
-            print("[PDF] Google Drive topilmadi — PDF mahalliy papkaga saqlanadi")
-            return os.path.join(os.path.expanduser('~'), 'Natijalar_PDF', 'Natijalar', date_str)
     except Exception as e:
         print(f"[PDF] Bulut papkasini aniqlashda xato: {e}")
-    # 1-usul: OneDrive muhit o'zgaruvchisi (eng ishonchli)
-    onedrive_root = os.environ.get('OneDrive') or os.environ.get('OneDriveConsumer')
-    # 2-usul: home papkadan topish
-    if not onedrive_root:
-        home = os.path.expanduser('~')
-        candidate = os.path.join(home, 'OneDrive')
-        if os.path.exists(candidate):
-            onedrive_root = candidate
-    # 3-usul: fallback — dastur papkasi yonida
-    if not onedrive_root:
-        onedrive_root = os.path.join(os.path.expanduser('~'), 'Natijalar_PDF')
-    return os.path.join(onedrive_root, 'Natijalar', date_str)
+    # Google Drive diski ulanmagan (GoogleDriveFS to'xtagan / o'rnatilmagan) —
+    # PDF yo'qolmasin, mahalliy papkaga tushadi; nazorat signal beradi.
+    print("[PDF] Google Drive topilmadi — PDF mahalliy papkaga saqlanadi")
+    return os.path.join(os.path.expanduser('~'), 'Natijalar_PDF', 'Natijalar', date_str)
 
 def _muhr_joyini_top(page, anchor, size):
     """Muhr uchun joy: «Laborant vrach:» bilan familiya ORASIDA, imzo qatorini
@@ -11138,14 +11123,14 @@ class MonoblokApp:
             # 5. OneDrive sinxronizatsiya nazorati
             #    Natija PDF lari haqiqatan bulutga chiqyaptimi? OneDrive jimgina
             #    ishdan chiqsa — natija nargi kompyuterga bormaydi va SMS ketmaydi.
-            print("\n☁ 5. OneDrive sinxronizatsiya nazoratini yoqyapman...")
+            print("\n☁ 5. Google Drive sinxronizatsiya nazoratini yoqyapman...")
             try:
                 od_ok = self.start_onedrive_monitor()
                 services_status['OneDrive'] = od_ok
                 if od_ok:
-                    print("   [OK] OneDrive nazorati yoqildi")
+                    print("   [OK] Google Drive nazorati yoqildi")
                 else:
-                    print("   [OGOHLANTIRISH] OneDrive nazorati yoqilmadi")
+                    print("   [OGOHLANTIRISH] Google Drive nazorati yoqilmadi")
             except Exception as e:
                 print(f"   [XATO] OneDrive nazoratida xato: {e}")
                 services_status['OneDrive'] = False
@@ -12374,7 +12359,7 @@ class MonoblokApp:
             import bulut_papka
             return bulut_papka.provider_nomi()
         except Exception:
-            return "OneDrive"
+            return "Google Drive"
 
     def _bulut_qisqa_nomi(self):
         """Toolbar tugmasi uchun qisqa nom (tugma eni 14 belgi)."""
@@ -25217,19 +25202,19 @@ Sana: {_sana_fmt}"""
 
         hint_text = (
             "  Bo'sh → QR da faqat namuna ID yoziladi (masalan: 260507003689)\n"
-            "  OneDrive papka linki → QR skanerda shu papka ochiladi\n"
-            "  Link + {{SAMPLE}} → https://1drv.ms/f/xxx?id={{SAMPLE}}\n"
+            "  Google Drive papka linki → QR skanerda shu papka ochiladi\n"
+            "  Link + {{SAMPLE}} → https://t.me/<bot>?start={{SAMPLE}}\n"
             "  {{DATE}} = sana (07.05.2026),   {{SAMPLE}} = namuna ID"
         )
         ttk.Label(qr_frame, text=hint_text, foreground="#555555",
                   font=("Arial", 8), justify=tk.LEFT).pack(anchor=tk.W, pady=(4, 0))
 
-        # OneDrive yo'l-yo'riq
-        onedrive_lf = ttk.LabelFrame(qr_frame, text="OneDrive dan link olish", padding="5")
+        # Google Drive yo'l-yo'riq (2026-11-13: OneDrive tashlandi)
+        onedrive_lf = ttk.LabelFrame(qr_frame, text="Google Drive dan link olish", padding="5")
         onedrive_lf.pack(fill=tk.X, pady=(6, 0))
         onedrive_steps = (
-            "1. OneDrive → 'Natijalar' papkasiga o'ng klik\n"
-            "2. 'Ulashish' → 'Havola nusxalash' ni bosing\n"
+            "1. Google Drive → 'Natijalar' papkasiga o'ng klik\n"
+            "2. 'Поделиться' / 'Ulashish' → 'Havolani nusxalash' ni bosing\n"
             "3. Nusxalangan linkni yuqoridagi maydonga joylashtiring\n"
             "   (QR skanerda shu papka ochiladi)"
         )
@@ -25523,7 +25508,8 @@ Sana: {_sana_fmt}"""
         save_lf.columnconfigure(1, weight=1)
 
         # Natija PDF lari qaysi bulutga chiqadi (bulut_papka.py)
-        bulut_var = tk.StringVar(value=(config.get('bulut_provayder') or 'onedrive'))
+        # 2026-11-13: OneDrive tashlandi — natija buluti DOIM Google Drive
+        bulut_var = tk.StringVar(value='gdrive')
         ttk.Label(save_lf, text="Natija buluti:").grid(row=0, column=0, sticky=tk.W, pady=3, padx=(0, 5))
         bulut_fr = ttk.Frame(save_lf)
         bulut_fr.grid(row=0, column=1, columnspan=3, sticky=tk.W, pady=3)
@@ -25565,6 +25551,11 @@ Sana: {_sana_fmt}"""
                         if boshqa != prov and _bp.is_inside_cloud(pdf_v.get().strip(), boshqa):
                             pdf_v.set("")
                             break
+                if pdf_v.get().strip() and _bp._onedrive_yolimi(pdf_v.get().strip()):
+                    bulut_info.config(text="⚠ Pastdagi PDF papkasi OneDrive'da — u endi ishlatilmaydi, "
+                                           "PDF Google Drive\\Natijalar ga tushadi. «Tozalash» bosing.",
+                                      foreground="#8B0000")
+                    return
                 if pdf_v.get().strip():
                     bulut_info.config(text="→ PDF qo'lda ko'rsatilgan papkaga saqlanadi (pastda). "
                                            "Bulut tanlovi ishlashi uchun «Tozalash» bosing.",
@@ -25582,10 +25573,8 @@ Sana: {_sana_fmt}"""
             except Exception as e:
                 bulut_info.config(text=f"Bulutni aniqlashda xato: {e}", foreground="#8B0000")
 
-        ttk.Radiobutton(bulut_fr, text="OneDrive", variable=bulut_var, value="onedrive",
-                        command=lambda: _bulut_yangila(True)).pack(side=tk.LEFT, padx=(0, 12))
-        ttk.Radiobutton(bulut_fr, text="Google Drive", variable=bulut_var, value="gdrive",
-                        command=lambda: _bulut_yangila(True)).pack(side=tk.LEFT)
+        ttk.Label(bulut_fr, text="☁ Google Drive  («Мой диск\\Natijalar»)",
+                  foreground="#005500").pack(side=tk.LEFT)
         wp_fields["pdf_save_dir"].trace_add("write", lambda *_: _bulut_yangila())
         _bulut_yangila()
 
@@ -25663,7 +25652,14 @@ Sana: {_sana_fmt}"""
             for key, var in wp_fields.items():
                 new_config[key] = var.get().strip()
             _eski_bulut = config.get('bulut_provayder') or 'onedrive'
-            new_config["bulut_provayder"] = bulut_var.get()
+            new_config["bulut_provayder"] = "gdrive"
+            # Eski OneDrive PDF yo'li saqlanmasin (baribir e'tiborga olinmaydi)
+            try:
+                import bulut_papka as _bp2
+                if _bp2._onedrive_yolimi(new_config.get("pdf_save_dir", "")):
+                    new_config["pdf_save_dir"] = ""
+            except Exception:
+                pass
 
             try:
                 save_blanka_config(new_config)
