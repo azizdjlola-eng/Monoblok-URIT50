@@ -65,9 +65,15 @@ _BK_DATA = os.environ.get("BIO_DATA_DIR") or os.path.join(
     os.environ.get("ProgramData", r"C:\ProgramData"), "AzizMedLine", "BK280")
 BASE_DIR = os.path.join(_BK_DATA, "RAW_LOGS")
 ERRORS_DIR = os.path.join(_BK_DATA, "ERRORS")
-os.makedirs(BASE_DIR, exist_ok=True)
-os.makedirs(ERRORS_DIR, exist_ok=True)
-_LOG_DIR = os.environ.get("BIO_LOG_DIR") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+try:
+    os.makedirs(BASE_DIR, exist_ok=True)
+    os.makedirs(ERRORS_DIR, exist_ok=True)
+except Exception:
+    pass  # import hech qachon yiqilmasin (Natija dasturi ochilishi muhimroq)
+# EXE da (Program Files ichida) yozib bo'lmaydi — loglar ProgramData ga.
+_LOG_DIR = os.environ.get("BIO_LOG_DIR") or (
+    os.path.join(_BK_DATA, "logs") if getattr(sys, "frozen", False)
+    else os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs"))
 
 ACK = b'\x06'   # BK-280 natija portida kutadigan bir baytli tasdiq
 

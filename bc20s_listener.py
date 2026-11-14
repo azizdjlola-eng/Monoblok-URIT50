@@ -70,7 +70,11 @@ _lock            = threading.Lock()
 # Loglar konsolga VA faylga yoziladi: logs/bc20s_YYYYMMDD.log
 # (dastur "start /min" bilan ochilgani uchun konsol ko'rinmaydi — 12.09.2026 da
 #  "natija tushmayapti" muammosini tekshirganda hech qanday iz qolmagan edi).
-_LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+# EXE da (Program Files ichida) yozib bo'lmaydi — loglar ProgramData ga.
+_LOG_DIR = (os.path.join(os.environ.get("ProgramData") or r"C:\ProgramData",
+                         "AzizMedLine", "BC20S", "logs")
+            if getattr(sys, "frozen", False)
+            else os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs"))
 _last_rx_time = None      # analizatordan oxirgi bayt (heartbeat ham) kelgan vaqt
 _last_result_time = None  # oxirgi ORU^R01 (natija) kelgan vaqt
 

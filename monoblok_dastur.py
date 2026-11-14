@@ -70,7 +70,7 @@ except ImportError:
 try:
     from bk280_listener import start_bk280_listener, stop_bk280_listener
     BK280_AVAILABLE = True
-except ImportError as e:
+except Exception as e:  # ImportError emas: modul ichidagi har qanday xato (PermissionError) dasturni yiqitmasin
     print(f"[OGOHLANTIRISH] BK-280 listener import qilinmadi: {e}")
     start_bk280_listener = None
     stop_bk280_listener = None
@@ -80,7 +80,7 @@ except ImportError as e:
 try:
     from BK280.asus_lis_server import start_lis_server as start_bk280_lis, stop_lis_server as stop_bk280_lis
     BK280_LIS_AVAILABLE = True
-except ImportError as e:
+except Exception as e:  # ImportError emas: modul ichidagi har qanday xato (PermissionError) dasturni yiqitmasin
     print(f"[OGOHLANTIRISH] BK-280 LIS server import qilinmadi: {e}")
     start_bk280_lis = None
     stop_bk280_lis = None
@@ -90,7 +90,7 @@ except ImportError as e:
 try:
     from bc20s_listener import start_bc20s_listener, stop_bc20s_listener, is_running as bc20s_is_running
     BC20S_AVAILABLE = True
-except ImportError as e:
+except Exception as e:  # ImportError emas: modul ichidagi har qanday xato (PermissionError) dasturni yiqitmasin
     print(f"[OGOHLANTIRISH] BC-20S listener import qilinmadi: {e}")
     start_bc20s_listener = None
     stop_bc20s_listener  = None
@@ -101,7 +101,7 @@ except ImportError as e:
 try:
     from hematology_window import open_window as open_hematology_window, HL7_TO_DB_NAME as _HEMA_HL7_MAP, get_multi_ref as _hema_get_multi_ref
     HEMATOLOGY_AVAILABLE = True
-except ImportError as e:
+except Exception as e:  # ImportError emas: modul ichidagi har qanday xato (PermissionError) dasturni yiqitmasin
     print(f"[OGOHLANTIRISH] Hematology window import qilinmadi: {e}")
     HEMATOLOGY_AVAILABLE = False
     open_hematology_window = None
@@ -111,7 +111,7 @@ except ImportError as e:
 try:
     from biochemistry_window import open_window as open_biochemistry_window
     BIOCHEMISTRY_AVAILABLE = True
-except ImportError as e:
+except Exception as e:  # ImportError emas: modul ichidagi har qanday xato (PermissionError) dasturni yiqitmasin
     print(f"[OGOHLANTIRISH] Biochemistry window import qilinmadi: {e}")
     BIOCHEMISTRY_AVAILABLE = False
     open_biochemistry_window = None
@@ -119,7 +119,7 @@ except ImportError as e:
 try:
     from urine_window import open_window as open_urine_window
     URINE_WINDOW_AVAILABLE = True
-except ImportError as e:
+except Exception as e:  # ImportError emas: modul ichidagi har qanday xato (PermissionError) dasturni yiqitmasin
     print(f"[OGOHLANTIRISH] Urine window import qilinmadi: {e}")
     URINE_WINDOW_AVAILABLE = False
     open_urine_window = None
@@ -128,7 +128,7 @@ except ImportError as e:
 try:
     import onedrive_monitor
     ONEDRIVE_MONITOR_AVAILABLE = True
-except ImportError as e:
+except Exception as e:  # ImportError emas: modul ichidagi har qanday xato (PermissionError) dasturni yiqitmasin
     print(f"[OGOHLANTIRISH] OneDrive monitor import qilinmadi: {e}")
     onedrive_monitor = None
     ONEDRIVE_MONITOR_AVAILABLE = False
@@ -138,7 +138,7 @@ except ImportError as e:
 try:
     import gemo_monitor
     GEMO_MONITOR_AVAILABLE = True
-except ImportError as e:
+except Exception as e:  # ImportError emas: modul ichidagi har qanday xato (PermissionError) dasturni yiqitmasin
     print(f"[OGOHLANTIRISH] Gemo monitor import qilinmadi: {e}")
     gemo_monitor = None
     GEMO_MONITOR_AVAILABLE = False
@@ -147,7 +147,7 @@ except ImportError as e:
 try:
     from qc_module import open_qc_window as _open_qc_window
     QC_AVAILABLE = True
-except ImportError as e:
+except Exception as e:  # ImportError emas: modul ichidagi har qanday xato (PermissionError) dasturni yiqitmasin
     print(f"[OGOHLANTIRISH] QC module import qilinmadi: {e}")
     QC_AVAILABLE = False
     _open_qc_window = None
@@ -156,7 +156,7 @@ except ImportError as e:
 # Chegaralar `result_limits.json` da (yoki result_validator.py -> DEFAULT_CONFIG da).
 try:
     import result_validator
-except ImportError as e:
+except Exception as e:  # ImportError emas: modul ichidagi har qanday xato (PermissionError) dasturni yiqitmasin
     print(f"[OGOHLANTIRISH] result_validator import qilinmadi: {e}")
     result_validator = None
 
@@ -164,7 +164,7 @@ except ImportError as e:
 # Sozlamalar `lab_quality.json` da.
 try:
     import lab_quality
-except ImportError as e:
+except Exception as e:  # ImportError emas: modul ichidagi har qanday xato (PermissionError) dasturni yiqitmasin
     print(f"[OGOHLANTIRISH] lab_quality import qilinmadi: {e}")
     lab_quality = None
 
