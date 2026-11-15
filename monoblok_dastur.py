@@ -17477,6 +17477,10 @@ Sana: {_sana_fmt}"""
         if not result_json and self._get_analyzer_managed_type(test_id) == 'urine':
             self._siydik_qolda_taklif(test_id, test_name)
             return
+        # Umumiy qon (CBC) — natija yo'q: analizator ishlamasa qo'lda (2026-11-15)
+        if not result_json and self._get_analyzer_managed_type(test_id) == 'hematology_cbc':
+            self._cbc_qolda_taklif(test_id, test_name)
+            return
 
         test_name_lower = test_name.lower()
 
@@ -18002,7 +18006,7 @@ Sana: {_sana_fmt}"""
         # (xato bo'lsa pastdagi oddiy oynaga qaytadi)
         if json_type == 'hematology_cbc':
             try:
-                self._show_hematology_cbc_popup(test_name, result_dict)
+                self._show_hematology_cbc_popup(test_name, result_dict, test_id=test_id)
                 return
             except Exception as _he:
                 print(f"[OGOHLANTIRISH] CBC oynasi ochilmadi, oddiy ko'rinish: {_he}")
@@ -18086,7 +18090,7 @@ Sana: {_sana_fmt}"""
                    command=popup.destroy).pack(pady=10)
         popup.focus_set()
 
-    def _show_hematology_cbc_popup(self, test_name, rd):
+    def _show_hematology_cbc_popup(self, test_name, rd, test_id=None):
         """Umumiy qon tahlili natijasi — Gemotologiya oynasidagidek: ↑/↓ rangli natija,
         yosh/jinsga mos norma, Flag va WBC/RBC/PLT gistogrammalari.
         Qatorlar va normalar blankadagi bilan BIR XIL (CBC_HEMA_ROWS + multi-ref),
@@ -18167,6 +18171,11 @@ Sana: {_sana_fmt}"""
         tk.Label(btm, text="Norma bemor yoshi va jinsiga qarab (blankadagi bilan bir xil)",
                  fg="#666", font=("Arial", 8)).pack(side=tk.LEFT)
         ttk.Button(btm, text="Yopish", command=win.destroy).pack(side=tk.RIGHT)
+        if test_id is not None:
+            def _qolda_tuzat():
+                win.destroy()
+                self._cbc_qolda_oyna(test_id, test_name, mavjud=rd)
+            ttk.Button(btm, text="✏ Qo'lda tuzatish", command=_qolda_tuzat).pack(side=tk.RIGHT, padx=6)
 
         body = ttk.Frame(win, padding=6)
         body.pack(fill=tk.BOTH, expand=True)
@@ -18234,6 +18243,469 @@ Sana: {_sana_fmt}"""
             win.after(80, _load_hist)
 
         win.focus_set()
+
+    # ─────────────────────────────────────────────────────────────────────
+    # UMUMIY QON TAHLILI (CBC) — natijani QO'LDA kiritish (2026-11-15).
+    # Mijozlarda analizator buzilsa / reagent tugasa / analizator umuman yo'q
+    # bo'lsa CBC natija kiritib bo'lmasdi: natija faqat analizator JSON'idan
+    # keladi, oddiy matn esa blankadagi CBC jadvalini buzadi. Bu oyna AYNAN
+    # analizator formatini yasaydi: {"type": "hematology_cbc", "WBC": "6.2", ...}
+    # — blanka (create_hematology_cbc_table_in_doc), ko'rish oynasi va oldingi
+    # natija solishtiruvi uni analizator natijasidek o'qiydi.
+    # Qatorlar/nomlar/normalar — gemo_blanka sozlamasidan (blanka bilan bir xil).
+    # ─────────────────────────────────────────────────────────────────────
+
+    def _cbc_qolda_taklif(self, test_id, test_name):
+        """CBC natijasi yo'q: «Ha» — qo'lda kiritish, «Yo'q» — Gemotologiya oynasi
+        (analizator natijasini tanlab bemorga biriktirish). True — taklif ko'rsatildi."""
+        javob = messagebox.askyesnocancel(
+            "Umumiy qon tahlili",
+            "Bu tahlil natijasi analizatordan hali kelmagan yoki bemorga biriktirilmagan.\n\n"
+            "«Ha» — natijani QO'LDA kiritish\n"
+            "«Yo'q» — Gemotologiya oynasini ochib, analizator natijasini tanlash\n"
+            "«Bekor» — hech narsa qilmaslik",
+            parent=self.root)
+        if javob is None:
+            return True
+        if javob is False:
+            try:
+                self.open_hematology_raw()
+            except Exception as _e:
+                messagebox.showerror("Gemotologiya", f"Oyna ochilmadi: {_e}", parent=self.root)
+            return True
+        self._cbc_qolda_oyna(test_id, test_name)
+        return True
+
+    @staticmethod
+    def _cbc_son(matn):
+        """'6,2' / ' 6.2 ' -> (6.2, '6.2'); bo'sh -> (None, ''); son emas -> (None, None)."""
+        s = str(matn or "").strip().replace(",", ".")
+        if not s:
+            return None, ""
+        try:
+            f = float(s)
+        except ValueError:
+            return None, None
+        if f < 0:
+            return None, None
+        return f, s
+
+    def _cbc_qolda_oyna(self, test_id, test_name, mavjud=None):
+        """CBC qo'lda kiritish / tuzatish oynasi.
+        mavjud — analizator (yoki avvalgi qo'lda) natija lug'ati: qiymatlar to'ldirilib
+        ochiladi, gistogramma va boshqa analizator maydonlari saqlanadi.
+
+        Avto-hisob (gemo_blanka.avto_formulalar): leykoformulada # YOKI % kiritiladi —
+        ikkinchisi WBC orqali chiqadi; MCH/MCV/MCHC, PCT, P-LCC, NLR, PLR ham.
+        Dastur hisoblagan katak och ko'k; laborant o'zi yozsa — qo'lda bo'ladi va
+        dastur unga boshqa tegmaydi. 3-diff / 5-diff — sozlamadan (oynada almashtiriladi)."""
+        bemor = self.current_bemor_data or {}
+        mavjud = dict(mavjud or {})
+        age = mavjud.get('patient_age') or bemor.get('yosh') or ''
+        gender = mavjud.get('patient_gender') or bemor.get('jins') or ''
+        try:
+            _gs = _gb.sozlama()
+        except Exception:
+            _gs = {"qatorlar": list(_gb.DEFAULT_QATORLAR)}
+
+        # Qatorlar (sozlamada yashirilmaganlar) va ularning yosh/jinsga mos normasi
+        qatorlar = []
+        for q in _gs.get("qatorlar") or []:
+            if q.get("korsat") == "yashirin":
+                continue
+            kod = q["kod"]
+            norma, lo, hi = q.get("norma", ""), None, None
+            alias = CBC_HEMA_KOD_ALIAS.get(kod, '')
+            try:
+                if _hema_get_multi_ref and age:
+                    lo, hi, ref = _hema_get_multi_ref(kod, age, gender)
+                    if not ref and alias:
+                        lo, hi, ref = _hema_get_multi_ref(alias, age, gender)
+                    if ref:
+                        norma = ref
+                    else:
+                        lo = hi = None
+            except Exception:
+                lo = hi = None
+            if lo is None or hi is None:
+                try:
+                    lo, hi = _parse_norma_to_min_max(norma)
+                except Exception:
+                    lo = hi = None
+            qatorlar.append({"kod": kod, "nom": q.get("nom", kod), "qisqa": q.get("qisqa") or kod,
+                             "birlik": q.get("birlik", ""), "norma": norma, "lo": lo, "hi": hi,
+                             "boshlangich": _gb.qiymat(mavjud, kod)})
+        Q = {q["kod"]: q for q in qatorlar}
+        birlik = {k: q["birlik"] for k, q in Q.items()}
+
+        # Holat: qiymat (matn), qo'lda yozilganlar, dastur hisoblaganlar
+        qiymat = {k: q["boshlangich"] for k, q in Q.items()}
+        qolda = {k for k, v in qiymat.items() if str(v).strip()}
+        avto = set()
+        if _gb.has_5diff(mavjud):
+            rejim0 = "5"
+        elif any(_gb.qiymat(mavjud, k) for k in _gb.DIFF3_KODLAR):
+            rejim0 = "3"
+        else:
+            rejim0 = "3" if str(_gs.get("qolda_diff")) == "3" else "5"
+
+        AVTO_BG, AVTO_FG = "#e3f0ff", "#0b4f8a"
+
+        win = tk.Toplevel(self.root)
+        win.title(f"{test_name} — qo'lda kiritish")
+        win.transient(self.root)
+        _center_window_on_work_area(win, 900, 880)
+        win.minsize(700, 480)
+        win.bind("<Escape>", lambda e: win.destroy())
+        v_rejim = tk.StringVar(win, value=rejim0)
+        v_avto = tk.BooleanVar(win, value=bool(_gs.get("qolda_avto", True)))
+
+        hdr = tk.Frame(win, bg="#1a3a5c")
+        hdr.pack(fill=tk.X)
+        tk.Label(hdr, text="✍ Umumiy qon tahlili — natijani qo'lda kiritish", bg="#1a3a5c", fg="white",
+                 font=("Arial", 13, "bold")).pack(side=tk.LEFT, padx=12, pady=8)
+        meta = [str(bemor.get('fish') or '')] if bemor.get('fish') else []
+        if age:
+            meta.append(f"Yoshi: {age}")
+        if gender:
+            meta.append(f"Jinsi: {gender}")
+        tk.Label(hdr, text="   |   ".join(meta), bg="#1a3a5c", fg="#aac8e8",
+                 font=("Arial", 9)).pack(side=tk.LEFT, padx=6)
+
+        asb = tk.Frame(win, bg="#f3f6fa")
+        asb.pack(fill=tk.X)
+        tk.Label(asb, text="Leykoformula:", bg="#f3f6fa", font=("Arial", 10, "bold")).pack(side=tk.LEFT, padx=(12, 4), pady=5)
+        for _q, _y in (("5", "5-diff (Neu, Lymph, Mon, Eos, Bas)"), ("3", "3-diff (Lymph, Mid, Gran)")):
+            tk.Radiobutton(asb, text=_y, value=_q, variable=v_rejim, bg="#f3f6fa",
+                           font=("Arial", 10)).pack(side=tk.LEFT, padx=4)
+        tk.Checkbutton(asb, text="Avtomatik hisoblash", variable=v_avto, bg="#f3f6fa",
+                       font=("Arial", 10, "bold")).pack(side=tk.LEFT, padx=(18, 4))
+        tk.Label(asb, text=" 3.41 ", bg=AVTO_BG, fg=AVTO_FG, relief="solid", bd=1,
+                 font=("Arial", 9)).pack(side=tk.LEFT, padx=(8, 3))
+        tk.Label(asb, text="— dastur hisobladi", bg="#f3f6fa", fg="#555",
+                 font=("Arial", 9)).pack(side=tk.LEFT)
+
+        btm = ttk.Frame(win, padding=(10, 6))
+        btm.pack(side=tk.BOTTOM, fill=tk.X)
+        tk.Label(btm, text="Enter — keyingi kiritiladigan maydon (hisoblanganlar o'tkazib yuboriladi); "
+                           "↑/↓ — har bir maydon.\nKasr: 6.2 yoki 6,2. Bo'sh qatorlar blankada chiqmaydi. "
+                           "Hisoblangan katakka o'zingiz yozsangiz — dastur unga tegmaydi.",
+                 fg="#555", font=("Arial", 9), justify=tk.LEFT).pack(side=tk.LEFT)
+
+        # Aylantiriladigan jadval
+        tash = ttk.Frame(win)
+        tash.pack(fill=tk.BOTH, expand=True, padx=8, pady=6)
+        canvas = tk.Canvas(tash, highlightthickness=0)
+        sb = ttk.Scrollbar(tash, orient="vertical", command=canvas.yview)
+        ichki = ttk.Frame(canvas)
+        ichki.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=ichki, anchor="nw")
+        canvas.configure(yscrollcommand=sb.set)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        def _g(e):
+            try:
+                canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+            except Exception:
+                pass
+        win.bind("<MouseWheel>", _g)
+
+        kirish = {}     # kod -> (StringVar, Entry, strelka Label)
+        nav = []        # Enter/↑/↓ tartibi: [(kod, Entry)]
+        jami_lbl = [None]
+        band = [False]      # dastur o'zi yozayapti — trace qo'lda deb hisoblamasin
+        kutish = [False]    # after_idle rejalashtirilgan
+        saqla_btn = [None]
+
+        def _uslub(kod):
+            var, ent, lbl = kirish[kod]
+            q = Q[kod]
+            f, s = self._cbc_son(var.get())
+            if s is None:
+                ent.configure(bg="#ffd6d6", fg="black")
+                lbl.configure(text="✗", fg="#c00")
+                return
+            if kod in avto:
+                ent.configure(bg=AVTO_BG, fg=AVTO_FG)
+            else:
+                ent.configure(bg="white", fg="black")
+            if f is None or q["lo"] is None or q["hi"] is None:
+                lbl.configure(text="")
+            elif f > q["hi"]:
+                lbl.configure(text="↑", fg="red")
+            elif f < q["lo"]:
+                lbl.configure(text="↓", fg="blue")
+            else:
+                lbl.configure(text="")
+
+        def _jami():
+            if jami_lbl[0] is None:
+                return
+            juft = _gb.juftlar(v_rejim.get())
+            foiz = [self._cbc_son(qiymat.get(p, ""))[0] for _n, p in juft if p in kirish]
+            bor = [f for f in foiz if f is not None]
+            if not bor:
+                matn, rang = "Leykoformula jami: — (% kiritilganda hisoblanadi)", "#777"
+            else:
+                jm = sum(bor)
+                if len(bor) < len(foiz):
+                    matn, rang = f"Leykoformula jami: {jm:.1f} %  (hali hammasi kiritilmagan)", "#b36b00"
+                elif abs(jm - 100.0) <= 1.0:
+                    matn, rang = f"Leykoformula jami: {jm:.1f} %  ✓", "#1e7e34"
+                else:
+                    matn, rang = f"Leykoformula jami: {jm:.1f} %  ⚠ 100 % bo'lishi kerak (saqlash mumkin)", "#c00"
+            # # va % ikkalasi qo'lda yozilgan bo'lsa — bir-biriga mosmi
+            w = self._cbc_son(qiymat.get("WBC", ""))[0]
+            mos_emas = []
+            if w:
+                for n, p in juft:
+                    if n in qolda and p in qolda and n in kirish and p in kirish:
+                        fn_, fp_ = self._cbc_son(qiymat[n])[0], self._cbc_son(qiymat[p])[0]
+                        if fn_ is not None and fp_ is not None:
+                            kut = w * fp_ / 100.0
+                            if abs(fn_ - kut) > max(0.06, 0.05 * kut):
+                                mos_emas.append(n.rstrip("#"))
+            if mos_emas:
+                matn += "    ⚠ # va % mos emas: " + ", ".join(mos_emas)
+                rang = "#c00"
+            jami_lbl[0].configure(text=matn, fg=rang)
+
+        def _hisobla():
+            kutish[0] = False
+            try:
+                if not win.winfo_exists():
+                    return
+            except Exception:
+                return
+            band[0] = True
+            try:
+                for k in list(avto):
+                    qiymat[k] = ""
+                    if k in kirish:
+                        kirish[k][0].set("")
+                avto.clear()
+                if v_avto.get():
+                    sonlar = {}
+                    for k in kirish:
+                        f, s = self._cbc_son(qiymat.get(k, ""))
+                        if f is not None:
+                            sonlar[k] = f
+                    yangi = _gb.avto_hisobla(sonlar, v_rejim.get(), birlik, bor=set(kirish))
+                    for k, s in yangi.items():
+                        if str(qiymat.get(k, "")).strip():
+                            continue    # noto'g'ri (son emas) qo'lda matn — ustidan yozilmaydi
+                        qiymat[k] = s
+                        avto.add(k)
+                        kirish[k][0].set(s)
+            finally:
+                band[0] = False
+            for k in kirish:
+                _uslub(k)
+            _jami()
+
+        def _rejalash():
+            if not kutish[0]:
+                kutish[0] = True
+                win.after_idle(_hisobla)
+
+        def _ozgardi(kod):
+            if band[0] or kod not in kirish:
+                return
+            v = kirish[kod][0].get()
+            qiymat[kod] = v
+            avto.discard(kod)
+            if v.strip():
+                qolda.add(kod)
+            else:
+                qolda.discard(kod)
+            _uslub(kod)
+            _rejalash()
+
+        def _katak(r, c, kod, bg):
+            """Natija katagi: Entry (c) + strelka (c+1). nav ga qo'shiladi."""
+            var = tk.StringVar(win, value=qiymat.get(kod, ""))
+            ent = tk.Entry(ichki, textvariable=var, width=9, font=("Arial", 11), justify="center")
+            ent.grid(row=r, column=c, padx=2, pady=1)
+            lbl = tk.Label(ichki, text="", bg=bg, font=("Arial", 11, "bold"), width=2)
+            lbl.grid(row=r, column=c + 1)
+            kirish[kod] = (var, ent, lbl)
+            nav.append((kod, ent))
+            var.trace_add("write", lambda *_a, k=kod: _ozgardi(k))
+
+        def _matn(r, c, matn, bg, bold=False, size=10, span=1, fg="black"):
+            tk.Label(ichki, text=matn, bg=bg, fg=fg, anchor="w",
+                     font=("Arial", size, "bold") if bold else ("Arial", size)).grid(
+                row=r, column=c, columnspan=span, sticky="ew", padx=1)
+
+        def _qur():
+            for w in ichki.winfo_children():
+                w.destroy()
+            kirish.clear()
+            nav.clear()
+            jami_lbl[0] = None
+            juft = _gb.juftlar(v_rejim.get())
+            juft_kod = {k for pr in juft for k in pr}
+            yashir = (_gb.DIFF3_KODLAR | _gb.DIFF5_KODLAR) - juft_kod
+            for c, (matn, w) in enumerate((("Ko'rsatkich", 30), ("Qisqa", 7), ("Natija", 10),
+                                           ("", 2), ("Norma", 12), ("Birlik", 7))):
+                tk.Label(ichki, text=matn, font=("Arial", 10, "bold"), bg="#e8eef5", width=w,
+                         anchor="w").grid(row=0, column=c, sticky="ew", padx=1, pady=(0, 2))
+            r = 1
+            leyko = False
+            for q in qatorlar:
+                kod = q["kod"]
+                if kod in yashir:
+                    continue
+                if kod in juft_kod:
+                    if leyko:
+                        continue
+                    leyko = True
+                    # ── Leykoformula bloki: har hujayra bitta qatorda — % | # ──
+                    yb = "#fff4e0"
+                    _matn(r, 0, f"Leykoformula ({v_rejim.get()}-diff) — % YOKI soni kiriting",
+                          yb, bold=True, span=2)
+                    _matn(r, 2, "Ulushi, %", yb, bold=True, span=4)
+                    _matn(r, 6, "Soni, 10⁹/L", yb, bold=True, span=4)
+                    r += 1
+                    for i, (n, p) in enumerate(juft):
+                        if n not in Q and p not in Q:
+                            continue
+                        bg = "#ffffff" if i % 2 == 0 else "#f6f8fb"
+                        qn, qp = Q.get(n), Q.get(p)
+                        nom = (qn or qp)["nom"]
+                        for _s in (" soni", " ulushi"):
+                            if nom.endswith(_s):
+                                nom = nom[: -len(_s)]
+                        _matn(r, 0, nom, bg)
+                        _matn(r, 1, ((qn or qp)["qisqa"]).rstrip("#%"), bg, bold=True)
+                        if qp:
+                            _katak(r, 2, p, bg)
+                            _matn(r, 4, qp["norma"], bg, size=9)
+                            _matn(r, 5, qp["birlik"], bg, size=9)
+                        if qn:
+                            _katak(r, 6, n, bg)
+                            _matn(r, 8, qn["norma"], bg, size=9)
+                            _matn(r, 9, qn["birlik"], bg, size=9)
+                        r += 1
+                    jl = tk.Label(ichki, text="", bg="#fff4e0", anchor="w", font=("Arial", 10, "bold"))
+                    jl.grid(row=r, column=0, columnspan=10, sticky="ew", padx=1, pady=(0, 6))
+                    jami_lbl[0] = jl
+                    r += 1
+                    continue
+                bg = "#ffffff" if r % 2 else "#f6f8fb"
+                _matn(r, 0, q["nom"], bg)
+                _matn(r, 1, q["qisqa"], bg, bold=True)
+                _katak(r, 2, kod, bg)
+                _matn(r, 4, q["norma"], bg, size=9)
+                _matn(r, 5, q["birlik"], bg, size=9)
+                r += 1
+            # Enter / ↑ / ↓
+            for idx, (_kod, ent) in enumerate(nav):
+                ent.bind("<Return>", lambda e, i=idx: _otish(i, +1, True))
+                ent.bind("<KP_Enter>", lambda e, i=idx: _otish(i, +1, True))
+                ent.bind("<Down>", lambda e, i=idx: _otish(i, +1, False))
+                ent.bind("<Up>", lambda e, i=idx: _otish(i, -1, False))
+
+        def _otish(i, qadam, aqlli):
+            if kutish[0]:
+                _hisobla()
+            j = i + qadam
+            while 0 <= j < len(nav):
+                kod = nav[j][0]
+                if aqlli and (kod in avto or (v_avto.get() and kod in _gb.INDEKS_KODLAR and kod not in qolda)):
+                    j += qadam
+                    continue
+                nav[j][1].focus_set()
+                nav[j][1].select_range(0, tk.END)
+                return "break"
+            if aqlli and qadam > 0 and saqla_btn[0] is not None:
+                saqla_btn[0].focus_set()
+            return "break"
+
+        def _rejim_ozgardi(*_a):
+            _qur()
+            _hisobla()
+            if nav:
+                nav[0][1].focus_set()
+        v_rejim.trace_add("write", _rejim_ozgardi)
+        v_avto.trace_add("write", lambda *_a: _hisobla())
+
+        def do_save():
+            _hisobla()
+            qiymatlar, xato = {}, []
+            for kod in kirish:
+                f, s = self._cbc_son(qiymat.get(kod, ""))
+                if s is None:
+                    xato.append(Q[kod]["qisqa"])
+                elif s:
+                    qiymatlar[kod] = s
+            if xato:
+                messagebox.showwarning("Noto'g'ri qiymat",
+                                       "Quyidagi ko'rsatkichlarda son emas yoki manfiy qiymat:\n"
+                                       + ", ".join(xato), parent=win)
+                return
+            if not qiymatlar:
+                messagebox.showwarning("Umumiy qon tahlili",
+                                       "Birorta ham ko'rsatkich kiritilmadi.", parent=win)
+                return
+            natija = dict(mavjud)
+            # Oynadagi kodlarning eski qiymatlari (o'chirilgan maydon) qolib ketmasin;
+            # boshqa diff rejimining (oynada ko'rinmagan) analizator qiymatlariga tegilmaydi
+            for kod in kirish:
+                natija.pop(kod, None)
+                _al = CBC_HEMA_KOD_ALIAS.get(kod)
+                if _al:
+                    natija.pop(_al, None)
+            natija.update(qiymatlar)
+            natija['type'] = 'hematology_cbc'
+            _src = str(mavjud.get('source') or '')
+            if not _src or _src == "Qo'lda":
+                natija['source'] = "Qo'lda"
+                natija['result'] = "qo'lda"
+            elif "qo'lda" not in _src.lower():
+                natija['source'] = f"{_src} (qo'lda tuzatilgan)"
+            natija.setdefault('sid', bemor.get('sample_id') or '')
+            if age and not natija.get('patient_age'):
+                natija['patient_age'] = str(age)
+            if gender and not natija.get('patient_gender'):
+                natija['patient_gender'] = str(gender)
+            import json as _json
+            _cbc_json = _json.dumps(natija, ensure_ascii=False)
+            self.test_results[test_id] = _cbc_json
+            self._mark_result_pending(test_id, _cbc_json)
+            win.destroy()
+            for tr_item in self.tests_tree.get_children():
+                t_tag = (self.tests_tree.item(tr_item).get('tags') or [None])[0]
+                if not t_tag:
+                    continue
+                try:
+                    if int(str(t_tag).split('_')[0]) == test_id:
+                        self.refresh_single_test_display(tr_item, test_id)
+                        break
+                except Exception:
+                    pass
+
+        sbtn = tk.Button(btm, text="  Saqlash  ", command=do_save, bg="#28a745", fg="white",
+                         font=("Arial", 11, "bold"), padx=18, pady=4, cursor="hand2")
+        sbtn.pack(side=tk.RIGHT, padx=6)
+        sbtn.bind("<Return>", lambda e: do_save())
+        saqla_btn[0] = sbtn
+        ttk.Button(btm, text="Bekor qilish", command=win.destroy).pack(side=tk.RIGHT, padx=4)
+
+        _qur()
+        _hisobla()
+        if nav:
+            win.after(100, lambda: (nav[0][1].focus_set(), nav[0][1].select_range(0, tk.END)))
+        # Sinov / tashqi kod uchun: kod bo'yicha katak, rejim, avto-hisob holati
+        win.cbc_katak = lambda kod: kirish[kod][1] if kod in kirish else None
+        win.cbc_rejim = v_rejim
+        win.cbc_avto = v_avto
+        win.cbc_avto_kodlar = avto
+        win.cbc_jami = lambda: jami_lbl[0].cget("text") if jami_lbl[0] is not None else ""
+        win.cbc_otish = _otish
+        win.cbc_nav = nav
+        return win
 
     # Siydik kimyoviy qismini QO'LDA kiritish (test poloska) — analizator ishlamasa,
     # poloska tugaganda (mijoz talabi, 2026-10-11) yoki laboratoriyada analizator
@@ -18831,6 +19303,8 @@ Sana: {_sana_fmt}"""
                 self._show_analyzer_result_popup(test_id)
             elif self._get_analyzer_managed_type(test_id) == 'urine':
                 self._siydik_qolda_taklif(test_id, test_name)
+            elif self._get_analyzer_managed_type(test_id) == 'hematology_cbc':
+                self._cbc_qolda_taklif(test_id, test_name)
             return
 
         # Test turini aniqlash (DB so'rovi YO'Q - test_data dan o'qish)
@@ -19680,6 +20154,8 @@ Sana: {_sana_fmt}"""
                 self._show_analyzer_result_popup(test_id)
             elif self._get_analyzer_managed_type(test_id) == 'urine':
                 self._siydik_qolda_taklif(test_id, test_name)
+            elif self._get_analyzer_managed_type(test_id) == 'hematology_cbc':
+                self._cbc_qolda_taklif(test_id, test_name)
             return
 
         tname_lower      = test_name.lower()
