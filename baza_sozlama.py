@@ -990,11 +990,14 @@ def lan_ruxsat(cfg: dict):
 
     # 1) Fayrvol
     try:
-        subprocess.run(["netsh", "advfirewall", "firewall", "add", "rule",
-                        f"name=AzizMedLine MySQL ({port})", "dir=in", "action=allow",
-                        "protocol=TCP", f"localport={port}"],
+        # Faqat ICHKI tarmoqqa (F1, 2026-11-14): eski «hamma joydan» qoida o'chiriladi
+        import fayrvol
+        nom = f"AzizMedLine MySQL ({port})"
+        subprocess.run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={nom}"],
                        capture_output=True, creationflags=cf, timeout=20)
-        qadamlar.append(f"✅ Fayrvol: {port}-port ochildi")
+        subprocess.run(fayrvol.qoida_buyrugi(nom, port),
+                       capture_output=True, creationflags=cf, timeout=20)
+        qadamlar.append(f"✅ Fayrvol: {port}-port ochildi (faqat ichki tarmoqqa)")
     except Exception as e:
         qadamlar.append(f"⚠️ Fayrvol ochilmadi ({e}) — administrator huquqi kerak")
 

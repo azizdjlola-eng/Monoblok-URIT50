@@ -36,8 +36,16 @@ SB = b'\x0b'  # Start Block (VT = 0x0B)
 EB = b'\x1c'  # End Block (FS = 0x1C)
 CR = b'\x0d'  # Carriage Return (0x0D)
 
-ERRORS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ERRORS")
-os.makedirs(ERRORS_DIR, exist_ok=True)
+# Xatolar papkasi ProgramData da (bk280_listener bilan bir xil joy). 14.11.2026: EXE da
+# __file__ = "C:\Program Files\...\_internal\BK280" — oddiy foydalanuvchiga u yerga yozish
+# taqiqlangan, import paytidagi makedirs PermissionError berib Natija dasturini ochilishdayoq
+# yiqitgan (mijoz PC). Papka yaratilmasa ham import hech qachon yiqilmasligi kerak.
+ERRORS_DIR = os.path.join(
+    os.environ.get("ProgramData") or r"C:\ProgramData", "AzizMedLine", "BK280", "ERRORS")
+try:
+    os.makedirs(ERRORS_DIR, exist_ok=True)
+except Exception:
+    pass
 
 # Global variables for threaded server
 _lis_server_socket = None

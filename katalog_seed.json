@@ -330,7 +330,7 @@
   "sample": "TEST",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 67,
@@ -357,7 +357,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 70,
@@ -366,7 +366,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 71,
@@ -465,7 +465,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 83,
@@ -483,7 +483,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 85,
@@ -492,7 +492,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 86,
@@ -501,7 +501,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 87,
@@ -528,7 +528,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 91,
@@ -582,7 +582,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 99,
@@ -591,7 +591,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 100,
@@ -600,7 +600,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 102,
@@ -618,7 +618,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 104,
@@ -627,7 +627,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 105,
@@ -636,7 +636,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 106,
@@ -645,7 +645,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 107,
@@ -654,7 +654,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 108,
@@ -663,7 +663,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 109,
@@ -672,7 +672,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 110,
@@ -681,7 +681,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 111,
@@ -690,7 +690,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 112,
@@ -699,7 +699,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 113,
@@ -708,7 +708,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 114,
@@ -717,7 +717,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 115,
@@ -726,7 +726,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 116,
@@ -735,7 +735,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 117,
@@ -744,7 +744,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 118,
@@ -753,7 +753,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 119,
@@ -762,7 +762,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 120,
@@ -771,7 +771,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 121,
@@ -834,7 +834,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 130,
@@ -1095,7 +1095,7 @@
   "sample": "TEST",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 0
+  "aktiv": 1
  },
  {
   "id": 160,
@@ -1104,7 +1104,7 @@
   "sample": "IFA",
   "turi": "test",
   "soha": "lab",
-  "aktiv": 1
+  "aktiv": 0
  },
  {
   "id": 164,
@@ -1320,6 +1320,294 @@
   "sample": "",
   "turi": "test",
   "soha": "funksional",
+  "aktiv": 0
+ },
+ {
+  "id": 188,
+  "nomi": "CA 72-4 (oshqozon onkomarkeri) IFA",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 189,
+  "nomi": "CA15-3 (ko'krak saratoni belgisi) IFA",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 190,
+  "nomi": "Gepatit B (HBsAg, IFA)",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 191,
+  "nomi": "Gepatit C (Anti-HCV, IFA)",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 192,
+  "nomi": "Gepatit D (D-antitela, IFA)",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 193,
+  "nomi": "Gepatit A (IgG, IFA)",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 194,
+  "nomi": "Helicobakter pylori IgG IFA",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 195,
+  "nomi": "IgE umumiy (Allergiya uchun) IFA",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 196,
+  "nomi": "Askarida IgG IFA",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 197,
+  "nomi": "Lyambliya-antitela IFA",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 198,
+  "nomi": "Vitamin D (25-OH) IFA",
+  "narxi": 110000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 199,
+  "nomi": "Vitamin B12 IFA",
+  "narxi": 70000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 200,
+  "nomi": "Ferritin IFA",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 201,
+  "nomi": "TTG (TSH) IFA",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 202,
+  "nomi": "T4 erkin IFA",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 203,
+  "nomi": "T3 erkin IFA",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 204,
+  "nomi": "AT-TPO IFA",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 205,
+  "nomi": "LG (LH) IFA",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 206,
+  "nomi": "FSG (FSH) IFA",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 207,
+  "nomi": "Prolaktin IFA",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 208,
+  "nomi": "Estradiol IFA",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 209,
+  "nomi": "Progesteron IFA",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 210,
+  "nomi": "Testesteron IFA",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 211,
+  "nomi": "Testesteron Erkin IFA",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 212,
+  "nomi": "Umumiy PSA IFA",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 213,
+  "nomi": "Insulin IFA",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 214,
+  "nomi": "Kortizol IFA",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 215,
+  "nomi": "XGCh (Homiladorlik gormoni) IFA",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 216,
+  "nomi": "Anti HBsAg (Antitelo) immunitet  IFA",
+  "narxi": 50000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 217,
+  "nomi": "Troponin I miqdoriy IFA",
+  "narxi": 70000,
+  "sample": "IFA",
+  "turi": "test",
+  "soha": "lab",
+  "aktiv": 1
+ },
+ {
+  "id": 218,
+  "nomi": "Breket tizimi (bir jag')",
+  "narxi": 4000000,
+  "sample": "",
+  "turi": "test",
+  "soha": "stomatologiya",
+  "aktiv": 0
+ },
+ {
+  "id": 219,
+  "nomi": "Stomatolog qabuli Stomatologiyev Zubnoy",
+  "narxi": 0,
+  "sample": "",
+  "turi": "test",
+  "soha": "stomatologiya",
   "aktiv": 0
  }
 ]

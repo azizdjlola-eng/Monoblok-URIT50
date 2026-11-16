@@ -72,6 +72,10 @@ DEFAULT = {
     "meta_qatori": True,          # "Avtomatik gematologik analizator: ... namuna sample № ..."
     "qisqa_nom_ustuni": True,
     "gistogramma": True,
+    # Qo'lda kiritish oynasi: leykoformula 5-diff (Neu, Lymph, Mon, Eos, Bas) yoki
+    # 3-diff (Lymph, Mid, Gran); avtomatik hisoblash (# ↔ %, MCH, MCV, NLR ...)
+    "qolda_diff": "5",
+    "qolda_avto": True,
     "qatorlar": DEFAULT_QATORLAR,
 }
 
@@ -130,9 +134,11 @@ def _toza(raw) -> dict:
         for k in ("sarlavha", "analizator_nomi"):
             if isinstance(raw.get(k), str):
                 s[k] = raw[k]
-        for k in ("meta_qatori", "qisqa_nom_ustuni", "gistogramma"):
+        for k in ("meta_qatori", "qisqa_nom_ustuni", "gistogramma", "qolda_avto"):
             if k in raw:
                 s[k] = bool(raw[k])
+        if str(raw.get("qolda_diff")) in ("3", "5"):
+            s["qolda_diff"] = str(raw["qolda_diff"])
         if isinstance(raw.get("qatorlar"), list) and raw["qatorlar"]:
             qs = [_toza_qator(q) for q in raw["qatorlar"] if isinstance(q, dict)]
             qs = [q for q in qs if q["kod"]]
@@ -195,6 +201,74 @@ def korinadigan_qatorlar(vals: dict, s: dict = None) -> list:
         r = dict(q)
         r["natija"] = natija
         out.append(r)
+    return out
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  QO'LDA KIRITISH — AVTOMATIK HISOBLASH
+# ─────────────────────────────────────────────────────────────────────────────
+# Leykoformula juftlari: (soni #, ulushi %). Laborant istaganini kiritadi —
+# ikkinchisi WBC orqali hisoblanadi (Neu# = WBC × Neu% / 100 va teskarisi).
+JUFT5 = (("Neu#", "Neu%"), ("Lymph#", "Lymph%"), ("Mon#", "Mon%"), ("Eos#", "Eos%"), ("Bas#", "Bas%"))
+JUFT3 = (("Lymph#", "Lymph%"), ("Mid#", "Mid%"), ("Gran#", "Gran%"))
+# Hech qachon o'lchanmaydigan, faqat hisoblanadigan indekslar (Enter ularni o'tkazib yuboradi)
+INDEKS_KODLAR = {"NLR", "PLR", "CP"}
+
+
+def juftlar(rejim: str):
+    return JUFT3 if str(rejim) == "3" else JUFT5
+
+
+def avto_formulalar(rejim: str, birlik: dict = None) -> list:
+    """Avto-hisob formulalari TARTIBDA: [(nishon, (kirish kodlari), fn, kasr)].
+
+    Qoida (oyna shu tartibda qo'llaydi): nishonda qiymat bo'lsa (qo'lda yozilgan
+    yoki shu o'tishda oldinroq hisoblangan) — tegilmaydi. Shuning uchun teskari
+    juftlar (Neu# ↔ Neu%, HCT ↔ MCV, PCT ↔ MPV) aylanib qolmaydi: qaysi biri
+    kiritilgan bo'lsa, ikkinchisi undan chiqadi.
+    birlik — {kod: birlik}; HGB/MCHC g/dL bo'lsa hisob moslanadi (standart g/L)."""
+    birlik = birlik or {}
+    F = []
+    for n, p in juftlar(rejim):
+        F.append((n, ("WBC", p), lambda w, x: w * x / 100.0, 2))
+        F.append((p, ("WBC", n), lambda w, x: x / w * 100.0, 1))
+    neu = "Gran" if str(rejim) == "3" else "Neu"
+    F.append(("NLR", (neu + "#", "Lymph#"), lambda a, b: a / b, 2))
+    F.append(("NLR", (neu + "%", "Lymph%"), lambda a, b: a / b, 2))
+    F.append(("PLR", ("PLT", "Lymph#"), lambda a, b: a / b, 0))
+    hk = 10.0 if "dl" in str(birlik.get("HGB", "")).lower() else 1.0     # g/dL → g/L
+    mk = 0.1 if "dl" in str(birlik.get("MCHC", "")).lower() else 1.0     # g/L → g/dL
+    F.append(("MCH", ("HGB", "RBC"), lambda h, r: h * hk / r, 1))
+    F.append(("MCV", ("HCT", "RBC"), lambda hc, r: hc * 10.0 / r, 1))
+    F.append(("HCT", ("MCV", "RBC"), lambda v, r: v * r / 10.0, 1))
+    F.append(("MCHC", ("HGB", "HCT"), lambda h, hc: h * hk * 100.0 / hc * mk, 0 if mk == 1.0 else 1))
+    F.append(("CP", ("HGB", "RBC"), lambda h, r: 3.0 * h * hk / (r * 100.0), 2))   # rang ko'rsatkichi
+    F.append(("PCT", ("PLT", "MPV"), lambda p, m: p * m / 10000.0, 3))
+    F.append(("MPV", ("PCT", "PLT"), lambda c, p: c * 10000.0 / p, 1))
+    F.append(("P-LCC", ("PLT", "P-LCR"), lambda p, l: p * l / 100.0, 0))
+    F.append(("P-LCR", ("P-LCC", "PLT"), lambda c, p: c / p * 100.0, 1))
+    return F
+
+
+def avto_hisobla(qiymatlar: dict, rejim: str, birlik: dict = None, bor=None) -> dict:
+    """{kod: son} (faqat kiritilganlar) → {kod: matn} — hisoblangan YANGI qiymatlar.
+    bor — oynada mavjud kodlar (None = hammasi); u yerda yo'q nishon/kirish ishlatilmaydi."""
+    v = {k: f for k, f in qiymatlar.items() if f is not None}
+    out = {}
+    for nishon, kir, fn, kasr in avto_formulalar(rejim, birlik):
+        if (bor is not None and nishon not in bor) or nishon in v:
+            continue
+        if any((bor is not None and k not in bor) or k not in v for k in kir):
+            continue
+        try:
+            r = fn(*[v[k] for k in kir])
+        except (ZeroDivisionError, ValueError, OverflowError):
+            continue
+        if r != r or r < 0 or r in (float("inf"),):
+            continue
+        s = f"{r:.{kasr}f}"
+        v[nishon] = float(s)
+        out[nishon] = s
     return out
 
 
@@ -271,6 +345,15 @@ def ochish_oyna(parent, namuna_fn=None):
         row=1, column=2, sticky=tk.W, padx=(16, 4))
     ttk.Checkbutton(top, text="Gistogrammalar (WBC / RBC / PLT)", variable=v_hist).grid(
         row=1, column=3, sticky=tk.W, padx=4)
+    # Qo'lda kiritish oynasi (analizator ishlamasa / mikroskopda sanalganda)
+    _DIFF_YOZUV = {"5": "5-diff (Neu, Lymph, Mon, Eos, Bas)", "3": "3-diff (Lymph, Mid, Gran)"}
+    v_diff = tk.StringVar(value=_DIFF_YOZUV.get(str(s.get("qolda_diff")), _DIFF_YOZUV["5"]))
+    v_avto = tk.BooleanVar(value=bool(s.get("qolda_avto", True)))
+    ttk.Label(top, text="Qo'lda kiritishda leykoformula:").grid(row=2, column=0, sticky=tk.W, padx=6, pady=3)
+    ttk.Combobox(top, textvariable=v_diff, values=list(_DIFF_YOZUV.values()), state="readonly",
+                 width=34).grid(row=2, column=1, sticky=tk.W, padx=4)
+    ttk.Checkbutton(top, text="Avtomatik hisoblash (# ↔ %, MCH, MCV, MCHC, PCT, NLR, PLR)",
+                    variable=v_avto).grid(row=2, column=2, columnspan=2, sticky=tk.W, padx=(16, 4))
 
     # ── Qatorlar jadvali ──────────────────────────────────────────────
     mid = ttk.Frame(win)
@@ -297,12 +380,15 @@ def ochish_oyna(parent, namuna_fn=None):
         jad.standartga()
         v_sarl.set(DEFAULT["sarlavha"]); v_anal.set("")
         v_meta.set(True); v_qisq.set(True); v_hist.set(True)
+        v_diff.set(_DIFF_YOZUV["5"]); v_avto.set(True)
 
     def _yig():
         return {"sarlavha": v_sarl.get().strip() or DEFAULT["sarlavha"],
                 "analizator_nomi": v_anal.get().strip(),
                 "meta_qatori": bool(v_meta.get()), "qisqa_nom_ustuni": bool(v_qisq.get()),
-                "gistogramma": bool(v_hist.get()), "qatorlar": jad.qatorlar}
+                "gistogramma": bool(v_hist.get()),
+                "qolda_diff": "3" if v_diff.get().startswith("3") else "5",
+                "qolda_avto": bool(v_avto.get()), "qatorlar": jad.qatorlar}
 
     def _namuna():
         try:
