@@ -210,6 +210,25 @@ def _fish_like(ustun, soz):
         return f"{ustun} LIKE %s", [f"%{soz}%"]
 
 
+def _tn_kor(nomi):
+    """Tahlil nomining ekrandagi ko'rinishi — «Dastur yozuvi» kirill/rus bo'lsa
+    (ui_til.tahlil_nomi). Bazada nom lotincha qoladi; faqat qidiruv oynasi uchun."""
+    try:
+        import ui_til
+        return ui_til.tahlil_nomi(nomi)
+    except Exception:
+        return nomi
+
+
+def _tn_mos(soz, nomi):
+    """Qidiruv so'zi tahlil nomiga mosmi (lotin, kirill yoki rus yozuvida)."""
+    try:
+        import ui_til
+        return ui_til.tahlil_qidiruv_mos(soz, nomi)
+    except Exception:
+        return str(soz or "").lower() in str(nomi or "").lower()
+
+
 def _bio_panel_idlarini_yangila():
     """Bioximiya blanka sozlamasi saqlangach — panel a'zolari ID lari joyida yangilanadi
     (qayta ishga tushirmasdan)."""
@@ -13593,7 +13612,11 @@ class MonoblokApp:
                 for fid, nomi in filiallar:
                     self._of_filial_map[nomi] = fid
                 self._of_filial_combo["values"] = list(self._of_filial_map.keys())
-                self._of_tahlil_all = sorted(set(nomlar), key=str.lower)
+                # Ro'yxat Dastur yozuvida (kirill/rus); qidiruv lotin nomni ham taniydi
+                self._of_tahlil_lotin = {}
+                for _n in set(nomlar):
+                    self._of_tahlil_lotin.setdefault(_tn_kor(_n), _n)
+                self._of_tahlil_all = sorted(self._of_tahlil_lotin, key=str.lower)
                 self._of_tahlil_combo["values"] = self._of_tahlil_all
             self.root.after(0, apply)
 
@@ -13609,10 +13632,12 @@ class MonoblokApp:
     def _on_of_tahlil_key(self, event):
         if event.keysym in ("Return", "Up", "Down", "Escape", "Tab"):
             return
-        q = self._norm_tahlil_nomi(self._of_tahlil_var.get())
+        q = self._of_tahlil_var.get()
         allv = getattr(self, "_of_tahlil_all", [])
+        lotin = getattr(self, "_of_tahlil_lotin", {})
         self._of_tahlil_combo["values"] = (
-            [n for n in allv if q in self._norm_tahlil_nomi(n)] if q else allv)
+            [n for n in allv if _tn_mos(q, n) or _tn_mos(q, lotin.get(n, n))]
+            if q.strip() else allv)
 
     def search_orders(self):
         """Sana oralig'i + tahlil + filial + holat bo'yicha buyurtmalar (fon oqimida)."""
@@ -13798,8 +13823,8 @@ class MonoblokApp:
             match = test_done
             if guruh:
                 match = [td for td in match if td[2] == guruh]
-            if q:
-                match = [td for td in match if q in norm(td[0])]
+            if q:   # q — lotin, kirill yoki rus yozuvida bo'lishi mumkin (Dastur yozuvi)
+                match = [td for td in match if _tn_mos(q, td[0])]
             if not match:
                 continue
             # Tahlil/guruh tanlangan bo'lsa holat — AYNAN o'sha tahlillarniki
@@ -13873,7 +13898,8 @@ class MonoblokApp:
         for s in stats:
             chiqmagan = s["jami"] - s["chiqqan"]
             st.insert("", tk.END, tags=("chiqmagan",) if chiqmagan else (),
-                      values=(s["nomi"], s["jami"], s["chiqqan"], chiqmagan, s["filial"] or ""))
+                      values=(_tn_kor(s["nomi"]), s["jami"], s["chiqqan"], chiqmagan,
+                              s["filial"] or ""))
 
         # Qisqa hisobot
         sana = p["dan"].strftime("%d.%m.%Y") if p["dan"] == p["gacha"] else \
@@ -13898,8 +13924,9 @@ class MonoblokApp:
 
     @staticmethod
     def _immuno_qisqa_nom(nomi):
-        """'Gepatit B (HBsAg, IFA ИФА)' → 'Gepatit B (HBsAg)' — ustunga sig'sin."""
-        s = re.sub(r"\b(IFA|ИФА|ELISA)\b", "", str(nomi or ""), flags=re.IGNORECASE)
+        """'Gepatit B (HBsAg, IFA ИФА)' → 'Gepatit B (HBsAg)' — ustunga sig'sin.
+        Dastur yozuvi kirill/rus bo'lsa — shu yozuvda (faqat ko'rinish uchun)."""
+        s = re.sub(r"\b(IFA|ИФА|ELISA)\b", "", str(_tn_kor(nomi) or ""), flags=re.IGNORECASE)
         s = re.sub(r"[\s,]+\)", ")", s)
         s = re.sub(r"\(\s*\)", "", s)
         return re.sub(r"\s{2,}", " ", s).strip(" ,")
@@ -13945,7 +13972,7 @@ class MonoblokApp:
         return {
             "topshirgan": fmt(sv),
             "filial": filial,
-            "tahlillar": ", ".join(n if d else f"{n} ⏳" for n, d in oddiy),
+            "tahlillar": ", ".join(_tn_kor(n) if d else f"{_tn_kor(n)} ⏳" for n, d in oddiy),
             "immuno": ", ".join(("✅ " if d else "⏳ ") + self._immuno_qisqa_nom(n)
                                 for n, d in immuno),
             "holat": holat,
@@ -13962,8 +13989,8 @@ class MonoblokApp:
         if not meta or not meta.get("tests"):
             var.set("")
             return
-        tayyor = [t for t, d, _g in meta["tests"] if d]
-        qolgan = [t for t, d, _g in meta["tests"] if not d]
+        tayyor = [_tn_kor(t) for t, d, _g in meta["tests"] if d]
+        qolgan = [_tn_kor(t) for t, d, _g in meta["tests"] if not d]
         txt = f"🧾 {meta['fish']}:  "
         if qolgan:
             txt += "⏳ Chiqmagan: " + ", ".join(qolgan)
@@ -13979,7 +14006,7 @@ class MonoblokApp:
         nomi = self._search_stat_tree.set(sel[0], "Tahlil nomi")
         if not nomi:
             return
-        self._of_tahlil_var.set(nomi)
+        self._of_tahlil_var.set(_tn_kor(nomi))
         try:
             self._search_nb.select(0)
         except Exception:

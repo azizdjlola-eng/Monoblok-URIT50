@@ -594,7 +594,109 @@ def korsat(matn):
     """Tanlangan yozuvdagi ko'rinishi (kirill yoki ruscha); lotinda — o'zi."""
     if not _YOQILGAN or not isinstance(matn, str) or not matn:
         return matn
+    t = _TN_KOR.get(matn)
+    if t is not None:
+        return t                                   # katalogdagi tahlil nomi
     return ruschaga(matn) if _REJIM == "rus" else kirillga(matn)
+
+
+# ─────────────────── tahlil nomlari (katalog) — jadvalda ───────────────────
+# Jadval qatorlari (bemor ma'lumoti) atayin o'girilmaydi. Lekin KATALOGDAGI tahlil
+# nomi — dastur yozuvi: kirill/rus tanlangan bo'lsa jadvalda ham shu yozuvda
+# ko'rinadi. Faqat ro'yxatga olingan (tahlil_nomlarini_qosh) nomga AYNAN teng
+# katak o'giriladi; kod qatorni o'qisa (item/set) — asl lotin nom qaytadi,
+# ya'ni bazaga, savatga, hisobotga lotincha nom yoziladi.
+_TN_KOR = {}               # asl lotin nom → ko'rinish
+_TN_ASL = {}               # ko'rinish → asl lotin nom
+
+
+def tahlil_nomi(nom):
+    """Katalog tahlil nomining tanlangan yozuvdagi ko'rinishi (lotinda — o'zi)."""
+    if not _YOQILGAN or not isinstance(nom, str):
+        return nom
+    t = _TN_KOR.get(nom)
+    if t is not None:
+        return t
+    if nom in _TN_ASL:
+        return nom                                 # allaqachon ko'rinish (kirill/rus)
+    try:
+        import tahlil_nomlari
+        return tahlil_nomlari.korinish(nom, _REJIM)
+    except Exception:
+        return nom
+
+
+def tahlil_nomlarini_qosh(nomlar):
+    """Katalog nomlarini jadval filtriga qo'shish. Avval FAOL nomlarni bering:
+    ikki nom bir xil ko'rinishga tushsa — birinchisi o'giriladi, keyingisi
+    lotincha qoladi (orqaga o'qishda adashmaslik uchun)."""
+    if not _YOQILGAN:
+        return 0
+    try:
+        import tahlil_nomlari
+    except Exception:
+        return 0
+    n = 0
+    for nom in nomlar or ():
+        if not isinstance(nom, str) or not nom or nom in _TN_KOR:
+            continue
+        try:
+            k = tahlil_nomlari.korinish(nom, _REJIM)
+        except Exception:
+            continue
+        if not k or k == nom or _TN_ASL.get(k, nom) != nom:
+            continue
+        _TN_KOR[nom] = k
+        _TN_ASL[k] = nom
+        n += 1
+    return n
+
+
+_RUS_KLAV = str.maketrans("ЎўҚқҒғҲҳЁё", "УуКкГгХхЕе")    # rus klaviaturasida yozilgan kirill
+
+
+def _qid_norm(s):
+    s = str(s or "").translate(_TUTUQ).lower().translate(_RUS_KLAV)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def tahlil_qidiruv_mos(soz, nom):
+    """Qidiruv so'zi (har qanday yozuvda) tahlil nomiga mosmi — lotin asl nomga
+    yoki ekrandagi (kirill/rus) ko'rinishiga. «қон», «кон», «qon», «кровь»
+    — barchasi «Qonning umumiy tahlili» ni topadi (o'z yozuvida). Fon oqimida
+    ham chaqirsa bo'ladi (faqat lug'at)."""
+    q = _qid_norm(soz)
+    if not q:
+        return True
+    n = _qid_norm(nom)
+    if q in n:
+        return True
+    if re.search(r"[А-Яа-яЁёЎўҚқҒғҲҳ]", str(soz)):
+        try:
+            if _qid_norm(lotinga(str(soz).strip())) in n:      # қон → qon
+                return True
+        except Exception:
+            pass
+    if _YOQILGAN:
+        k = tahlil_nomi(nom)
+        if k != nom and q in _qid_norm(k):
+            return True
+    return False
+
+
+def _tn_kor(v):
+    return _TN_KOR.get(v, v) if isinstance(v, str) else v
+
+
+def _tn_asl(v):
+    return _TN_ASL.get(v, v) if isinstance(v, str) else v
+
+
+def _tn_qiymatlar(v, f):
+    """values (tuple/list/str) ichidagi har katakka f."""
+    if isinstance(v, (tuple, list)):
+        return type(v)(f(x) for x in v)
+    return f(v)
 
 
 def ogir(matn):
@@ -728,6 +830,54 @@ def _yamoq():
         return r
 
     ttk.Treeview.heading = _heading
+
+    # ── jadval qatori: katalog tahlil nomi → ko'rinish; o'qishda → asl ──
+    def _tv_kw(kw):
+        try:
+            if "values" in kw and kw["values"] not in (None, ""):
+                kw["values"] = _tn_qiymatlar(kw["values"], _tn_kor)
+            if isinstance(kw.get("text"), str):
+                kw["text"] = _tn_kor(kw["text"])
+        except Exception:
+            pass
+        return kw
+
+    asl_tv_insert = ttk.Treeview.insert
+    asl_tv_item = ttk.Treeview.item
+    asl_tv_set = ttk.Treeview.set
+
+    def _tv_insert(self, parent, index, iid=None, **kw):
+        return asl_tv_insert(self, parent, index, iid, **_tv_kw(kw))
+
+    def _tv_item(self, item, option=None, **kw):
+        r = asl_tv_item(self, item, option, **_tv_kw(kw))
+        try:
+            if option in ("values", "-values", "text", "-text"):
+                return _tn_qiymatlar(r, _tn_asl)
+            if option is None and not kw and isinstance(r, dict):
+                r = dict(r)
+                if "values" in r:
+                    r["values"] = _tn_qiymatlar(r["values"], _tn_asl)
+                if "text" in r:
+                    r["text"] = _tn_asl(r["text"])
+        except Exception:
+            pass
+        return r
+
+    def _tv_set(self, item, column=None, value=None):
+        if value is not None:
+            return asl_tv_set(self, item, column, _tn_kor(value))
+        r = asl_tv_set(self, item, column)
+        try:
+            if isinstance(r, dict):
+                return {k: _tn_asl(v) for k, v in r.items()}
+            return _tn_asl(r)
+        except Exception:
+            return r
+
+    ttk.Treeview.insert = _tv_insert
+    ttk.Treeview.item = _tv_item
+    ttk.Treeview.set = _tv_set
 
     def _nb_kw(kw):
         if isinstance(kw.get("text"), str):
