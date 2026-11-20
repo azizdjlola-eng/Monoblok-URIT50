@@ -1562,7 +1562,17 @@ if __name__ == "__main__":
         except Exception:
             pass
         import tizim_nazorati
-        tizim_nazorati.qoriqchi_bir_aylanish(log=lambda m: None)
+        try:
+            tizim_nazorati.qoriqchi_bir_aylanish(log=lambda m: None)
+        except Exception:
+            pass
+        # Himoya (v1.0.73): Registratsiya yopiq bo'lsa ham — begona ulanish, litsenziya, fayllar;
+        # navbatdagi hodisalar VPS'ga. Faqat EXE da, hech narsani bloklamaydi.
+        try:
+            import himoya_hodisa
+            himoya_hodisa.bir_tekshiruv()
+        except Exception:
+            pass
         _s.exit(0)
     _b = "baza"
     if "--litsenziya" in _s.argv:

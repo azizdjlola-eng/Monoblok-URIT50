@@ -227,12 +227,21 @@ def demo_oynasi(parent) -> bool:
     f = tk.Frame(w, bg="#0f1422")
     f.pack(padx=22, pady=10)
     maydon = {}
-    qatorlar = (("nomi", "Klinika / laboratoriya nomi *"), ("turi", "Turi *"), ("telefon", "Telefon raqami *"),
+    qatorlar = (("nomi", "Klinika / laboratoriya nomi *"), ("turi", "Turi *"),
+                ("stir", "STIR (INN) — 9 raqam *"), ("telefon", "Telefon raqami *"),
                 ("telegram", "Telegram (raqam yoki @nom)"), ("manzil", "Manzil (viloyat, tuman, ko'cha) *"),
                 ("masul", "Mas'ul shaxs"))
+    # O'rnatishda kiritilgan rekvizitlar (installer aktsept.json) — formani oldindan to'ldiradi
+    try:
+        import himoya_hodisa
+        _akt = himoya_hodisa.aktsept_oqi()
+    except Exception:
+        _akt = {}
+    _oldin = {"nomi": _akt.get("tashkilot", ""), "stir": _akt.get("stir", ""), "telefon": _akt.get("telefon", ""),
+              "manzil": _akt.get("manzil", ""), "masul": _akt.get("rahbar", "")}
     for i, (k, nom) in enumerate(qatorlar):
         tk.Label(f, text=nom, bg="#0f1422", fg="#cfd6ea", font=("Segoe UI", 9)).grid(row=i, column=0, sticky="w", pady=3)
-        v = tk.StringVar()
+        v = tk.StringVar(value=_oldin.get(k, ""))
         if k == "turi":
             v.set(demo.TURLAR[0])
             ttk.Combobox(f, textvariable=v, values=demo.TURLAR, state="readonly", width=32).grid(
@@ -249,6 +258,11 @@ def demo_oynasi(parent) -> bool:
         forma = {k: v.get().strip() for k, v in maydon.items()}
         if not forma["nomi"] or not forma["telefon"] or not forma["manzil"]:
             messagebox.showwarning("To'ldiring", "Klinika nomi, telefon va manzil kerak.", parent=w)
+            return
+        forma["stir"] = "".join(ch for ch in forma.get("stir", "") if ch.isdigit())
+        if len(forma["stir"]) not in (9, 14):
+            messagebox.showwarning("STIR", "STIR (INN) 9 ta raqam bo'lishi kerak (YaTT uchun JShShIR — 14 ta).",
+                                   parent=w)
             return
         if not v_roz.get():
             messagebox.showwarning("Rozilik", "Boshlash uchun rozilik belgisini qo'ying.", parent=w)
@@ -358,6 +372,144 @@ def demo_kuzat(root):
         except Exception:
             pass
     root.after(5000, _tick)
+
+
+SHARTNOMA_V = "1.0"
+
+
+def _shartnoma_fayli() -> str:
+    """Installer {app} ga qo'yadigan shartnoma matni (mijoz buildi)."""
+    nomzod = []
+    if getattr(sys, "frozen", False):
+        ildiz = os.path.dirname(os.path.dirname(sys.executable))
+        nomzod += [os.path.join(ildiz, "shartnoma_uz.txt"), os.path.join(os.path.dirname(sys.executable),
+                                                                          "shartnoma_uz.txt")]
+    nomzod.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build",
+                               "shartnoma_uz.txt"))
+    for p in nomzod:
+        if os.path.isfile(p):
+            return p
+    return ""
+
+
+def aktsept_oynasi(parent) -> bool:
+    """Shartnoma + STIR — installerda kiritilmagan (eski mijoz, jim yangilangan) o'rnatmalar uchun.
+    True — saqlandi va (internet bo'lsa) AzizMedLine'ga yuborildi."""
+    import tkinter as tk
+    from tkinter import messagebox
+    import himoya_hodisa
+    natija = {"ok": False}
+    w = tk.Toplevel(parent)
+    w.title("🖊 Litsenziya shartlari va klinika ma'lumotlari")
+    w.configure(bg="#0f1422")
+    w.resizable(False, False)
+    tk.Label(w, text="Litsenziya shartnomasi", bg="#0f1422", fg="#e6e9f2",
+             font=("Segoe UI Semibold", 14)).pack(pady=(14, 2))
+    tk.Label(w, text=("Dastur va AzizMedLine ma'lumotlari (katalog, normalar, shablonlar) faqat klinikaning o'z\n"
+                      "faoliyati uchun beriladi. Uchinchi shaxsga berish, bazaga begona dastur ulash taqiqlanadi.\n"
+                      "Himoya tizimi faqat texnik ma'lumot yuboradi — bemorlar ma'lumoti yuborilmaydi."),
+             bg="#0f1422", fg="#9aa3bd", font=("Segoe UI", 9), justify="left").pack(padx=20)
+    fayl = _shartnoma_fayli()
+    if fayl:
+        tk.Button(w, text="📄 Shartnomaning to'liq matni", relief="flat", bg="#1a2236", fg="#cfd6ea",
+                  cursor="hand2", command=lambda: os.startfile(fayl)).pack(pady=(6, 0))
+    f = tk.Frame(w, bg="#0f1422")
+    f.pack(padx=22, pady=10)
+    oldin = himoya_hodisa.aktsept_oqi()
+    std = {"tashkilot": oldin.get("tashkilot") or _klinika_taxmin()}
+    maydon = {}
+    for i, (k, nom) in enumerate((("tashkilot", "Tashkilot (klinika) nomi *"),
+                                  ("stir", "STIR (INN) — 9 raqam; YaTT — JShShIR 14 *"),
+                                  ("rahbar", "Rahbar F.I.Sh. *"), ("telefon", "Telefon raqami *"),
+                                  ("manzil", "Manzil"))):
+        tk.Label(f, text=nom, bg="#0f1422", fg="#cfd6ea", font=("Segoe UI", 9)).grid(row=i, column=0, sticky="w",
+                                                                                      pady=3)
+        v = tk.StringVar(value=std.get(k, oldin.get(k, "")))
+        tk.Entry(f, textvariable=v, width=36, font=("Segoe UI", 10)).grid(row=i, column=1, padx=(8, 0), pady=3)
+        maydon[k] = v
+    belgilar = []
+    for matn in ("Shartnomani o'qidim va uning barcha shartlariga roziman",
+                 "Dasturni uchinchi shaxslarga bermayman, bazaga begona dastur va sun'iy intellekt ulamayman",
+                 "Shartlar buzilsa litsenziya to'xtatilishi va keyingi narx 2–3 baravargacha oshishini tushunaman"):
+        v = tk.BooleanVar(value=False)
+        tk.Checkbutton(w, text=matn, variable=v, bg="#0f1422", fg="#cfd6ea", selectcolor="#1a2236",
+                       activebackground="#0f1422", font=("Segoe UI", 9)).pack(anchor="w", padx=22)
+        belgilar.append(v)
+
+    def _saqla():
+        fm = {k: v.get().strip() for k, v in maydon.items()}
+        fm["stir"] = "".join(ch for ch in fm["stir"] if ch.isdigit())
+        if len(fm["tashkilot"]) < 3 or len(fm["rahbar"]) < 3:
+            messagebox.showwarning("To'ldiring", "Tashkilot nomi va rahbar F.I.Sh. kerak.", parent=w)
+            return
+        if len(fm["stir"]) not in (9, 14):
+            messagebox.showwarning("STIR", "STIR 9 ta raqam (YaTT uchun JShShIR — 14 ta).", parent=w)
+            return
+        if len("".join(ch for ch in fm["telefon"] if ch.isdigit())) < 9:
+            messagebox.showwarning("Telefon", "Telefon raqamini to'liq kiriting.", parent=w)
+            return
+        if not all(b.get() for b in belgilar):
+            messagebox.showwarning("Rozilik", "Uchala belgini qo'ying.", parent=w)
+            return
+        fm.update({"shartnoma_v": SHARTNOMA_V, "manba": "dastur"})
+        himoya_hodisa.aktsept_yoz(fm)
+        natija["ok"] = True
+        import threading
+
+        def _yubor():
+            try:
+                himoya_hodisa.aktsept_yubor(timeout=10)
+            except Exception:
+                pass
+        threading.Thread(target=_yubor, daemon=True, name="aktsept").start()
+        messagebox.showinfo("Rahmat", "Ma'lumotlar saqlandi. Shartnoma raqami internet orqali qayd etiladi.",
+                            parent=w)
+        w.destroy()
+    r = tk.Frame(w, bg="#0f1422")
+    r.pack(fill="x", padx=22, pady=(8, 14))
+    tk.Button(r, text="✅ Roziman — saqlash", command=_saqla, bg="#1f8a4c", fg="white", relief="flat",
+              font=("Segoe UI Semibold", 11), cursor="hand2").pack(side="left", fill="x", expand=True, ipady=5)
+    tk.Button(r, text="Keyinroq", command=w.destroy, relief="flat", bg="#3a4257", fg="#e6e9f2",
+              font=("Segoe UI", 10)).pack(side="left", padx=(8, 0), ipady=5)
+    w.transient(parent)
+    w.grab_set()
+    w.wait_window()
+    return natija["ok"]
+
+
+def aktsept_kerak_bolsa(root):
+    """MIJOZ buildi, EXE: shartnoma/STIR hali yo'q bo'lsa — Registratsiya ochilgach 20 s dan keyin bir
+    martalik oyna (kuniga bir martadan ko'p emas, «Keyinroq» mumkin — ish to'xtamaydi)."""
+    if not getattr(sys, "frozen", False):
+        return
+    try:
+        import mijoz_belgi
+        import himoya_hodisa
+        if not mijoz_belgi.mijoz_buildmi() or himoya_hodisa.stir_togrimi(himoya_hodisa.aktsept_oqi().get("stir")):
+            return
+    except Exception:
+        return
+    import datetime as _dt
+    belgi = os.path.join(himoya_hodisa.papka(), "aktsept_eslatma.txt")
+    bugun = _dt.date.today().isoformat()
+    try:
+        with open(belgi, encoding="utf-8") as f:
+            if f.read().strip() == bugun:
+                return
+    except Exception:
+        pass
+
+    def _och():
+        try:
+            with open(belgi, "w", encoding="utf-8") as f:
+                f.write(bugun)
+        except Exception:
+            pass
+        try:
+            aktsept_oynasi(root)
+        except Exception:
+            pass
+    root.after(20_000, _och)
 
 
 def _faollashtirish_oyna(natija, app_nomi, parent=None) -> bool:

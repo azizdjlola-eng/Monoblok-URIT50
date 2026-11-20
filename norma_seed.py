@@ -27,12 +27,29 @@ def _json_yol() -> str:
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "norma_seed.json")
 
 
-def normalar_yukla() -> list:
+def _paket():
+    """MIJOZ buildi (v1.0.73): ochiq seed yo'q — demo yoki (pullik litsenziyada) to'liq shifrlangan paket.
+    (katalog, normalar) yoki None (paket modul/fayl yo'q — bizning build)."""
     try:
-        with open(_json_yol(), "r", encoding="utf-8") as f:
-            return json.load(f)
+        from litsenziya import paket
+        k, n, manba = paket.katalog_va_normalar()
+        if manba:
+            return k, n
     except Exception:
-        return []
+        pass
+    return None
+
+
+def normalar_yukla() -> list:
+    p = _json_yol()
+    if os.path.exists(p):
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+    pk = _paket()
+    return list(pk[1]) if pk else []
 
 
 def _db_config() -> dict:
@@ -229,11 +246,15 @@ def _katalog_json_yol() -> str:
 
 
 def katalog_yukla() -> list:
-    try:
-        with open(_katalog_json_yol(), "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return []
+    p = _katalog_json_yol()
+    if os.path.exists(p):
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+    pk = _paket()
+    return list(pk[0]) if pk else []
 
 
 def seed_katalog(conn, faqat_yoq: bool = True) -> int:
