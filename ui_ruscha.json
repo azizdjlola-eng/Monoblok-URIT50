@@ -2879,5 +2879,12 @@
  "{} ta tahlil qoldig'i {} donaga TENGLANADI": "Анализов: {} — остаток станет равен {} шт.",
  "{} ta tahlil cheksizligi BEKOR qilinadi (qoldiq kuzatiladi": "Анализов: {} — безлимит будет ОТМЕНЁН (остаток будет отслеживаться",
  "{} ta tahlil yangilandi": "Обновлено анализов: {}",
- "Tahlillarni o'qishda xato": "Ошибка чтения анализов"
+ "Tahlillarni o'qishda xato": "Ошибка чтения анализов",
+ "Bu kompyuterda nazoratni o'chirish": "Отключить контроль на этом компьютере",
+ "Nazorat yoqilgan (shu kompyuterda": "Контроль включён (на этом компьютере",
+ "Nazoratni faqat administrator yoqib-o'chira oladi": "Включать и отключать контроль может только администратор",
+ "Tizim nazorati SHU kompyuterda o'chirilsinmi": "Отключить контроль системы на ЭТОМ компьютере",
+ "Bu kompyuterda ogohlantirish oynasi endi chiqmaydi (dastur qayta ochilganda ham": "На этом компьютере окно предупреждения больше не появится (и после перезапуска программы",
+ "Boshqa kompyuterlarda nazorat o'zgarmaydi": "На других компьютерах контроль не изменится",
+ "Qayta yoqish: menyudagi «🛡 Tizim» → «Nazorat yoqilgan": "Включить снова: в меню «🛡 Система» → «Контроль включён"
 }

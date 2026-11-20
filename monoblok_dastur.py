@@ -14163,6 +14163,17 @@ class MonoblokApp:
         # IFA kuzatuv — Pro paket moduli: avtomatik ochilish jim o'tkaziladi
         if not (_pkt.yoqilganmi("ifa_kuzatuv") if avto else _pkt.tekshir("ifa_kuzatuv", self.root)):
             return
+        if avto and self._boshqa_modal_oyna():
+            # Hamshira modal oynada (siydik/natija kiritish, grab_set). IFA oynasi uning
+            # ustiga chiqsa — grab tufayli «Ko'rdim» ham, ortda qolgan modal oyna ham
+            # bosilmaydi va dastur qotib qoladi (2026-11-20). Shuning uchun ogohlantirish
+            # KECHIKTIRILADI: tugma yonib-o'chadi, modal yopilishi bilan oyna ochiladi.
+            eski = getattr(self, "_imm_kutilgan_banner", None)
+            self._imm_kutilgan_banner = f"{eski}\n{banner}" if eski else banner
+            if not getattr(self, "_imm_kutish_faol", False):
+                self._imm_kutish_faol = True
+                self.root.after(1500, self._imm_kutilganni_och)
+            return
         if not avto:
             self._immuno_blink = False      # laborant o'zi ochdi — ko'rdi
         # Avtomatik ochilganda hamshira yozayotgan joydan fokusni tortib olmaymiz
@@ -14367,6 +14378,37 @@ class MonoblokApp:
             fr.pack(fill=tk.X, before=self._imm_ctl)
         except Exception:
             pass
+
+    def _boshqa_modal_oyna(self):
+        """Ilovada IFA oynasidan boshqa oyna grab ushlab turibdimi (modal kiritish oynasi)."""
+        try:
+            g = self.root.grab_current()
+        except Exception:
+            return False
+        if g is None:
+            return False
+        imm = getattr(self, "_immuno_win", None)
+        try:
+            if imm is not None and imm.winfo_exists() and str(g).startswith(str(imm)):
+                return False
+        except Exception:
+            pass
+        return True
+
+    def _imm_kutilganni_och(self):
+        """Kechiktirilgan IFA ogohlantirishi: modal oyna yopilguncha kutadi, keyin ochadi."""
+        try:
+            if self._boshqa_modal_oyna():
+                self.root.after(1500, self._imm_kutilganni_och)
+                return
+            self._imm_kutish_faol = False
+            banner = getattr(self, "_imm_kutilgan_banner", None)
+            self._imm_kutilgan_banner = None
+            if banner:
+                self.open_immuno_window(banner=banner)
+        except Exception as e:
+            self._imm_kutish_faol = False
+            print(f"[{IMMUNO_LABEL}] kechiktirilgan ogohlantirish: {e}")
 
     def _immuno_raise(self, win, prev_focus=None):
         """Oynani boshqalar ustiga chiqarish (fokusni tortib olmasdan)."""
