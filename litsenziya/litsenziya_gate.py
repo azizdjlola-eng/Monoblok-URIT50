@@ -15,6 +15,7 @@ Foydalanish (server jarayonlari — sam_nazorat --server-only, tv_server):
 
 import os
 import sys
+import time
 
 from . import litsenziya_manager as lm
 from . import demo
@@ -354,10 +355,14 @@ def demo_kuzat(root):
                 kun = sek // 86400 + (1 if sek % 86400 else 0)
                 sarlavha = root.title().split("  —  DEMO")[0]
                 root.title(f"{sarlavha}  —  DEMO: {kun} kun qoldi" if n.yaroqli else f"{sarlavha}  —  DEMO TUGAGAN")
+                if n.yaroqli and not holat.get("baho"):
+                    holat["baho"] = True                                        # T5 — sessiyada bir marta
+                    root.after(30_000, lambda nn=n: _demo_bahosi(root, nn))
                 if not n.yaroqli and not holat["tugadi"]:
                     holat["tugadi"] = True
                     _xabar("Sinov muddati tugadi. Dastur keyingi ochilishda ishlamaydi — ma'lumotlaringiz "
                            "saqlanadi. Litsenziya oling.", "Sinov muddati tugadi")
+                    root.after(3000, lambda nn=n: _ketish_sorovi(root, nn))     # T2 — «nima sababdan?»
                 elif n.yaroqli and sek <= 3 * 86400 and _t.time() - holat["oxirgi_xabar"] >= 3600:
                     holat["oxirgi_xabar"] = _t.time()
                     _xabar(f"Sinov muddati tugashiga {kun} kun qoldi!\nTugagach dastur ishlamaydi. "
@@ -512,6 +517,37 @@ def aktsept_kerak_bolsa(root):
     root.after(20_000, _och)
 
 
+def _ketish_sorovi(parent, natija):
+    """MIJOZ buildi: demo tugagan (T2) yoki pullik muddat o'tganiga 7 kun (T3) — «nima sababdan?» bir marta
+    (`docs/KETISH_SABABI_SOROVNOMA_REJA.md`, K4). «Sotib olmoqchiman» / «To'lov kechikdi» → litsenziya so'rovi.
+    Xato bo'lsa — jim (litsenziya oynasi ishlashda davom etadi, «Zaxira olish» ham)."""
+    try:
+        import mijoz_belgi
+        if not mijoz_belgi.mijoz_buildmi():
+            return
+        import ketish_sorov
+        r = ketish_sorov.litsenziya_tugagan_bolsa(parent, natija)
+        if r and r.get("sotuv"):
+            sorov_oynasi(parent, natija)
+    except Exception:
+        pass
+
+
+def _demo_bahosi(root, n):
+    """Demo 7- va 20-kunida bir savollik baho (T5, ixtiyoriy). Sessiyada ko'pi bilan bitta oyna."""
+    try:
+        import ketish_sorov
+        p = n.payload or {}
+        kun = (time.time() - float(p.get("issued_at") or 0)) / 86400
+        for kalit, dan, gacha in (("20", 20, 27), ("7", 7, 20)):
+            if dan <= kun < gacha and ketish_sorov.kerakmi(ketish_sorov.T5, n.machine_id, kalit):
+                ketish_sorov.baho_oyna(root, kalit, mid=n.machine_id)
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def _faollashtirish_oyna(natija, app_nomi, parent=None) -> bool:
     try:
         import tkinter as tk
@@ -550,6 +586,13 @@ def _faollashtirish_oyna(natija, app_nomi, parent=None) -> bool:
         def _demo_bosh():
             if demo_oynasi(oyna):
                 holat["ok"] = True
+                # «Sizga nima kerak?» — demo boshida bir marta (menyu, nazorat, sozlash ro'yxati)
+                try:
+                    import imkoniyat_profil
+                    if not imkoniyat_profil.soraldimi():
+                        imkoniyat_profil.oyna(oyna, birinchi=True)
+                except Exception:
+                    pass
                 oyna.destroy()
         tk.Button(oyna, text=f"🎁 {demo.DEMO_KUN} kunlik BEPUL sinovni boshlash", command=_demo_bosh, bg="#0e9f6e",
                   fg="white", relief="flat", font=("Segoe UI Semibold", 12), cursor="hand2"
@@ -622,6 +665,9 @@ def _faollashtirish_oyna(natija, app_nomi, parent=None) -> bool:
 
     tk.Label(oyna, text=f"Administrator bilan bog'laning:\n{ALOQA_TELEFON}   {ALOQA_TELEGRAM}",
              bg="#0f1422", fg="#9aa3bd", font=("Segoe UI", 9), justify="center").pack(pady=(12, 0))
+
+    if natija.holat == lm.Holat.MUDDATI_TUGAGAN:
+        oyna.after(400, lambda: _ketish_sorovi(oyna, natija))
 
     oyna.protocol("WM_DELETE_WINDOW", oyna.destroy)
     if parent:

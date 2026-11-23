@@ -411,10 +411,12 @@ def _profil_yoli() -> str:
 
 
 def profil_saqla(forma: dict):
+    # «Sizga nima kerak?» (imkoniyat_profil) kalitlari shu faylda — forma qayta saqlansa yo'qolmasin
+    eski = {k: v for k, v in profil_oqi().items() if str(k).startswith("imkoniyat")}
     try:
         os.makedirs(os.path.dirname(_profil_yoli()), exist_ok=True)
         with open(_profil_yoli(), "w", encoding="utf-8") as f:
-            json.dump(dict(forma, qollandi=False), f, ensure_ascii=False, indent=1)
+            json.dump(dict(forma, qollandi=False, **eski), f, ensure_ascii=False, indent=1)
     except Exception:
         pass
 
