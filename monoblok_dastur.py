@@ -1207,6 +1207,7 @@ def _get_norma_bold_hints(norma_text: str, jins: str = "", yosh=None, emizikli: 
 # ══════════════════════════════════════════════════════════════════════════
 _NORMA_QATOR_AJRATGICH = r'[;\n]|,\s+(?=\S)'
 _NORMA_JINS_SOZLARI = {"erkak", "ayol"}
+_NORMA_JINS_RE = re.compile(r'erkak|ayol|эркак|аёл|male|female|women|woman', re.IGNORECASE)
 
 
 def _norma_line_is_bold(part: str, bold_hints: list, patient_jins: str = "") -> bool:
@@ -1218,6 +1219,12 @@ def _norma_line_is_bold(part: str, bold_hints: list, patient_jins: str = "") -> 
     pt_ayol = jins_up in ("AYOL", "АЁЛ", "F", "FEMALE", "A", "WOMEN", "WOMAN")
     other_hints = [h for h in bold_hints
                    if h and h.strip().lower() not in _NORMA_JINS_SOZLARI]
+    # Qarama-qarshi jinsning yosh qatori («41-60 yosh Erkak») ayol bemor uchun «boshqa shart» emas —
+    # aks holda PSA'da 50 yoshli ayolning «Ayol: 0.0-0.45» qatori qalin chiqmasdi (2026-11-24)
+    if pt_ayol:
+        other_hints = [h for h in other_hints if not ('erkak' in h.lower() and 'ayol' not in h.lower())]
+    elif pt_erkak:
+        other_hints = [h for h in other_hints if not ('ayol' in h.lower() and 'erkak' not in h.lower())]
 
     part_lower = (part or '').lower()
     line_has_erkak = 'erkak' in part_lower
@@ -1227,6 +1234,15 @@ def _norma_line_is_bold(part: str, bold_hints: list, patient_jins: str = "") -> 
         return False          # ayol bemor — sof erkak qatori hech qachon
     if pt_erkak and line_has_ayol and not line_has_erkak:
         return False          # erkak bemor — sof ayol qatori hech qachon
+    # Qatorda YOSH sharti bor (">50 yosh Ayol", "1-6 yosh", "12 yoshdan katta") — faqat
+    # _get_norma_bold_hints() shu qatorni bemor yoshiga MOS deb topgan bo'lsa qalin.
+    # 2026-11-24: 30 yoshli ayolda AT-TPO «>50 yosh Ayol» qatori ham qalin chiqardi — jins
+    # mos kelgani yetarli deb olinardi (yosh tekshirilmasdi).
+    if ':' in (part or ''):
+        _cat = part.split(':', 1)[0].strip()
+        _cat_yosh = _NORMA_JINS_RE.sub('', _cat).strip()
+        if any(c in _cat_yosh for c in '<>≥≤+') or re.search(r'\d+\s*(yosh|лет|год)', _cat_yosh.lower()):
+            return any(h and h.strip().lower() == _cat.lower() for h in bold_hints)
     if (line_has_erkak or line_has_ayol) and other_hints:
         # Jins + yosh/faza birga: yosh/faza ham mos kelishi shart
         return any(h and h.strip().lower() in part_lower for h in other_hints)

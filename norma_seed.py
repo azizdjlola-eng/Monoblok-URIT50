@@ -101,12 +101,60 @@ def seed_avto() -> int:
         try:
             _ensure_norma_table(conn)     # tahlillar_norma KAFOLATLI mavjud bo'lsin
             n1 = seed_normalar(conn)      # tahlillar_norma (normalar)
+            normalar_yozuvini_tuzat(conn)  # «16< yosh» → «>16 yosh» (faqat mijoz o'zgartirmagan matn)
             n2 = seed_katalog(conn)       # tahlillar (xizmat katalogi + narxlar)
             n3 = seed_mkb10(conn)         # mkb10 (XKT-10 tashxis lug'ati)
             n4 = seed_dorilar(conn)       # dorilar (retsept lug'ati, 18-BOSQICH)
             return n1 + n2 + n3 + n4
         finally:
             conn.close()
+    except Exception:
+        return 0
+
+
+# ── Normalar yozuvi bir xil (v1.0.75, egasi 2026-10-10) ──────────────────────────────────────────
+# Belgi doim raqamdan OLDIN: «16< yosh» → «>16 yosh». Natija (monoblok_dastur._parse_age_condition)
+# ikkala tartibni ham bir xil tushunadi — ma'no o'zgarmaydi, faqat yozuv.
+# Aniq almashtirishlar: seed matni AYNAN shu bo'lsa (mijoz tahrirlamagan) — ma'no tuzatishlari ham:
+#   PSA «61< yosh» = 61 yoshdan KATTA edi (61 yoshli erkak hech bir qatorga tushmasdi) → «>60 yosh»;
+#   Insulin «12< yosh qandli diabet» — tashxis sharti, yosh bo'yicha avtomatik qalin bo'lmasin;
+#   AT-TPO «>50 yosh Ayol: 0.0-50.0» — «Ayol: 0.0-50.0» bilan aynan bir xil (ortiqcha qator);
+#   GFR «90<» — hech qanday oraliq ajratilmasdi (strelka yo'q edi) → «>90».
+NORMA_ANIQ_ALMASHTIRISH = {
+    "0-40 yosh Erkak: 0.0-4.0, 41-60 yosh Erkak: 0.0-5.5, 61< yosh Erkak: 0.0-7.0, Ayol: 0.0-0.45":
+        "0-40 yosh Erkak: 0.0-4.0, 41-60 yosh Erkak: 0.0-5.5, >60 yosh Erkak: 0.0-7.0, Ayol: 0.0-0.45",
+    "<12 yosh: 0.0-10.0, >12 yosh: 2.0-24.9, 12< yosh qandli diabet: 25.0-100.0":
+        "<12 yosh: 0.0-10.0, >12 yosh: 2.0-24.9, Qandli diabetda (12 yoshdan katta): 25.0-100.0",
+    "Erkak: 0.0-30.0, Ayol: 0.0-50.0, >50 yosh Ayol: 0.0-50.0": "Erkak: 0.0-30.0, Ayol: 0.0-50.0",
+    "90<": ">90",
+}
+_TESKARI_YOSH_RE = re.compile(
+    r"(?<![\d.<>≤≥])(\d+)\s*([<>])\s*(yosh|лет|год)(?=\s*(?:erkak|ayol|эркак|аёл)?\s*:)", re.IGNORECASE)
+
+
+def yozuv_bir_xil(norma):
+    """Norma matnining bir xil yozuvi (o'zgarmasa — o'zi qaytadi)."""
+    if not norma:
+        return norma
+    s = NORMA_ANIQ_ALMASHTIRISH.get(str(norma).strip(), norma)
+    return _TESKARI_YOSH_RE.sub(lambda m: ("<" if m.group(2) == ">" else ">") + m.group(1) + " " + m.group(3), s)
+
+
+def normalar_yozuvini_tuzat(conn) -> int:
+    """tahlillar_norma dagi eski yozuvlarni bir xil qiladi. Faqat matn o'qilgandan beri o'zgarmagan
+    qator yangilanadi (WHERE norma=eski). Idempotent, har startda arzon (bir SELECT). Qaytaradi: soni."""
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT id, norma FROM tahlillar_norma WHERE norma IS NOT NULL AND norma <> ''")
+        n = 0
+        for _id, norma in cur.fetchall():
+            yangi = yozuv_bir_xil(norma)
+            if yangi != norma:
+                cur.execute("UPDATE tahlillar_norma SET norma=%s WHERE id=%s AND norma=%s", (yangi, _id, norma))
+                n += cur.rowcount or 0
+        conn.commit()
+        cur.close()
+        return n
     except Exception:
         return 0
 

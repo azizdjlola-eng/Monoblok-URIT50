@@ -223,7 +223,7 @@
  {
   "guruh": "IFA",
   "tahlil_nomi": "AT-TPO IFA",
-  "norma": "Erkak: 0.0-30.0, Ayol: 0.0-50.0, >50 yosh Ayol: 0.0-50.0",
+  "norma": "Erkak: 0.0-30.0, Ayol: 0.0-50.0",
   "birlik": "",
   "type": "numeric",
   "min_val": null,
@@ -236,7 +236,7 @@
  {
   "guruh": "IFA",
   "tahlil_nomi": "AT-TPO IFA ИФА",
-  "norma": "Erkak: 0.0-30.0, Ayol: 0.0-50.0, >50 yosh Ayol: 0.0-50.0",
+  "norma": "Erkak: 0.0-30.0, Ayol: 0.0-50.0",
   "birlik": "ME/ml",
   "type": "numeric",
   "min_val": null,
@@ -733,7 +733,7 @@
  {
   "guruh": "TEST",
   "tahlil_nomi": "Glomerulyar filtratsiya tezligi (GFR)",
-  "norma": "90<",
+  "norma": ">90",
   "birlik": "INR",
   "type": "numeric",
   "min_val": null,
@@ -954,7 +954,7 @@
  {
   "guruh": "IFA",
   "tahlil_nomi": "IgE umumiy (Allergiya uchun) IFA",
-  "norma": "<1 yosh: 0.0-15.0, 1-6 yosh: 0.0-60.0, 6-10 yosh: 0.0-90.0, 10-16 yosh: 20.0-200.0, 16< yosh: 20.0-100.0",
+  "norma": "<1 yosh: 0.0-15.0, 1-6 yosh: 0.0-60.0, 6-10 yosh: 0.0-90.0, 10-16 yosh: 20.0-200.0, >16 yosh: 20.0-100.0",
   "birlik": "ME/ml",
   "type": "numeric",
   "min_val": null,
@@ -967,7 +967,7 @@
  {
   "guruh": "IFA",
   "tahlil_nomi": "IgE umumiy (Allergiya uchun) ИФА",
-  "norma": "<1 yosh: 0.0-15.0, 1-6 yosh: 0.0-60.0, 6-10 yosh: 0.0-90.0, 10-16 yosh: 20.0-200.0, 16< yosh: 20.0-100.0",
+  "norma": "<1 yosh: 0.0-15.0, 1-6 yosh: 0.0-60.0, 6-10 yosh: 0.0-90.0, 10-16 yosh: 20.0-200.0, >16 yosh: 20.0-100.0",
   "birlik": "ME/ml",
   "type": "numeric",
   "min_val": null,
@@ -993,7 +993,7 @@
  {
   "guruh": "IFA",
   "tahlil_nomi": "Insulin IFA",
-  "norma": "<12 yosh: 0.0-10.0, >12 yosh: 2.0-24.9, 12< yosh qandli diabet: 25.0-100.0",
+  "norma": "<12 yosh: 0.0-10.0, >12 yosh: 2.0-24.9, Qandli diabetda (12 yoshdan katta): 25.0-100.0",
   "birlik": "μU/ml",
   "type": "numeric",
   "min_val": null,
@@ -1006,7 +1006,7 @@
  {
   "guruh": "IFA",
   "tahlil_nomi": "Insulin IFA ИФА",
-  "norma": "<12 yosh: 0.0-10.0, >12 yosh: 2.0-24.9, 12< yosh qandli diabet: 25.0-100.0",
+  "norma": "<12 yosh: 0.0-10.0, >12 yosh: 2.0-24.9, Qandli diabetda (12 yoshdan katta): 25.0-100.0",
   "birlik": "μU/ml",
   "type": "numeric",
   "min_val": null,
@@ -2103,7 +2103,7 @@
  {
   "guruh": "IFA",
   "tahlil_nomi": "Umumiy PSA IFA",
-  "norma": "0-40 yosh Erkak: 0.0-4.0, 41-60 yosh Erkak: 0.0-5.5, 61< yosh Erkak: 0.0-7.0, Ayol: 0.0-0.45",
+  "norma": "0-40 yosh Erkak: 0.0-4.0, 41-60 yosh Erkak: 0.0-5.5, >60 yosh Erkak: 0.0-7.0, Ayol: 0.0-0.45",
   "birlik": "ng/ml",
   "type": "numeric",
   "min_val": null,
@@ -2116,7 +2116,7 @@
  {
   "guruh": "IFA",
   "tahlil_nomi": "Umumiy PSA IFA ИФА",
-  "norma": "0-40 yosh Erkak: 0.0-4.0, 41-60 yosh Erkak: 0.0-5.5, 61< yosh Erkak: 0.0-7.0, Ayol: 0.0-0.45",
+  "norma": "0-40 yosh Erkak: 0.0-4.0, 41-60 yosh Erkak: 0.0-5.5, >60 yosh Erkak: 0.0-7.0, Ayol: 0.0-0.45",
   "birlik": "ng/ml",
   "type": "numeric",
   "min_val": null,
