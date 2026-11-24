@@ -18951,14 +18951,22 @@ Sana: {_sana_fmt}"""
 
         qolda_vars = {}   # {kod: StringVar} — faqat qolda rejimida
         if qolda:
-            tk.Label(left, text="Ro'yxatdan tanlang yoki qiymatni o'zingiz yozing.\n"
+            # Yangi kiritish (kimyoviy qiymat hali yo'q) — NORMA bilan to'ldiriladi:
+            # hamshira faqat o'zgarganini tuzatadi (egasi talabi, 2026-11-24).
+            # Avval saqlangan natija ochilsa — o'sha qiymatlar, hech narsa qo'shilmaydi.
+            _qolda_q = _sb.qolda_qatorlar(_ss)
+            _norma_toldir = not any(_sb.qiymat(all_analytes, _q["kod"]) for _q in _qolda_q)
+            _norma_qiy = _sb.qolda_norma_qiymatlari(_ss) if _norma_toldir else {}
+            tk.Label(left, text=("Norma qiymatlari qo'yilgan — faqat o'zgarganini tuzating.\n"
+                                 if _norma_toldir else "") +
+                                "Ro'yxatdan tanlang yoki qiymatni o'zingiz yozing.\n"
                                 "Bo'sh ko'rsatkich blankada «-» bo'lib chiqadi.\n"
-                                "MA, Ca, CR — faqat 14 parametrli poloskada (bo'sh = chiqmaydi).",
+                                "MA, Ca, CR — 14 parametrli poloska; 11 talikda bo'shating.",
                      font=("Arial", 8), fg="#555", justify=tk.LEFT
                      ).pack(anchor="w", pady=(0, 4))
             qgrid = tk.Frame(left)
             qgrid.pack(fill=tk.BOTH, expand=True)
-            for r_i, _sq in enumerate(_sb.qolda_qatorlar(_ss)):
+            for r_i, _sq in enumerate(_qolda_q):
                 code = _sq["kod"]
                 if code == 'MA' and r_i:
                     ttk.Separator(qgrid, orient=tk.HORIZONTAL).grid(
@@ -18966,7 +18974,7 @@ Sana: {_sana_fmt}"""
                 tk.Label(qgrid, text=f"{_sq['nom']} ({code})",
                          font=("Arial", 9), anchor="w", width=19
                          ).grid(row=r_i * 2, column=0, sticky="w", pady=1)
-                qv = tk.StringVar(value=_sb.qiymat(all_analytes, code))
+                qv = tk.StringVar(value=_sb.qiymat(all_analytes, code) or _norma_qiy.get(code, ''))
                 ttk.Combobox(qgrid, textvariable=qv, width=12, values=_sq.get("variantlar") or []
                              ).grid(row=r_i * 2, column=1, sticky="w", pady=1, padx=2)
                 tk.Label(qgrid, text=_sq.get("birlik", ''), font=("Arial", 8), fg="#666"
