@@ -288,6 +288,36 @@ def patologikmi(q: dict, val: str) -> bool:
     return v not in ("manfiy", "neg", "negative", "-", "(0) manfiy", "normal", "norma")
 
 
+# Qo'lda (test poloska) oynasi YANGI ochilganda kimyoviy qismga qo'yiladigan NORMA
+# qiymatlari (egasi talabi, 2026-11-24): hamshira faqat o'zgarganini tuzatadi —
+# hammasi toza bo'lsa tegmasdan saqlaydi. Bu yerda yo'q qator — poloska
+# darajalaridan normadagi birinchisi (manfiy / normal / 10 ...).
+# Sonli qatorlar normaning o'rtasidan: pH 6.0 (5.5-7.0), Ca 2.5 (1.5-9.0),
+# CR 8.8 (2.0-22.0) → MA/CR = 1.1 mg/mmol (A1 — norma).
+NORMA_BOSHLANGICH = {"SG": "1.015", "PH": "6.0", "MA": "10", "CA": "2.5", "CR": "8.8"}
+
+
+def norma_boshlangich(q: dict) -> str:
+    """Qatorga qo'yiladigan normal boshlang'ich qiymat ('' — topilmasa).
+    Mijoz normani o'zgartirgan bo'lsa ham patologik qiymat hech qachon qo'yilmaydi."""
+    afzal = NORMA_BOSHLANGICH.get(str(q.get("kod") or "").upper())
+    nomzodlar = ([afzal] if afzal else []) + list(q.get("variantlar") or [])
+    for v in nomzodlar:
+        if str(v).strip() and not patologikmi(q, v):
+            return str(v).strip()
+    return ""
+
+
+def qolda_norma_qiymatlari(s: dict = None) -> dict:
+    """{kod: normal qiymat} — qo'lda kiritish oynasini norma bilan to'ldirish uchun."""
+    out = {}
+    for q in qolda_qatorlar(s):
+        v = norma_boshlangich(q)
+        if v:
+            out[q["kod"]] = v
+    return out
+
+
 def qoshimcha_kodlar(s: dict = None) -> list:
     """Foydalanuvchi qo'shgan kimyoviy kodlar — analizator natijasidan tashlanmasin."""
     return [q["kod"] for q in (s or sozlama())["kimyoviy"] if q["kod"] not in DEFAULT_KIM_KODLAR]
