@@ -1,5 +1,11 @@
 {
-  "morning_done": "2026-11-06",
+  "morning_done": "2026-11-15",
   "snoozed": {},
-  "alerted": {}
+  "alerted": {
+    "conn": {
+      "date": "2026-11-15",
+      "count": 1,
+      "last": "2026-11-15T08:06:05"
+    }
+  }
 }

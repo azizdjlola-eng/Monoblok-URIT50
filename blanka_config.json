@@ -8,6 +8,8 @@
   "ong_panel": "logo",
   "qr_link_template": "",
   "blanka_ruscha": false,
+  "blanka_yozuv": "lotin",
+  "kirill_qoldir": "",
   "pdf_muhr": true,
   "pdf_muhr_path": "G:\\DASTUR\\URIT 50\\muhr\\elektron_muhr.png",
   "pdf_muhr_size": 3.8,
@@ -23,11 +25,17 @@
   "klinika_manzil": "Surxondaryo vil., Sherobod tumani, Qo'rg'on MFY,\nY. Oxunboboev ko'chasi, 57E-uy",
   "klinika_tel": "Tel.: (998) 99-673-13-42",
   "laborant_vrach": "Murodov A.X",
+  "imzo_rasm_path": "",
+  "imzo_balandlik": 1.0,
+  "tasdiq_lavozim": "Tasdiqladi:",
+  "tasdiq_fish": "",
+  "blanka_izoh": "",
   "klinika_rang": "1E9943",
   "header_bg_color": "D609DB",
   "bemor_row_color": "5861FC",
   "table_header_bg": "9DC3E6",
   "group_title_color": "009F50",
   "word_save_dir": "G:\\Қилинган анализлар",
-  "pdf_save_dir": ""
+  "pdf_save_dir": "E:\\Мой диск\\Natijalar",
+  "bulut_provayder": "gdrive"
 }
