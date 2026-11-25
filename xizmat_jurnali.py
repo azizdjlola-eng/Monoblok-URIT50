@@ -79,6 +79,22 @@ def telefonni_yashir(matn: str) -> str:
     return matn
 
 
+# Masofadan o'qiladigan jurnalda bemor ISMI ko'rinmasin (SMS qatorlari). Klinikadagi
+# faylga tegilmaydi — u yerda registratorga ism kerak.
+_BEMOR_RE = (
+    (re.compile(r"(\*\*\*TELEFON\*\*\*\s*)\([^()\n]*\)"), r"\1(***BEMOR***)"),
+    (re.compile(r"(raqam yo['ʻ’`]q:\s*)[^(\n]+(?=\()"), r"\1***BEMOR*** "),
+    (re.compile(r"(raqam noto['ʻ’`]g['ʻ’`]ri:[^—\n]*—\s*)[^(\n]+(?=\()"), r"\1***BEMOR*** "),
+    (re.compile(r"(body=)[^'\"\s]+"), r"\1***"),
+)
+
+
+def bemorni_yashir(matn: str) -> str:
+    for r, o in _BEMOR_RE:
+        matn = r.sub(o, matn)
+    return matn
+
+
 # ───────────────────────── Hodisalar jurnali ─────────────────────────
 # jurnal\hodisalar.log — bir qator = bir hodisa (JSON). Tizim nazoratchisi va
 # tuzatuvchi yozadi: nima buzildi, nega (texnik sabab), kim/nima tuzatdi,
