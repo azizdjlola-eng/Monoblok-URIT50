@@ -126,7 +126,8 @@ def ochish_oyna(parent, qadamlar):
             messagebox.showwarning("O'rnatish ustasi", "Bazaga yozib bo'lmadi (mahalliy saqlandi).", parent=win)
 
     bot = ttk.Frame(win)
-    bot.pack(fill=tk.X, padx=8, pady=8)
+    # pastga qotirilgan: noutbukda oyna qisilsa ham tugmalar ko'rinadi (28.11.2026)
+    bot.pack(side=tk.BOTTOM, fill=tk.X, padx=8, pady=8, before=outer)
     tk.Button(bot, text="✔ O'rnatish tugadi", command=_tugadi, bg="#2E7D32", fg="white",
               font=("Arial", 10, "bold"), padx=14, pady=4, cursor="hand2").pack(side=tk.RIGHT, padx=4)
     ttk.Button(bot, text="Yopish", command=win.destroy).pack(side=tk.RIGHT, padx=4)

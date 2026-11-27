@@ -1134,7 +1134,7 @@ def sozlama_oynasi(parent=None, bolim: str = "baza") -> bool:
     oyna.title("AzizMedLine — Sozlama")
     oyna.configure(bg=_BG)
     oyna.geometry("620x750")
-    oyna.resizable(False, False)
+    oyna.resizable(False, True)     # noutbukda bo'yiga kichraysa — sahifa aylanadi
 
     # ── Sarlavha ──
     bosh = tk.Frame(oyna, bg=_BG)
@@ -1150,11 +1150,20 @@ def sozlama_oynasi(parent=None, bolim: str = "baza") -> bool:
     sahifalar = {}
     tab_tugma = {}
 
+    # Sahifalar aylanadigan ramkada: noutbukda (oyna ekranga qisilganda)
+    # «💾 Saqlash» sahifa oxirida qolib ketmasin — aylantirib yetiladi (28.11.2026)
+    try:
+        import oyna_joyi
+        sah_tashqi, sah_ichki = oyna_joyi.aylanma_ramka(oyna, bg=_BG)
+    except Exception:
+        sah_tashqi = sah_ichki = tk.Frame(oyna, bg=_BG)
+    sah_tashqi.pack(fill="both", expand=True, padx=20, pady=(10, 0))
+
     def _koorsat(nom):
         for k, s in sahifalar.items():
             s.pack_forget()
             tab_tugma[k].config(bg=_KARTA, fg=_KUL)
-        sahifalar[nom].pack(fill="both", expand=True, padx=20, pady=(10, 0))
+        sahifalar[nom].pack(fill="both", expand=True)
         tab_tugma[nom].config(bg="#2b5cff", fg="white")
         if nom == "litsenziya":
             _lic_yangila()
@@ -1168,7 +1177,7 @@ def sozlama_oynasi(parent=None, bolim: str = "baza") -> bool:
                       command=lambda n=nom: _koorsat(n))
         b.pack(side="left", padx=(0, 4), ipady=6, ipadx=10)
         tab_tugma[nom] = b
-        sahifalar[nom] = tk.Frame(oyna, bg=_BG)
+        sahifalar[nom] = tk.Frame(sah_ichki, bg=_BG)
 
     # ════════════════════ 1) BAZA ════════════════════
     s1 = sahifalar["baza"]
@@ -1538,7 +1547,7 @@ def sozlama_oynasi(parent=None, bolim: str = "baza") -> bool:
     # ── Yopish ──
     tk.Button(oyna, text="✖ Yopish", command=lambda: oyna.destroy(), bg=_KARTA, fg=_KUL,
               relief="flat", font=("Segoe UI", 10), cursor="hand2"
-              ).pack(side="bottom", fill="x", padx=20, pady=12, ipady=6)
+              ).pack(side="bottom", fill="x", padx=20, pady=12, ipady=6, before=sah_tashqi)
 
     _koorsat(bolim if bolim in sahifalar else "baza")
 
@@ -1579,4 +1588,9 @@ if __name__ == "__main__":
         _b = "litsenziya"
     elif "--xizmatlar" in _s.argv:
         _b = "xizmatlar"
+    try:
+        import oyna_joyi            # noutbukda oyna ekranga sig'sin
+        oyna_joyi.ornat()
+    except Exception:
+        pass
     sozlama_oynasi(bolim=_b)

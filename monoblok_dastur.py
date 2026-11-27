@@ -10940,6 +10940,13 @@ class MonoblokApp:
         self.root = root
         self.root.title("AzizMedLine LIMS - Monoblok Dastur")
         self.root.geometry("1520x790")
+        # Noutbuk / 1366×768 ekranga sig'masa — butun ekranga yoyiladi
+        # (katta monitorda o'zgarmaydi). 28.11.2026
+        try:
+            import oyna_joyi
+            oyna_joyi.kichik_bolsa_yoy(self.root, 1520, 790)
+        except Exception:
+            pass
 
         # Oynani ko'rinadigan qilish (darhol)
         self.root.deiconify()
@@ -24138,8 +24145,16 @@ Sana: {_sana_fmt}"""
                             variable=bv).grid(row=r, column=0, columnspan=2, sticky=tk.W, padx=8, pady=6)
             vars_map[(section, "enabled")] = bv
 
-        nb = ttk.Notebook(dialog)
-        nb.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+        # Bo'limlar aylanadigan ramkada, pastki tugmalar esa oyna pastiga
+        # qotirilgan — noutbukda (oyna ekranga qisilganda) «Saqlash» yo'qolmasin.
+        try:
+            import oyna_joyi
+            nb_tashqi, nb_ota = oyna_joyi.aylanma_ramka(dialog)
+        except Exception:
+            nb_tashqi = nb_ota = ttk.Frame(dialog)
+        nb_tashqi.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+        nb = ttk.Notebook(nb_ota)
+        nb.pack(fill=tk.BOTH, expand=True)
 
         # ───────────────────────── BAZA (MySQL) ─────────────────────────
         tab_db = ttk.Frame(nb)
@@ -25361,12 +25376,13 @@ Sana: {_sana_fmt}"""
             lic_refresh()
 
         # ───────────────────────── Pastki tugmalar ──────────────────────
+        # side=BOTTOM + before: oyna kichraysa ham tugmalar joyini birinchi oladi
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=8, before=nb_tashqi)
         ttk.Label(dialog,
                   text="ℹ Analizator/baza o'zgarishlari dastur qayta ishga tushgandan keyin to'liq kuchga kiradi.",
-                  foreground="#1565C0", wraplength=600).pack(padx=10, pady=(0, 4))
-
-        btn_frame = ttk.Frame(dialog)
-        btn_frame.pack(fill=tk.X, padx=10, pady=8)
+                  foreground="#1565C0", wraplength=600).pack(side=tk.BOTTOM, padx=10, pady=(0, 4),
+                                                              before=nb_tashqi)
 
         def save_settings():
             new_cfg = load_config()
@@ -26160,8 +26176,11 @@ Sana: {_sana_fmt}"""
         # ══════════════════════════════════════════════════════════════
         # TUGMALAR
         # ══════════════════════════════════════════════════════════════
-        btn_frame = ttk.Frame(main_frame)
-        btn_frame.pack(pady=12)
+        # Tugmalar aylanadigan qismdan TASHQARIDA, oyna pastiga qotirilgan:
+        # noutbukda oyna pasti ekrandan chiqsa ham «Saqlash» doim ko'rinadi
+        # (28.11.2026, Sardorbek klinikasi — Saqlash ko'rinmay qolgan).
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(side=tk.BOTTOM, pady=8, before=outer)
 
         def save_settings():
             ht = header_type_var.get()

@@ -293,8 +293,18 @@ def sozla(dastur: str) -> logging.Logger:
 
     Jurnal faylini ulaydi, ushlanmagan xatolarni (asosiy oqim + ishchi
     oqimlar) to'liq traceback bilan yozdiradi va «ishga tushdi» qatorini
-    qo'yadi. Hech qachon dasturni yiqitmaydi."""
+    qo'yadi. Hech qachon dasturni yiqitmaydi.
+
+    Shu yerda oynalarni ekranga sig'dirish himoyasi ham yoqiladi
+    (oyna_joyi.ornat): sozla() har bir dastur boshida, birinchi oynadan OLDIN
+    chaqiriladi — bitta joyda ulansa hamma dastur (Registratsiya, Natija,
+    Qoriqchi, Baza sozlamasi ...) qamraladi. 28.11.2026."""
     global _handler, _dastur
+    try:
+        import oyna_joyi
+        oyna_joyi.ornat()
+    except Exception:
+        pass
     lg = logger()
     if _handler is not None:
         return lg
@@ -350,7 +360,13 @@ def sozla(dastur: str) -> logging.Logger:
 
 def tk_ulash(root):
     """Tkinter tugma/after ichidagi xatolar ham jurnalga tushsin (odatda ular
-    faqat konsolga chiqadi — pythonw/EXE da esa hech qayerga)."""
+    faqat konsolga chiqadi — pythonw/EXE da esa hech qayerga).
+    Oynalarni ekranga sig'dirish himoyasi ham shu oynaga ulanadi."""
+    try:
+        import oyna_joyi
+        oyna_joyi.ornat(root)
+    except Exception:
+        pass
     _eski = getattr(root, "report_callback_exception", None)
 
     def _rce(tur, qiymat, tb):
