@@ -31,6 +31,15 @@ try:
 except Exception:
     pass
 import tkinter as tk
+
+
+def _gildirak_bogla(canvas, handler):
+    """bind_all("<MouseWheel>") o'rniga — faqat o'z oynasiga (oyna_joyi.gildirak_bogla, 28.11.2026)."""
+    try:
+        import oyna_joyi
+        oyna_joyi.gildirak_bogla(canvas, handler)
+    except Exception:
+        canvas.bind_all("<MouseWheel>", handler)
 from tkinter import ttk, messagebox, scrolledtext
 from datetime import datetime
 import threading
@@ -451,7 +460,8 @@ def load_blanka_config() -> dict:
     _mijoz = _mijoz_belgisi()
     default_config = {
         "blanka_ustuni_path": default_path,
-        "logo_path": LOGO_DEFAULT_PATH,
+        # MIJOZ da bizning G:\ yo'limiz «✗ Topilmadi» bo'lib ko'rinmasin — bo'sh (28.11.2026)
+        "logo_path": "" if _mijoz else LOGO_DEFAULT_PATH,
         "header_type": "shablon",
         # MIJOZ buildida bizning klinika ma'lumotlari blankaga TUSHMASIN —
         # nom mijozniki, qolganlari bo'sh (Blanka Sozlamalaridan to'ldiriladi).
@@ -9517,7 +9527,15 @@ class TahlilKiritishOynasi:
         )
         title_label.pack()
         
-        main_frame = ttk.Frame(self.root, padding="10")
+        # Shakl aylanadigan ramkada (16 qator — noutbukda sig'maydi), CRUD tugmalari
+        # pastga qotirilgan (button_frame) — 28.11.2026 tekshiruvi
+        try:
+            import oyna_joyi
+            self._shakl_tashqi, _shakl_ichki = oyna_joyi.aylanma_ramka(self.root)
+        except Exception:
+            self._shakl_tashqi = _shakl_ichki = ttk.Frame(self.root)
+        self._shakl_tashqi.pack(fill=tk.BOTH, expand=True)
+        main_frame = ttk.Frame(_shakl_ichki, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
         
         # Guruh (MAJBURIY)
@@ -9709,9 +9727,9 @@ class TahlilKiritishOynasi:
         
         main_frame.columnconfigure(1, weight=1)
         
-        # CRUD Tugmalar
+        # CRUD Tugmalar (pastga qotirilgan)
         button_frame = ttk.Frame(self.root, padding="10")
-        button_frame.pack(fill=tk.X)
+        button_frame.pack(side=tk.BOTTOM, fill=tk.X, before=self._shakl_tashqi)
         
         ttk.Button(button_frame, text="[SAQLASH] Saqlash (CREATE/UPDATE)", command=self.save_or_update, width=25).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="🗑️ O'chirish (DELETE)", command=self.delete_tahlil, width=20).pack(side=tk.LEFT, padx=5)
@@ -10541,7 +10559,9 @@ class MultiRefRangeOynasi:
         self.load_from_main_app()
         
         button_frame = ttk.Frame(main_container)
-        button_frame.pack(fill=tk.X, padx=10, pady=10)
+        # OK/Cancel va «Yangi kategoriya» pastga qotirilgan: noutbukda jadval qisqaradi (28.11.2026)
+        button_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=10, before=canvas_frame)
+        add_frame.pack_configure(side=tk.BOTTOM, after=button_frame)
         
         ttk.Button(button_frame, text="[OK] OK", command=self.save_and_close, width=15).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="[XATO] Cancel", command=self.window.destroy, width=15).pack(side=tk.LEFT, padx=5)
@@ -11100,7 +11120,7 @@ class MonoblokApp:
                 self.root.after(0, lambda: self.status_var.set("[OGOHLANTIRISH] MySQL serverga ulanib bo'lmadi"))
             
             # 2. URIT-50 siydik analizatorini ishga tushirish [OK] INTEGRATSIYA QILINGAN
-            self.root.after(0, lambda: self.status_var.set("URIT-50 siydik analizatorini ishga tushiryapman..."))
+            self.root.after(0, lambda: self.status_var.set("Siydik analizatori ulanmoqda..."))
             print("\n💧 2. URIT-50 siydik analizatorini ishga tushiryapman...")
             self.stop_existing_urit50_processes()
             urit_ok = self.start_urit50_service()
@@ -11118,7 +11138,7 @@ class MonoblokApp:
             time.sleep(2)  # URIT-50 ishga tushishi uchun kutish
             
             # 3. BK-280 biokimyo analizatorini ishga tushirish [OK] INTEGRATSIYA QILINGAN
-            self.root.after(0, lambda: self.status_var.set("BK-280 biokimyo analizatorini ishga tushiryapman..."))
+            self.root.after(0, lambda: self.status_var.set("Bioximiya analizatori ulanmoqda..."))
             print("\n🧪 3. BK-280 biokimyo analizatorini ishga tushiryapman...")
             try:
                 bk280_ok = self.start_bk280_listener()
@@ -11148,7 +11168,7 @@ class MonoblokApp:
             time.sleep(1)
 
             # 4. BC-20S gematologiya analizatori listener ni ishga tushirish
-            self.root.after(0, lambda: self.status_var.set("BC-20S gematologiya analizatorini ishga tushiryapman..."))
+            self.root.after(0, lambda: self.status_var.set("Gemotologiya analizatori ulanmoqda..."))
             print("\n🩸 4. BC-20S gematologiya analizatorini ishga tushiryapman...")
             try:
                 bc20s_ok = self.start_bc20s_listener()
@@ -11206,10 +11226,19 @@ class MonoblokApp:
                 print(f"   {status_icon} {name}: {status_text}")
             print(f"{'='*70}\n")
             
-            # Status xabarlarini ko'rsatish
-            if len(successful_services) == len(services_status):
+            # Status xabarlarini ko'rsatish. Shu mijozda yoqilmagan (litsenziya/sozlama)
+            # analizatorlar «ishga tushmadi» deb chiqmasin — 28.11.2026 tekshiruvi
+            # (BK-280'i yo'q mijozda ham «BK-280 … ishga tushmadi» yozilardi).
+            _kerak = self._kerakli_xizmatlar()
+            services_status = {k: v for k, v in services_status.items() if _kerak.get(k, True)}
+            successful_services = [name for name, ok in services_status.items() if ok]
+            failed_services = [name for name, ok in services_status.items() if not ok]
+            if not services_status:
+                final_status = "[OK] Tayyor (analizator ulanishi yoqilmagan — natija qo'lda kiritiladi)"
+                self.root.after(0, lambda: self.status_var.set(final_status))
+            elif len(successful_services) == len(services_status):
                 # Barcha dasturlar muvaffaqiyatli ishga tushdi
-                final_status = "[OK] URIT-50, BK-280, BC-20S ishga tushdi"
+                final_status = f"[OK] {', '.join(successful_services)} ishga tushdi"
                 self.root.after(0, lambda: self.status_var.set(final_status))
                 print(f"🎉 {final_status}\n")
             elif successful_services:
@@ -11299,6 +11328,23 @@ class MonoblokApp:
         except:
             return False
     
+    def _kerakli_xizmatlar(self) -> dict:
+        """Holat satri uchun: qaysi xizmat SHU mijozda yoqilgan (litsenziya paketi + sozlama).
+        Bilinmasa — yoqilgan deb hisoblanadi (oldingi xatti-harakat). 28.11.2026"""
+        def _yoq(paket, analizator):
+            try:
+                if not _pkt.yoqilganmi(paket):
+                    return False
+            except Exception:
+                pass
+            try:
+                return bool(get_analyzer(analizator).get("enabled", True))
+            except Exception:
+                return True
+        bio = _yoq("bio_analizator", "bioximiya")
+        return {"URIT-50": _yoq("siydik_analizator", "siydik"), "BK-280": bio, "BK-280 LIS": bio,
+                "BC-20S": _yoq("gemo_analizator", "gemotologiya")}
+
     def check_database_connection(self):
         """Database ulanishini tekshirish - yaxshilangan"""
         try:
@@ -12749,7 +12795,8 @@ class MonoblokApp:
             relief=tk.RAISED, bd=2, cursor="hand2",
             state=tk.DISABLED
         )
-        self.tarix_btn.pack(fill=tk.X, pady=(4, 2))
+        # pastga qotirilgan: noutbukda «Oldingi tashriflar» jadvali qisqaradi, tugma qoladi
+        self.tarix_btn.pack(side=tk.BOTTOM, fill=tk.X, pady=(4, 2), before=hist_frame)
     
     def create_tests_panel(self, parent):
         """Tahlillar ro'yxati paneli"""
@@ -12844,9 +12891,19 @@ class MonoblokApp:
         buttons_frame = ttk.Frame(parent)
         buttons_frame.pack(fill=tk.X, pady=5)
         
-        # Chap tomondagi tugmalar
+        # Chap tomondagi tugmalar. Noutbukda (ish maydoni < 1700 px) bitta qatorga
+        # sig'maydi — «Yangilash» va o'ngdagilar kesilardi (28.11.2026 tekshiruvi):
+        # chap guruh alohida qatorga tushadi, chop/saqlash tugmalari ikkinchi qatorda.
+        try:
+            import oyna_joyi as _oj
+            _tor = _oj.ish_maydoni(self.root)[2] < 1700
+        except Exception:
+            _tor = False
         left_buttons = ttk.Frame(buttons_frame)
-        left_buttons.pack(side=tk.LEFT, padx=2)
+        if _tor:
+            left_buttons.pack(side=tk.TOP, anchor=tk.W, padx=2, pady=(0, 3))
+        else:
+            left_buttons.pack(side=tk.LEFT, padx=2)
         
         ttk.Button(
             left_buttons,
@@ -13119,7 +13176,8 @@ class MonoblokApp:
 
         # Amallar qatori
         action_frame = ttk.Frame(search_win)
-        action_frame.pack(pady=4)
+        # pastga qotirilgan: noutbukda natijalar jadvali qisqaradi, «Yuklash» ko'rinadi
+        action_frame.pack(side=tk.BOTTOM, pady=4, before=results_frame)
 
         ttk.Button(
             action_frame, text="✓ Yuklash (2x bosish)",
@@ -13139,7 +13197,7 @@ class MonoblokApp:
                   text="💡 Bir marta bosish → tanlash  |  Ikki marta bosish → yuklash  |  "
                        "📋 Tarixni ko'rish → barcha tashriflarni birga ko'rsatish  |  "
                        "📊 Statistikada tahlilga 2x bosish → o'sha tahlil bemorlari",
-                  foreground="gray").pack(pady=3)
+                  foreground="gray").pack(side=tk.BOTTOM, pady=3, before=action_frame)  # eng pastda
 
         # Double-click event
         self.search_results_tree.bind("<Double-1>", self.on_search_result_double_click)
@@ -20923,7 +20981,7 @@ Sana: {_sana_fmt}"""
             # Mouse wheel scroll
             def on_mousewheel(event):
                 canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-            canvas.bind_all("<MouseWheel>", on_mousewheel)
+            _gildirak_bogla(canvas, on_mousewheel)
             
             dialog.focus_set()
             
@@ -21445,7 +21503,7 @@ Sana: {_sana_fmt}"""
         rsb.pack(side="right", fill="y")
 
         def _on_mw(e): rcanv.yview_scroll(int(-1 * (e.delta / 120)), "units")
-        rcanv.bind_all("<MouseWheel>", _on_mw)
+        _gildirak_bogla(rcanv, _on_mw)
 
         entry_vars = {}
 
@@ -25673,7 +25731,7 @@ Sana: {_sana_fmt}"""
         canvas.bind("<Configure>", lambda e: canvas.itemconfig("inner", width=e.width))
         def _on_mousewheel(event):
             canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        _gildirak_bogla(canvas, _on_mousewheel)
         def _on_dialog_destroy():
             canvas.unbind_all("<MouseWheel>")
             dialog.destroy()

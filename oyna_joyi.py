@@ -197,24 +197,96 @@ def sigdir(win):
         return False
 
 
+_KUTILMOQDA = set()      # Configure tekshiruvi rejalashtirilgan oynalar (takror chaqirmaslik)
+
+
+def _juda_kattami(win):
+    """Oyna o'z monitoriga O'LCHAMI bilan sig'maydimi (joyiga qaralmaydi — foydalanuvchi
+    oynani chetga surib qo'ygan bo'lsa unga qarshi kurashmaymiz)."""
+    try:
+        if win.state() != "normal" or win.overrideredirect():
+            return False
+        _x, _y, W, H = monitor_maydoni(win)
+        ust = win.winfo_rooty() - win.winfo_y()
+        if not 0 < ust < 100:
+            ust = 32
+        return win.winfo_width() > W or win.winfo_height() + ust > H
+    except Exception:
+        return False
+
+
 def _bogla(interp):
-    """Bitta Tcl interpretatori (har bir tk.Tk()) uchun Map bog'lamasi."""
+    """Bitta Tcl interpretatori (har bir tk.Tk()) uchun Map va Configure bog'lamasi."""
+    def _vidjet(e):
+        w = e.widget
+        if isinstance(w, str):
+            w = interp.nametowidget(w)
+        return w
+
     def _map(e):
         try:
-            w = e.widget
-            if isinstance(w, str):
-                w = interp.nametowidget(w)
+            w = _vidjet(e)
             w.after(30, lambda: sigdir(w))
         except Exception:
             pass
+
+    def _configure(e):
+        # Ochilgandan KEYIN kattalashadigan oynalar (ro'yxat keyin to'ladi) — 28.11.2026
+        try:
+            w = _vidjet(e)
+            k = str(w)
+            if k in _KUTILMOQDA:
+                return
+
+            def _tekshir():
+                _KUTILMOQDA.discard(k)
+                if _juda_kattami(w):
+                    sigdir(w)
+            _KUTILMOQDA.add(k)
+            w.after(150, _tekshir)
+        except Exception:
+            pass
+
     try:
         if getattr(interp, "_oyna_joyi_boglandi", False):
             return
-        interp.bind_class("Toplevel", "<Map>", _map, add="+")
-        interp.bind_class(interp.winfo_class(), "<Map>", _map, add="+")
+        for sinf in ("Toplevel", interp.winfo_class()):
+            interp.bind_class(sinf, "<Map>", _map, add="+")
+            interp.bind_class(sinf, "<Configure>", _configure, add="+")
         interp._oyna_joyi_boglandi = True
     except Exception:
         pass
+
+
+def _xabar_egasi_ornat():
+    """messagebox.show*/ask* egasiz (parent=) chaqirilsa va o'sha paytda modal oyna
+    (grab_set) ochiq bo'lsa — xabar o'sha oyna ustida chiqadi. Aks holda xabar asosiy
+    oyna ustida chiqib, modal oyna ortida qolishi mumkin edi (Registratsiyada 246,
+    Natijada 24 shunday chaqiruv — 28.11.2026 tekshiruvi). Hech qachon xato otmaydi."""
+    try:
+        import tkinter as tk
+        from tkinter import messagebox as mb
+    except Exception:
+        return
+    for nom in ("showinfo", "showwarning", "showerror", "askyesno", "askokcancel",
+                "askyesnocancel", "askquestion", "askretrycancel"):
+        asl = getattr(mb, nom, None)
+        if asl is None or getattr(asl, "_oyna_joyi", False):
+            continue
+
+        def _w(*a, _asl=asl, **k):
+            if k.get("parent") is None:
+                try:
+                    r = getattr(tk, "_default_root", None)
+                    g = r.grab_current() if r is not None else None
+                    if g is not None and g.winfo_exists() and g.winfo_viewable():
+                        k["parent"] = g
+                except Exception:
+                    pass
+            return _asl(*a, **k)
+        _w._oyna_joyi = True
+        _w.__name__ = getattr(asl, "__name__", nom)
+        setattr(mb, nom, _w)
 
 
 def ornat(root=None):
@@ -231,6 +303,7 @@ def ornat(root=None):
                 asl_init(self, *a, **k)
                 _bogla(self)
             tk.Tk.__init__ = _init
+            _xabar_egasi_ornat()
             _ORNATILGAN = True
         if root is None:
             root = getattr(tk, "_default_root", None)
@@ -242,6 +315,35 @@ def ornat(root=None):
                 pass
     except Exception:
         pass
+
+
+# ───────────────────── sichqoncha g'ildiragi ─────────────────────
+def gildirak_bogla(canvas, handler=None):
+    """`canvas.bind_all("<MouseWheel>", h)` O'RNIGA (28.11.2026).
+
+    bind_all butun dasturga bog'lanadi: oyna boshqa yo'l bilan yopilsa (masalan
+    Kassa «Kassani yopish» → win.destroy) bog'lama qolib ketardi va keyin har
+    aylantirishda «invalid command name …canvas» xatosi (mijozda 318 marta);
+    oyna ochiq turganda boshqa oynadagi ro'yxat aylantirilsa ham shu canvas
+    aylanardi. Endi g'ildirak faqat canvas turgan OYNAGA bog'lanadi — oyna
+    yopilganda bog'lama u bilan birga yo'qoladi; canvas o'chgan bo'lsa jim."""
+    import tkinter as tk
+
+    def _h(e):
+        try:
+            if not canvas.winfo_exists():
+                return
+            if handler is not None:
+                return handler(e)
+            canvas.yview_scroll(int(-1 * (e.delta / 120)) or (-1 if e.delta > 0 else 1), "units")
+        except tk.TclError:
+            pass
+
+    try:
+        canvas.winfo_toplevel().bind("<MouseWheel>", _h, add="+")
+    except Exception:
+        pass
+    return _h
 
 
 # ───────────────────── aylanadigan (scroll) ramka ─────────────────────
